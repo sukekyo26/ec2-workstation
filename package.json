@@ -8,8 +8,12 @@
     "build": "tsc",
     "watch": "tsc -w",
     "test": "jest",
-    "cdk": "cdk"
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy:network": "cdk deploy '*-network' --require-approval never",
+    "deploy:workspaces": "cdk deploy --all --require-approval never"
   },
+  "packageManager": "pnpm@10.28.0",
   "devDependencies": {
     "@types/jest": "^30",
     "@types/node": "^24.10.1",

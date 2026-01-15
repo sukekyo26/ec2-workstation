@@ -1,0 +1,21 @@
+{
+    "$schema": "./workspace-config.schema.json",
+    "projectName": "ec2-remote-workspace",
+    "environment": "dev",
+    "vpcCidr": "10.0.0.0/16",
+    "defaultInstanceConfig": {
+        "instanceType": "t3.large",
+        "volumeSize": 100,
+        "volumeType": "gp3"
+    },
+    "users": [
+        {
+            "username": "developer1",
+            "displayName": "Developer One"
+        },
+        {
+            "username": "developer2",
+            "displayName": "Developer Two"
+        }
+    ]
+}

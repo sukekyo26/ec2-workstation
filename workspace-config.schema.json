@@ -1,0 +1,103 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Workspace Configuration",
+    "description": "EC2 Remote Workspace の設定スキーマ",
+    "type": "object",
+    "required": [
+        "users"
+    ],
+    "properties": {
+        "projectName": {
+            "type": "string",
+            "description": "プロジェクト名（リソース命名に使用）",
+            "default": "ec2-remote-workspace",
+            "pattern": "^[a-z0-9][a-z0-9-]*[a-z0-9]$"
+        },
+        "environment": {
+            "type": "string",
+            "description": "環境名 (dev, staging, prod)",
+            "default": "dev",
+            "enum": [
+                "dev",
+                "staging",
+                "prod"
+            ]
+        },
+        "vpcCidr": {
+            "type": "string",
+            "description": "VPC CIDR",
+            "default": "10.0.0.0/16",
+            "pattern": "^([0-9]{1,3}\\.){3}[0-9]{1,3}/[0-9]{1,2}$"
+        },
+        "defaultInstanceConfig": {
+            "type": "object",
+            "description": "デフォルトのEC2インスタンス設定",
+            "properties": {
+                "instanceType": {
+                    "type": "string",
+                    "description": "インスタンスタイプ",
+                    "default": "t3.large"
+                },
+                "volumeSize": {
+                    "type": "number",
+                    "description": "EBSボリュームサイズ (GB)",
+                    "default": 100,
+                    "minimum": 20,
+                    "maximum": 1000
+                },
+                "volumeType": {
+                    "type": "string",
+                    "description": "EBSボリュームタイプ",
+                    "default": "gp3",
+                    "enum": [
+                        "gp3",
+                        "gp2"
+                    ]
+                }
+            }
+        },
+        "users": {
+            "type": "array",
+            "description": "ワークスペースユーザー一覧",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "required": [
+                    "username"
+                ],
+                "properties": {
+                    "username": {
+                        "type": "string",
+                        "description": "ユーザー名（3-32文字、小文字英数字とハイフン・アンダースコア）",
+                        "pattern": "^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$"
+                    },
+                    "displayName": {
+                        "type": "string",
+                        "description": "表示名（オプション）"
+                    },
+                    "instanceConfig": {
+                        "type": "object",
+                        "description": "ユーザー固有のインスタンス設定（オプション）",
+                        "properties": {
+                            "instanceType": {
+                                "type": "string"
+                            },
+                            "volumeSize": {
+                                "type": "number",
+                                "minimum": 20,
+                                "maximum": 1000
+                            },
+                            "volumeType": {
+                                "type": "string",
+                                "enum": [
+                                    "gp3",
+                                    "gp2"
+                                ]
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

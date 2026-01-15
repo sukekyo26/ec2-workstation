@@ -199,34 +199,172 @@ Private Subnet + NAT Gatewayは一般的なベストプラクティスですが�
 ```
 ec2-remote-workspace/
 ├── README.md
-├── cdk/                          # AWS CDK プロジェクト
-│   ├── bin/
-│   │   └── ec2-remote-workspace.ts       # CDKアプリエントリポイント
-│   ├── lib/
-│   │   ├── constructs/
-│   │   │   ├── vpc-construct.ts          # VPC構成
-│   │   │   ├── security-construct.ts     # セキュリティグループ・IAM
-│   │   │   └── ec2-construct.ts          # EC2インスタンス
-│   │   ├── stacks/
-│   │   │   ├── network-stack.ts          # 共有ネットワーク（1つ）
-│   │   │   └── workspace-stack.ts        # 個人用ワークスペース（人数分）
-│   │   └── config/
-│   │       └── workspace-config.ts       # ユーザー設定
+├── workspace-config.json         # ユーザー・プロジェクト設定
+├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
+├── bin/
+│   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
+├── lib/
+│   ├── constructs/
+│   │   ├── vpc-construct.ts      # VPC構成
+│   │   ├── security-construct.ts # セキュリティグループ・IAM
+│   │   └── ec2-construct.ts      # EC2インスタンス
+│   ├── stacks/
+│   │   ├── network-stack.ts      # 共有ネットワーク（1つ）
+│   │   └── workspace-stack.ts    # 個人用ワークスペース（人数分）
+│   ├── config/
+│   │   └── workspace-config.ts   # 設定ファイル読み込み・バリデーション
 │   ├── scripts/
-│   │   ├── user-data.sh          # EC2初期化スクリプト
-│   │   └── connect.sh            # 接続用ヘルパースクリプト
-│   ├── cdk.json
-│   ├── package.json
-│   └── tsconfig.json
-├── cfn/                          # CloudFormationテンプレート（生成）
-│   ├── network.yaml
-│   └── workspace.yaml
-├── docs/
-│   ├── setup-guide.md            # セットアップ手順
-│   ├── usage-guide.md            # 使用方法
-│   └── troubleshooting.md        # トラブルシューティング
-└── .vscode/
-    └── settings.json             # VS Code設定
+│   │   └── user-data.sh          # EC2初期化スクリプト
+│   └── index.ts                  # エクスポート
+├── scripts/
+│   └── connect.sh                # 接続用ヘルパースクリプト
+├── test/                         # テストコード
+├── cdk.json
+├── package.json
+└── tsconfig.json
+```
+
+---
+
+## 🚀 使用方法
+
+### 前提条件
+
+以下のツールがインストールされていること：
+
+- **Node.js 22+** - [ダウンロード](https://nodejs.org/)
+- **pnpm** - `npm install -g pnpm`
+- **AWS CLI v2** - [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+- **AWS CDK CLI** - `npm install -g aws-cdk`
+- **Session Manager Plugin** - [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+
+### インストール
+
+```bash
+# リポジトリをクローン
+git clone <repository-url>
+cd ec2-remote-workspace
+
+# 依存関係をインストール
+pnpm install
+```
+
+### 設定
+
+`workspace-config.json` を編集してユーザーとプロジェクト設定を定義します：
+
+```json
+{
+  "$schema": "./workspace-config.schema.json",
+  "projectName": "ec2-remote-workspace",
+  "environment": "dev",
+  "vpcCidr": "10.0.0.0/16",
+  "defaultInstanceConfig": {
+    "instanceType": "t3.large",
+    "volumeSize": 100,
+    "volumeType": "gp3"
+  },
+  "users": [
+    {
+      "username": "developer1",
+      "displayName": "Developer One"
+    },
+    {
+      "username": "developer2",
+      "displayName": "Developer Two"
+    }
+  ]
+}
+```
+
+#### 設定項目
+
+| 項目 | 必須 | デフォルト | 説明 |
+|------|------|-----------|------|
+| `projectName` | - | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
+| `environment` | - | `dev` | 環境名 (dev, staging, prod) |
+| `vpcCidr` | - | `10.0.0.0/16` | VPC CIDR |
+| `defaultInstanceConfig.instanceType` | - | `t3.large` | EC2インスタンスタイプ |
+| `defaultInstanceConfig.volumeSize` | - | `100` | EBSボリュームサイズ (GB) |
+| `defaultInstanceConfig.volumeType` | - | `gp3` | EBSボリュームタイプ |
+| `users` | ✅ | - | ユーザー配列（1人以上必須） |
+| `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
+| `users[].displayName` | - | - | 表示名 |
+| `users[].instanceConfig` | - | - | ユーザー個別のインスタンス設定 |
+
+### ビルド
+
+```bash
+# TypeScriptをコンパイル
+pnpm build
+```
+
+### テスト
+
+```bash
+# テストを実行
+pnpm test
+```
+
+### デプロイ
+
+```bash
+# AWS認証情報を設定
+aws configure
+
+# CDK Bootstrap（初回のみ）
+cdk bootstrap
+
+# 全スタックをデプロイ
+cdk deploy --all
+
+# 特定のスタックのみデプロイ
+cdk deploy ec2-remote-workspace-dev-network
+cdk deploy ec2-remote-workspace-dev-developer1
+```
+
+### 接続
+
+デプロイ完了後、SessionManager経由でEC2インスタンスに接続できます：
+
+```bash
+# 接続スクリプトを使用（推奨）
+./scripts/connect.sh -u developer1
+
+# または直接AWS CLIで接続
+# まずインスタンスIDを取得
+aws ec2 describe-instances \
+  --filters "Name=tag:Owner,Values=developer1" \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --output text
+
+# SessionManager経由で接続
+aws ssm start-session --target i-xxxxxxxxxxxx
+```
+
+### VS Code Remote接続
+
+1. VS Code に **Remote - SSH** 拡張機能をインストール
+2. **AWS Toolkit** 拡張機能をインストール
+3. SSH configを設定（`~/.ssh/config`）：
+
+```
+Host ec2-workspace-*
+    ProxyCommand aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p
+    User ubuntu
+    IdentityFile ~/.ssh/your-key.pem
+```
+
+4. VS Codeから接続
+
+### スタックの削除
+
+```bash
+# 全スタックを削除
+cdk destroy --all
+
+# 特定のスタックのみ削除
+cdk destroy ec2-remote-workspace-dev-developer1
 ```
 
 ---
@@ -234,28 +372,29 @@ ec2-remote-workspace/
 ## 🔧 実装フェーズ
 
 ### Phase 1: 基盤構築（CDKプロジェクトセットアップ）
-- [ ] CDKプロジェクト初期化
-- [ ] 共通設定・型定義
-- [ ] VPC Construct作成（Public Subnetのみ、Internet Gateway）
-- [ ] セキュリティグループ作成（全インバウンドブロック、アウトバウンドHTTPS許可）
+- [x] CDKプロジェクト初期化
+- [x] 共通設定・型定義
+- [x] VPC Construct作成（Public Subnetのみ、Internet Gateway）
+- [x] セキュリティグループ作成（全インバウンドブロック、アウトバウンドHTTPS許可）
 
 ### Phase 2: セキュリティ構成
-- [ ] IAMロール作成（EC2用、SSM接続権限）
-- [ ] セキュリティグループ作成（インバウンドSSH禁止）
-- [ ] インスタンスプロファイル設定
+- [x] IAMロール作成（EC2用、SSM接続権限）
+- [x] セキュリティグループ作成（インバウンドSSH禁止）
+- [x] インスタンスプロファイル設定
 
 ### Phase 3: EC2ワークスペース構成
-- [ ] EC2 Construct作成
-- [ ] User Dataスクリプト作成（Docker, Git等のインストール）
-- [ ] EBS設定（gp3 100GB）
-- [ ] 個人用スタックのパラメータ化
+- [x] EC2 Construct作成
+- [x] User Dataスクリプト作成（Docker, Git等のインストール）
+- [x] EBS設定（gp3 100GB）
+- [x] 個人用スタックのパラメータ化
 
 ### Phase 4: 接続・運用ツール
-- [ ] SessionManager接続用スクリプト
+- [x] SessionManager接続用スクリプト
 - [ ] VS Code Remote接続設定ガイド
 - [ ] 自動起動/停止スケジュール（コスト削減）
 
 ### Phase 5: ドキュメント・テスト
+- [x] テストコード作成
 - [ ] セットアップガイド作成
 - [ ] トラブルシューティングガイド
 - [ ] CloudFormationテンプレート出力
