@@ -1,5 +1,5 @@
 #!/bin/bash
-set -e
+set -eux
 
 # ============================================================
 # EC2 Remote Workspace - User Data Script
@@ -19,12 +19,12 @@ export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
 
 # システムアップデート
-echo "[1/8] Updating system packages..."
+echo "[1/6] Updating system packages..."
 apt-get update -y
 apt-get upgrade -y
 
 # 基本ツールインストール
-echo "[2/8] Installing essential tools..."
+echo "[2/6] Installing essential tools..."
 apt-get install -y \
     curl \
     wget \
@@ -45,41 +45,15 @@ apt-get install -y \
     build-essential \
     apt-transport-https
 
-# SSM Agentインストール（Ubuntu用）
-echo "[3/8] Installing SSM Agent..."
-if ! command -v amazon-ssm-agent &> /dev/null; then
-    mkdir -p /tmp/ssm
-    cd /tmp/ssm
-    wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
-    dpkg -i amazon-ssm-agent.deb
-    systemctl enable amazon-ssm-agent
-    systemctl start amazon-ssm-agent
-    cd /
-    rm -rf /tmp/ssm
-fi
-
-# SSM Agentステータス確認
-echo "SSM Agent Status:"
-systemctl status amazon-ssm-agent --no-pager || true
-
 # Dockerインストール
-echo "[4/8] Installing Docker..."
+echo "[3/6] Installing Docker..."
 if ! command -v docker &> /dev/null; then
-    # Docker公式GPGキー追加
-    install -m 0755 -d /etc/apt/keyrings
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
-    chmod a+r /etc/apt/keyrings/docker.gpg
+    # Docker公式インストールスクリプトを使用
+    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+    sh /tmp/get-docker.sh
+    rm -f /tmp/get-docker.sh
 
-    # Dockerリポジトリ追加
-    echo \
-      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
-      $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-      tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-    apt-get update -y
-    apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-
-    # Dockerサービス有効化
+    # Dockerサービス有効化（通常は自動で有効化されるが念のため）
     systemctl enable docker
     systemctl start docker
 fi
@@ -94,7 +68,7 @@ echo "Docker Compose version:"
 docker compose version
 
 # AWS CLI v2インストール
-echo "[5/8] Installing AWS CLI v2..."
+echo "[4/6] Installing AWS CLI v2..."
 if ! command -v aws &> /dev/null; then
     cd /tmp
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -105,43 +79,16 @@ fi
 echo "AWS CLI version:"
 aws --version
 
-# Node.js (via nvm) インストール
-echo "[6/8] Installing Node.js via nvm..."
-NVM_VERSION="v0.40.1"
-NODE_VERSION="22"
-
-# ubuntuユーザーとしてnvmをインストール
-sudo -u ubuntu bash << 'EOFNVM'
-export HOME=/home/ubuntu
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-export NVM_DIR="$HOME/.nvm"
-[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
-nvm install 22
-nvm use 22
-nvm alias default 22
-EOFNVM
-
-# Python環境セットアップ
-echo "[7/8] Setting up Python environment..."
-apt-get install -y python3 python3-pip python3-venv
-
-# pipのアップグレード
-python3 -m pip install --upgrade pip --break-system-packages || true
-
-# VS Code Server用の設定ディレクトリ作成
-echo "[8/8] Setting up VS Code Server directories..."
-mkdir -p /home/ubuntu/.vscode-server
-chown -R ubuntu:ubuntu /home/ubuntu/.vscode-server
-
 # 開発用ディレクトリ作成
-mkdir -p /home/ubuntu/workspace
-chown -R ubuntu:ubuntu /home/ubuntu/workspace
+echo "[5/6] Setting up workspace directory..."
+mkdir -p /home/ubuntu/work
+chown -R ubuntu:ubuntu /home/ubuntu/work
 
 # タイムゾーン設定（日本時間）
+echo "[6/6] Setting timezone and swap space..."
 timedatectl set-timezone Asia/Tokyo
 
 # スワップ領域作成（メモリ不足対策）
-echo "Creating swap space..."
 if [ ! -f /swapfile ]; then
     fallocate -l 4G /swapfile
     chmod 600 /swapfile
@@ -159,7 +106,6 @@ echo ""
 echo "Installed software:"
 echo "  - Docker: $(docker --version)"
 echo "  - AWS CLI: $(aws --version)"
-echo "  - Python: $(python3 --version)"
 echo "  - Git: $(git --version)"
 echo ""
 echo "SSM Agent Status:"
