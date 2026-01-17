@@ -84,6 +84,10 @@ echo "[5/6] Setting up workspace directory..."
 mkdir -p /home/ubuntu/work
 chown -R ubuntu:ubuntu /home/ubuntu/work
 
+# sudoヘルプメッセージを非表示にする
+touch /home/ubuntu/.sudo_as_admin_successful
+chown ubuntu:ubuntu /home/ubuntu/.sudo_as_admin_successful
+
 # タイムゾーン設定（日本時間）
 echo "[6/6] Setting timezone and swap space..."
 timedatectl set-timezone Asia/Tokyo
@@ -107,8 +111,5 @@ echo "Installed software:"
 echo "  - Docker: $(docker --version)"
 echo "  - AWS CLI: $(aws --version)"
 echo "  - Git: $(git --version)"
-echo ""
-echo "SSM Agent Status:"
-systemctl status amazon-ssm-agent --no-pager || true
 echo ""
 echo "You can now connect via AWS Systems Manager Session Manager."
