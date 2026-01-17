@@ -88,6 +88,17 @@ chown -R ubuntu:ubuntu /home/ubuntu/work
 touch /home/ubuntu/.sudo_as_admin_successful
 chown ubuntu:ubuntu /home/ubuntu/.sudo_as_admin_successful
 
+# .bashrcにホームディレクトリへの移動を追記（重複チェック付き）
+if ! grep -q 'cd ~/work' /home/ubuntu/.bashrc; then
+    cat >> /home/ubuntu/.bashrc << 'EOF'
+
+# カレントディレクトリが/の場合、作業ディレクトリに移動
+if [ "$PWD" = "/" ]; then
+    cd ~/work
+fi
+EOF
+fi
+
 # タイムゾーン設定（日本時間）
 echo "[6/6] Setting timezone and swap space..."
 timedatectl set-timezone Asia/Tokyo
