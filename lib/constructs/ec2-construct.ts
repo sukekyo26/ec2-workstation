@@ -75,7 +75,7 @@ export class Ec2Construct extends Construct {
                             ? ec2.EbsDeviceVolumeType.GP3
                             : ec2.EbsDeviceVolumeType.GP2,
                         encrypted: true, // 暗号化有効
-                        deleteOnTermination: false, // インスタンス削除時にEBSを保持
+                        deleteOnTermination: true, // インスタンス削除時にEBSも削除
                     }),
                 },
             ],
