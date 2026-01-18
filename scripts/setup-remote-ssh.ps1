@@ -16,14 +16,8 @@ Write-Host "Checking prerequisites..." -ForegroundColor Cyan
 
 $hasError = $false
 
-# Check PowerShell version (requires v7+)
-if ($PSVersionTable.PSVersion.Major -lt 7) {
-    Write-Host "Error: PowerShell 7 or later is required. Current version: $($PSVersionTable.PSVersion)" -ForegroundColor Red
-    Write-Host "  Download: https://github.com/PowerShell/PowerShell/releases" -ForegroundColor Yellow
-    $hasError = $true
-} else {
-    Write-Host "  PowerShell $($PSVersionTable.PSVersion) - OK" -ForegroundColor Green
-}
+# Check PowerShell version
+Write-Host "  PowerShell $($PSVersionTable.PSVersion) - OK" -ForegroundColor Green
 
 # Check AWS CLI v2
 $awsCliPath = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
@@ -179,7 +173,7 @@ Host $SSH_HOST
    IdentityFile $SECRET_KEY_PATH_UNIX
    IdentitiesOnly yes
    ServerAliveInterval 60
-   ProxyCommand pwsh -Command "& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' ssm start-session --region $REGION --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
+   ProxyCommand powershell -Command "& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' ssm start-session --region $REGION --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
 "@
 
 Add-Content -Path $SSH_CONFIG_PATH -Value $sshConfigContent
