@@ -58,7 +58,7 @@ Windows PC（管理者権限なし）からSessionManager経由でEC2 Linux開�
                     ┌───────────┴───────────┐
                     │      Windows PC       │
                     │  (管理者権限なし)      │
-                    │  VS Code + AWS Toolkit│
+                    │  VS Code + Remote-SSH │
                     └───────────────────────┘
 ```
 
@@ -217,7 +217,8 @@ ec2-remote-workspace/
 │   │   └── user-data.sh          # EC2初期化スクリプト
 │   └── index.ts                  # エクスポート
 ├── scripts/
-│   └── connect.sh                # 接続用ヘルパースクリプト
+│   ├── connect.sh                # 接続用ヘルパースクリプト（Linux/Mac）
+│   └── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
 ├── test/                         # テストコード
 ├── cdk.json
 ├── package.json
@@ -325,37 +326,80 @@ cdk deploy ec2-remote-workspace-dev-developer1
 
 ### 接続
 
-デプロイ完了後、SessionManager経由でEC2インスタンスに接続できます：
+デプロイ完了後、VS Code Remote-SSH経由でEC2インスタンスに接続できます。
 
-```bash
-# 接続スクリプトを使用（推奨）
-./scripts/connect.sh -u developer1
+#### 前提条件（Windows PC）
 
-# または直接AWS CLIで接続
-# まずインスタンスIDを取得
-aws ec2 describe-instances \
-  --filters "Name=tag:Owner,Values=developer1" \
-  --query 'Reservations[].Instances[].InstanceId' \
-  --output text
+以下のソフトウェアがインストールされていること：
 
-# SessionManager経由で接続
-aws ssm start-session --target i-xxxxxxxxxxxx
-```
+- **PowerShell 7+** - [ダウンロード](https://github.com/PowerShell/PowerShell/releases)
+- **VS Code** - [ダウンロード](https://code.visualstudio.com/)
+- **Remote - SSH 拡張機能** - VS Codeで`ms-vscode-remote.remote-ssh`をインストール
+- **AWS CLI v2** - [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
+- **Session Manager Plugin** - [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+  - ⚠️ インストール後、`session-manager-plugin`コマンドがPATHから実行できることを確認してください
 
-### VS Code Remote接続
+#### セットアップ手順
 
-1. VS Code に **Remote - SSH** 拡張機能をインストール
-2. **AWS Toolkit** 拡張機能をインストール
-3. SSH configを設定（`~/.ssh/config`）：
+1. **インスタンスIDを取得**
 
-```
-Host ec2-workspace-*
-    ProxyCommand aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p
-    User ubuntu
-    IdentityFile ~/.ssh/your-key.pem
-```
+   AWSコンソールまたはCLIでデプロイしたEC2インスタンスのIDを確認します：
 
-4. VS Codeから接続
+   ```powershell
+   aws ec2 describe-instances `
+     --filters "Name=tag:Owner,Values=<username>" `
+     --query 'Reservations[].Instances[].InstanceId' `
+     --output text
+   ```
+
+2. **SSH設定スクリプトを実行**
+
+   PowerShellで以下のスクリプトを実行し、SSH configを自動設定します：
+
+   ```powershell
+   .\scripts\setup-remote-ssh.ps1
+   ```
+
+   スクリプトは以下を行います：
+   - EC2インスタンスIDの入力を求める
+   - SSHホスト名の入力を求める（デフォルト: `ec2`）
+   - AWSリージョンの入力を求める（デフォルト: `ap-northeast-1`）
+   - キーペアの秘密鍵をAWS SSM Parameter Storeから取得
+   - `~/.ssh/config`にSSM経由の接続設定を追加
+
+3. **VS Codeから接続**
+
+   - VS Codeを開く
+   - `F1` → `Remote-SSH: Connect to Host...`
+   - 設定したホスト名（例: `ec2`）を選択
+   - 接続完了
+
+#### 手動設定（オプション）
+
+スクリプトを使わずに手動で設定する場合：
+
+1. **秘密鍵を取得**
+
+   ```powershell
+   # キーペアIDを取得
+   $KEY_NAME = aws ec2 describe-instances --instance-ids <instance-id> --query "Reservations[0].Instances[0].KeyName" --output text
+   $KEY_ID = aws ec2 describe-key-pairs --key-names $KEY_NAME --query "KeyPairs[0].KeyPairId" --output text
+
+   # 秘密鍵を保存
+   aws ssm get-parameter --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text | Set-Content -Path "$env:USERPROFILE\.ssh\ec2-key.pem"
+   ```
+
+2. **SSH configを編集**（`~/.ssh/config`）
+
+   ```
+   Host ec2
+      HostName <instance-id>
+      User ubuntu
+      IdentityFile ~/.ssh/ec2-key.pem
+      IdentitiesOnly yes
+      ServerAliveInterval 60
+      ProxyCommand pwsh -Command "& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' ssm start-session --region ap-northeast-1 --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
+   ```
 
 ### スタックの削除
 
