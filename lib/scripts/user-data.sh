@@ -43,7 +43,10 @@ apt-get install -y \
     lsb-release \
     software-properties-common \
     build-essential \
-    apt-transport-https
+    apt-transport-https \
+    dnsutils \
+    iputils-ping \
+    net-tools
 
 # Dockerインストール
 echo "[3/6] Installing Docker..."
