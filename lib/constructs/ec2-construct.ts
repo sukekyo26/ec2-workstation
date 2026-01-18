@@ -38,11 +38,19 @@ export class Ec2Construct extends Construct {
     public readonly instance: ec2.Instance;
     /** インスタンスID */
     public readonly instanceId: string;
+    /** SSHキーペア */
+    public readonly keyPair: ec2.KeyPair;
 
     constructor(scope: Construct, id: string, props: Ec2ConstructProps) {
         super(scope, id);
 
         const resourcePrefix = `${props.projectName}-${props.environment}-${props.username}`;
+
+        // SSHキーペア作成（公開鍵はAWSが自動生成、秘密鍵はSSM Parameter Storeに保存）
+        this.keyPair = new ec2.KeyPair(this, 'KeyPair', {
+            keyPairName: `${resourcePrefix}-keypair`,
+            type: ec2.KeyPairType.ED25519,
+        });
 
         // Ubuntu 24.04 LTS AMIを取得
         const ubuntuAmi = ec2.MachineImage.lookup({
@@ -62,6 +70,9 @@ export class Ec2Construct extends Construct {
             role: props.instanceProfile.role as iam.IRole,
             // インスタンスプロファイルはロール経由で自動作成されるため、
             // ここでは明示的に設定しない
+
+            // SSHキーペア（Remote-SSH接続用）
+            keyPair: this.keyPair,
 
             // User Data
             userData: props.userData,
