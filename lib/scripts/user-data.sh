@@ -34,6 +34,7 @@ apt-get install -y \
     htop \
     tree \
     jq \
+    bc \
     unzip \
     zip \
     tar \
