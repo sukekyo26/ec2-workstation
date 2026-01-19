@@ -127,13 +127,13 @@ describe('WorkspaceStack', () => {
             });
         });
 
-        test('インスタンス削除時にEBSが保持される', () => {
+        test('インスタンス削除時にEBSも削除される', () => {
             template.hasResourceProperties('AWS::EC2::Instance', {
                 BlockDeviceMappings: Match.arrayWith([
                     Match.objectLike({
                         DeviceName: '/dev/sda1',
                         Ebs: Match.objectLike({
-                            DeleteOnTermination: false,
+                            DeleteOnTermination: true,
                         }),
                     }),
                 ]),
