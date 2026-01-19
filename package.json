@@ -1,9 +1,6 @@
 {
   "name": "ec2-remote-workspace",
   "version": "0.1.0",
-  "bin": {
-    "ec2-remote-workspace": "bin/ec2-remote-workspace.js"
-  },
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
