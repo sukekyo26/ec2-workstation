@@ -1,258 +1,190 @@
 # EC2 Remote Workspace
 
-Windows PC（管理者権限なし）からSessionManager経由でEC2 Linux開発環境に接続し、DevContainerで開発を行うためのインフラ構築プロジェクト。
+AWS CDKを使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。
 
 ## 📋 プロジェクト概要
 
-### 背景・課題
-- ローカルWindows PCに管理者権限がなく、WSLを有効化できない
-- SSH接続はセキュリティ上の理由で禁止
-- チーム開発のため環境差分を最小化したい
+### 主な特徴
 
-### 解決策
-- AWS EC2上にLinux開発環境を構築
-- SessionManager経由でセキュアに接続
-- DevContainerを使用してチーム間の環境を統一
+- **SessionManager経由のセキュアな接続** - SSH(22)ポートを開放せず、IAM認証でセキュアにアクセス
+- **チーム開発対応** - 設定ファイル（`workspace-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
+- **DevContainer対応** - Docker環境がプリインストールされており、VS Code DevContainerでの開発が可能
+- **Infrastructure as Code** - AWS CDKによる再現可能なインフラ構築
+
+### 想定ユースケース
+
+| ケース | 説明 |
+|--------|------|
+| **ローカルPCに制限がある場合** | 管理者権限なし、WSL使用不可、社内ポリシーでの制限など |
+| **チーム開発環境の統一** | 全メンバーが同一構成の開発環境を使用 |
+| **セキュアなリモート開発** | SSH不使用、IAM認証、監査ログ対応 |
+| **高スペックな開発環境が必要** | ローカルPCよりもパワフルなEC2インスタンスを使用 |
 
 ---
 
-## 🏗️ 実装計画
+## 🏗️ アーキテクチャ
 
-### アーキテクチャ概要
+```mermaid
+flowchart TB
+    subgraph AWS["AWS Cloud"]
+        subgraph VPC["VPC (10.0.0.0/16)"]
+            subgraph Subnet["Public Subnet"]
+                EC2A["🖥️ EC2 Instance<br/>User A"]
+                EC2B["🖥️ EC2 Instance<br/>User B"]
+            end
+            IGW["🌐 Internet Gateway"]
+        end
+        SSM["AWS Systems Manager<br/>Session Manager"]
+        CW["CloudWatch Logs<br/>セッションログ"]
+    end
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                           AWS Cloud                              │
-│  ┌───────────────────────────────────────────────────────────┐  │
-│  │                         VPC                                │  │
-│  │  ┌─────────────────────────────────────────────────────┐  │  │
-│  │  │                  Public Subnet                       │  │  │
-│  │  │  ┌─────────────────────────────────────────────┐    │  │  │
-│  │  │  │            EC2 Instance (Dev Env)            │    │  │  │
-│  │  │  │  ┌───────────────────────────────────────┐  │    │  │  │
-│  │  │  │  │  - Ubuntu 24.04 LTS                   │  │    │  │  │
-│  │  │  │  │  - Docker & Docker Compose            │  │    │  │  │
-│  │  │  │  │  - SSM Agent                          │  │    │  │  │
-│  │  │  │  │  - Git, Node.js, Python, etc.         │  │    │  │  │
-│  │  │  │  └───────────────────────────────────────┘  │    │  │  │
-│  │  │  │                                             │    │  │  │
-│  │  │  │  Security Group:                            │    │  │  │
-│  │  │  │  - Inbound:  ALL BLOCKED (SSH含む)          │    │  │  │
-│  │  │  │  - Outbound: HTTPS(443) only                │    │  │  │
-│  │  │  └─────────────────────────────────────────────┘    │  │  │
-│  │  │                         │                            │  │  │
-│  │  └─────────────────────────┼────────────────────────────┘  │  │
-│  │                            │                               │  │
-│  │  ┌─────────────────────────┼────────────────────────────┐  │  │
-│  │  │      Internet Gateway   │                            │  │  │
-│  │  └─────────────────────────┼────────────────────────────┘  │  │
-│  └────────────────────────────┼───────────────────────────────┘  │
-└───────────────────────────────┼──────────────────────────────────┘
-                                │
-                    ┌───────────┴───────────┐
-                    │   AWS SSM Endpoints   │
-                    │   (Public Endpoints)  │
-                    └───────────┬───────────┘
-                                │ SessionManager
-                                │ (HTTPS/443)
-                    ┌───────────┴───────────┐
-                    │      Windows PC       │
-                    │  (管理者権限なし)      │
-                    │  VS Code + Remote-SSH │
-                    └───────────────────────┘
+    subgraph Local["ローカルPC"]
+        VSCode["VS Code<br/>+ Remote-SSH"]
+    end
+
+    VSCode -->|"HTTPS (443)<br/>SessionManager"| SSM
+    SSM -->|"IAM認証"| EC2A
+    SSM -->|"IAM認証"| EC2B
+    SSM -->|"監査ログ"| CW
+    EC2A & EC2B -->|"アウトバウンド<br/>HTTPS (443)"| IGW
+    IGW --> Internet["🌍 Internet<br/>apt, docker pull, git等"]
+
+    style EC2A fill:#ff9900,color:#fff
+    style EC2B fill:#ff9900,color:#fff
+    style SSM fill:#3b48cc,color:#fff
+    style VPC fill:#f0f0f0
 ```
 
-### 技術スタック
+### リソース構成
 
-| カテゴリ | 技術選定 | 理由 |
-|---------|---------|------|
-| IaC | AWS CDK (TypeScript) | 型安全性、再利用性、CloudFormation生成も可能 |
-| OS | **Ubuntu 24.04 LTS** | 最新パッケージ、開発者に馴染み深い、2029年までサポート |
-| インスタンス | t3.large | 2vCPU/8GB RAM、開発に十分なスペック |
-| ストレージ | EBS gp3 100GB | 高速I/O、コスト効率が良い |
-| ネットワーク | **Public Subnet** | セキュリティグループで保護、NAT Gateway不要でコスト削減 |
-| 接続方式 | SSM SessionManager | SSH不要、IAM認証、監査ログ対応 |
+```mermaid
+flowchart LR
+    subgraph NetworkStack["📦 Network Stack (共有)"]
+        VPC["VPC"]
+        Subnet["Public Subnet"]
+        IGW["Internet Gateway"]
+        RT["Route Table"]
+    end
 
-### Public Subnet採用の理由（セキュリティ考慮）
+    subgraph WorkspaceA["📦 Workspace Stack (User A)"]
+        EC2A["EC2 Instance"]
+        SGA["Security Group"]
+        IAMA["IAM Role"]
+        KPA["SSH Key Pair"]
+    end
 
-Private Subnet + NAT Gatewayは一般的なベストプラクティスですが、以下の理由でPublic Subnetを採用：
+    subgraph WorkspaceB["📦 Workspace Stack (User B)"]
+        EC2B["EC2 Instance"]
+        SGB["Security Group"]
+        IAMB["IAM Role"]
+        KPB["SSH Key Pair"]
+    end
+
+    NetworkStack --> WorkspaceA
+    NetworkStack --> WorkspaceB
+```
+
+---
+
+## 🔧 技術スタック
+
+| カテゴリ | 技術 | 説明 |
+|---------|------|------|
+| IaC | AWS CDK (TypeScript) | 型安全なインフラ定義 |
+| OS | Ubuntu 24.04 LTS | 2029年までサポート |
+| インスタンス | t3.large (デフォルト) | 2vCPU / 8GB RAM |
+| ストレージ | EBS gp3 100GB | 高速I/O、コスト効率 |
+| 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
+| パッケージ管理 | pnpm | 高速な依存関係管理 |
+
+### Public Subnet採用について
+
+一般的にはPrivate Subnet + NAT Gatewayがベストプラクティスですが、本プロジェクトでは**Public Subnet**を採用しています。
 
 | 項目 | 説明 |
-|-----|------|
+|------|------|
 | **コスト削減** | NAT Gateway ($45/月) + VPC Endpoints ($30/月) = **月$75削減** |
-| **セキュリティ担保** | セキュリティグループで全インバウンドをブロック（パブリックIPがあっても接続不可） |
-| **IAM認証** | SessionManagerはIAM認証必須。IPだけでは接続できない |
-| **監査ログ** | 全セッションはCloudWatch Logsに記録 |
+| **セキュリティ担保** | セキュリティグループで**全インバウンドをブロック**（SSHポート含む）<br/>アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
+| **IAM認証** | SessionManager接続にはIAM認証が必須 |
+| **監査ログ** | 全セッションをCloudWatch Logsに記録 |
 
-⚠️ **重要**: SSH(22)を含む**全インバウンドトラフィックをブロック**することで、Private Subnet同等のセキュリティを実現
+> ⚠️ パブリックIPが付与されますが、セキュリティグループで全インバウンドをブロックするため、外部から直接接続することはできません。
+
+### VPC/Subnet共有設計
+
+VPCとSubnetはチームメンバー間で共有し、EC2インスタンスのみ個人ごとに分離します。
+
+| リソース | 共有/分離 | 理由 |
+|----------|----------|------|
+| VPC | 共有 | コスト削減、管理容易 |
+| Public Subnet | 共有 | 個別作成の必要なし |
+| EC2インスタンス | **分離** | 完全に独立した開発環境 |
+| セキュリティグループ | **分離** | インスタンスごとの通信制御 |
+| IAMロール | **分離** | 最小権限の原則 |
+
+### セキュリティ
+
+```mermaid
+flowchart TB
+    subgraph Security["🔐 3層のセキュリティ"]
+        L1["1️⃣ IAM認証<br/>SessionManager接続時に必須"]
+        L2["2️⃣ リソースタグ<br/>Ownerタグで自分のインスタンスのみ許可"]
+        L3["3️⃣ セキュリティグループ<br/>全インバウンドブロック"]
+    end
+    L1 --> L2 --> L3
+```
+
+| セキュリティ層 | 説明 |
+|---------------|------|
+| **IAM認証** | SessionManager接続にはAWS認証情報が必要 |
+| **リソースタグによる制限** | `Owner`タグで自分のインスタンスのみアクセス可能 |
+| **セキュリティグループ** | インバウンド：全拒否、アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
+| **監査ログ** | CloudWatch Logsに全セッションを記録 |
+| **EBS暗号化** | 全ボリュームをAWS管理キーで暗号化 |
+| **IMDSv2強制** | インスタンスメタデータサービスv2を強制（SSRF対策） |
 
 ---
 
-## 🌐 ネットワーク共有設計について
+## 📋 前提条件
 
-### 共有ネットワーク vs 個別ネットワーク
+### 必要なツール
 
-本プロジェクトでは、**VPC/Subnetをチームメンバー間で共有**し、**EC2インスタンスのみ個人ごとに分離**する設計を採用します。
+| ツール | バージョン | インストール |
+|--------|-----------|-------------|
+| Node.js | 22+ | [ダウンロード](https://nodejs.org/) |
+| pnpm | 10+ | `npm install -g pnpm` |
+| AWS CLI v2 | **2.32.0以降推奨** | [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+| Session Manager Plugin | 最新 | [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) |
 
-| リソース | 共有 or 分離 | 理由 |
-|---------|-------------|------|
-| **VPC** | 共有（1つ） | コスト削減、管理容易 |
-| **Public Subnet** | 共有（1つ） | 個別作成の必要なし |
-| **Internet Gateway** | 共有（1つ） | VPCに1つで十分 |
-| **EC2インスタンス** | **個別（人数分）** | 完全に独立した開発環境 |
-| **セキュリティグループ** | **個別（人数分）** | インスタンスごとの通信制御 |
-| **IAMロール** | **個別（人数分）** | 最小権限の原則 |
+### AWS環境
 
-### セキュリティ分離の仕組み
-
-同じVPC内にいても、**セキュリティグループ**でインスタンス間の通信を完全に制御できます：
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                      VPC (共有)                           │
-│  ┌────────────────────────────────────────────────────┐  │
-│  │          Public Subnet (共有)                       │  │
-│  │                                                     │  │
-│  │  ┌─────────────────┐      ┌─────────────────┐     │  │
-│  │  │  田中さんのEC2   │      │  佐藤さんのEC2   │     │  │
-│  │  │  IP: 10.0.1.10  │      │  IP: 10.0.1.20  │     │  │
-│  │  │                 │      │                 │     │  │
-│  │  │  SG-tanaka:     │      │  SG-sato:       │     │  │
-│  │  │  In: ❌ ALL     │  ❌   │  In: ❌ ALL     │     │  │
-│  │  │  Out: HTTPS     │      │  Out: HTTPS     │     │  │
-│  │  └─────────────────┘      └─────────────────┘     │  │
-│  │         ↑                         ↑               │  │
-│  │         │                         │               │  │
-│  │         └─────────────────────────┘               │  │
-│  │            お互いに通信できない                     │  │
-│  └────────────────────────────────────────────────────┘  │
-└──────────────────────────────────────────────────────────┘
-```
-
-#### セキュリティグループによる分離
-
-| ルール | 説明 | 効果 |
-|--------|------|------|
-| **インバウンド: 全拒否** | 外部からもVPC内からも接続不可 | 他のメンバーのインスタンスから接続できない |
-| **アウトバウンド: HTTPS許可** | 外部への通信のみ可能 | インターネットアクセスは可能 |
-
-### 共有ネットワークのメリット
-
-| メリット | 説明 | 効果 |
-|---------|------|------|
-| **コスト削減** | VPC/IGW等は追加料金なし | 1ユーザーでも10ユーザーでも同じ |
-| **管理容易** | ネットワーク設定は1回だけ | 新メンバー追加時もワークスペーススタックのみデプロイ |
-| **IP枯渇回避** | Subnet（/24）で254個のIPアドレス | 10-20人程度なら十分 |
-| **統一された構成** | 全員が同じネットワーク構成 | トラブルシューティングが容易 |
-
-### アクセス制御（3層の防御）
-
-| 層 | 仕組み | 保護対象 |
-|----|--------|---------|
-| **1. IAM認証** | SessionManager接続時にIAM認証が必須 | 他のメンバーのインスタンスに接続できない |
-| **2. リソースタグ** | IAMポリシーで自分のインスタンスのみ許可 | 誤って他のメンバーの環境にアクセス不可 |
-| **3. セキュリティグループ** | ネットワークレベルでインスタンス間通信をブロック | VPC内でも通信できない |
-
-### IAMポリシー例（個人のインスタンスのみアクセス可能）
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ssm:StartSession"
-      ],
-      "Resource": [
-        "arn:aws:ec2:ap-northeast-1:*:instance/*"
-      ],
-      "Condition": {
-        "StringEquals": {
-          "ssm:resourceTag/Owner": "${aws:username}"
-        }
-      }
-    }
-  ]
-}
-```
-
-→ 自分の `Owner` タグが付いたインスタンスにしか接続できない
-
-### 完全分離が必要なケース
-
-以下の場合は個別VPCを検討してください：
-
-| ケース | 理由 | 対応 |
-|--------|------|------|
-| **本番環境も構築する** | 開発と本番の完全分離 | VPCを分ける |
-| **機密性の高いデータ** | コンプライアンス要件 | VPCを分ける + Private Subnet |
-| **顧客ごとの環境** | マルチテナント | VPC Peeringまたは Transit Gateway |
-| **異なるネットワーク要件** | チームごとに異なるCIDR | VPCを分ける |
-
-→ 今回のような**チーム内の開発環境**であれば、共有VPCで全く問題ありません
-
----
-
-## 📁 ディレクトリ構成（予定）
-
-```
-ec2-remote-workspace/
-├── README.md
-├── workspace-config.json         # ユーザー・プロジェクト設定
-├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
-├── bin/
-│   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
-├── lib/
-│   ├── constructs/
-│   │   ├── vpc-construct.ts      # VPC構成
-│   │   ├── security-construct.ts # セキュリティグループ・IAM
-│   │   └── ec2-construct.ts      # EC2インスタンス
-│   ├── stacks/
-│   │   ├── network-stack.ts      # 共有ネットワーク（1つ）
-│   │   └── workspace-stack.ts    # 個人用ワークスペース（人数分）
-│   ├── config/
-│   │   └── workspace-config.ts   # 設定ファイル読み込み・バリデーション
-│   ├── scripts/
-│   │   └── user-data.sh          # EC2初期化スクリプト
-│   └── index.ts                  # エクスポート
-├── scripts/
-│   ├── connect.sh                # 接続用ヘルパースクリプト（Linux/Mac）
-│   └── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
-├── test/                         # テストコード
-├── cdk.json
-├── package.json
-└── tsconfig.json
-```
+- AWSアカウント
+- IAMユーザーまたはルートユーザー
+  - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + CDKデプロイ権限
+  - ルートユーザーの場合：追加権限不要
+- AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
+- CDK Bootstrap済み（`cdk bootstrap`）
 
 ---
 
 ## 🚀 使用方法
 
-### 前提条件
-
-以下のツールがインストールされていること：
-
-- **Node.js 22+** - [ダウンロード](https://nodejs.org/)
-- **pnpm** - `npm install -g pnpm`
-- **AWS CLI v2** - [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-- **AWS CDK CLI** - `npm install -g aws-cdk`
-- **Session Manager Plugin** - [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-
-### インストール
+### 1. リポジトリのクローン
 
 ```bash
-# リポジトリをクローン
 git clone <repository-url>
 cd ec2-remote-workspace
+```
 
-# 依存関係をインストール
+### 2. 依存関係のインストール
+
+```bash
 pnpm install
 ```
 
-### 設定
+### 3. ユーザー設定
 
-`workspace-config.json` を編集してユーザーとプロジェクト設定を定義します：
+`workspace-config.json` を編集してプロジェクト設定とユーザーを定義します。
 
 ```json
 {
@@ -272,7 +204,11 @@ pnpm install
     },
     {
       "username": "developer2",
-      "displayName": "Developer Two"
+      "displayName": "Developer Two",
+      "instanceConfig": {
+        "instanceType": "t3.xlarge",
+        "volumeSize": 200
+      }
     }
   ]
 }
@@ -281,273 +217,250 @@ pnpm install
 #### 設定項目
 
 | 項目 | 必須 | デフォルト | 説明 |
-|------|------|-----------|------|
-| `projectName` | - | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
-| `environment` | - | `dev` | 環境名 (dev, staging, prod) |
-| `vpcCidr` | - | `10.0.0.0/16` | VPC CIDR |
-| `defaultInstanceConfig.instanceType` | - | `t3.large` | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | - | `100` | EBSボリュームサイズ (GB) |
-| `defaultInstanceConfig.volumeType` | - | `gp3` | EBSボリュームタイプ |
+|------|:----:|-----------|------|
+| `projectName` | | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
+| `environment` | | `dev` | 環境名（dev, staging, prod） |
+| `vpcCidr` | | `10.0.0.0/16` | VPCのCIDRブロック |
+| `defaultInstanceConfig.instanceType` | | `t3.large` | EC2インスタンスタイプ |
+| `defaultInstanceConfig.volumeSize` | | `100` | EBSボリュームサイズ（GB） |
+| `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
 | `users` | ✅ | - | ユーザー配列（1人以上必須） |
 | `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
-| `users[].displayName` | - | - | 表示名 |
-| `users[].instanceConfig` | - | - | ユーザー個別のインスタンス設定 |
+| `users[].displayName` | | - | 表示名 |
+| `users[].instanceConfig` | | - | ユーザー個別のインスタンス設定（デフォルトを上書き） |
 
-### ビルド
+### 4. AWS認証
+
+AWS CLI 2.32.0以降では、`aws login` コマンドでブラウザ認証が可能です（推奨）。
 
 ```bash
-# TypeScriptをコンパイル
-pnpm build
+# ブラウザで認証（AWS CLI 2.32.0以降）
+aws login
 ```
 
-### テスト
+> **✨ `aws login` のメリット:**
+> - Identity Center不要でブラウザ認証可能
+> - 一時認証情報が15分ごとに自動リフレッシュ
+> - 長期アクセスキーの漏洩リスクを排除
+> - IAMユーザーには `SignInLocalDevelopmentAccess` マネージドポリシーの付与が必要
+
+<details>
+<summary>従来の認証方法（AWS CLI 2.31.0以前）</summary>
 
 ```bash
-# テストを実行
-pnpm test
-```
+# AWS SSOの場合
+aws sso login --profile <profile-name>
 
-### デプロイ
-
-```bash
-# AWS認証情報を設定
+# IAMユーザーの場合（非推奨）
 aws configure
+```
 
-# CDK Bootstrap（初回のみ）
-cdk bootstrap
+</details>
 
+### 5. CDK Bootstrap（初回のみ）
+
+```bash
+pnpm cdk bootstrap
+```
+
+### 6. デプロイ
+
+```bash
 # 全スタックをデプロイ
-cdk deploy --all
+pnpm cdk deploy --all
 
 # 特定のスタックのみデプロイ
-cdk deploy ec2-remote-workspace-dev-network
-cdk deploy ec2-remote-workspace-dev-developer1
+pnpm cdk deploy ec2-remote-workspace-dev-network       # ネットワークのみ
+pnpm cdk deploy ec2-remote-workspace-dev-developer1    # 特定ユーザーのみ
 ```
 
-### 接続
+### 7. デプロイ確認
 
-デプロイ完了後、VS Code Remote-SSH経由でEC2インスタンスに接続できます。
+デプロイ完了後、各スタックの出力でインスタンスIDと接続コマンドが表示されます。
 
-#### 前提条件（Windows PC）
-
-以下のソフトウェアがインストールされていること：
-
-- **PowerShell 7+** - [ダウンロード](https://github.com/PowerShell/PowerShell/releases)
-- **VS Code** - [ダウンロード](https://code.visualstudio.com/)
-- **Remote - SSH 拡張機能** - VS Codeで`ms-vscode-remote.remote-ssh`をインストール
-- **AWS CLI v2** - [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)
-- **Session Manager Plugin** - [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
-  - ⚠️ インストール後、`session-manager-plugin`コマンドがPATHから実行できることを確認してください
-
-#### セットアップ手順
-
-1. **インスタンスIDを取得**
-
-   AWSコンソールまたはCLIでデプロイしたEC2インスタンスのIDを確認します：
-
-   ```powershell
-   aws ec2 describe-instances `
-     --filters "Name=tag:Owner,Values=<username>" `
-     --query 'Reservations[].Instances[].InstanceId' `
-     --output text
-   ```
-
-2. **SSH設定スクリプトを実行**
-
-   PowerShellで以下のスクリプトを実行し、SSH configを自動設定します：
-
-   ```powershell
-   .\scripts\setup-remote-ssh.ps1
-   ```
-
-   スクリプトは以下を行います：
-   - EC2インスタンスIDの入力を求める
-   - SSHホスト名の入力を求める（デフォルト: `ec2`）
-   - AWSリージョンの入力を求める（デフォルト: `ap-northeast-1`）
-   - キーペアの秘密鍵をAWS SSM Parameter Storeから取得
-   - `~/.ssh/config`にSSM経由の接続設定を追加
-
-3. **VS Codeから接続**
-
-   - VS Codeを開く
-   - `F1` → `Remote-SSH: Connect to Host...`
-   - 設定したホスト名（例: `ec2`）を選択
-   - 接続完了
-
-#### 手動設定（オプション）
-
-スクリプトを使わずに手動で設定する場合：
-
-1. **秘密鍵を取得**
-
-   ```powershell
-   # キーペアIDを取得
-   $KEY_NAME = aws ec2 describe-instances --instance-ids <instance-id> --query "Reservations[0].Instances[0].KeyName" --output text
-   $KEY_ID = aws ec2 describe-key-pairs --key-names $KEY_NAME --query "KeyPairs[0].KeyPairId" --output text
-
-   # 秘密鍵を保存
-   aws ssm get-parameter --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text | Set-Content -Path "$env:USERPROFILE\.ssh\ec2-key.pem"
-   ```
-
-2. **SSH configを編集**（`~/.ssh/config`）
-
-   ```
-   Host ec2
-      HostName <instance-id>
-      User ubuntu
-      IdentityFile ~/.ssh/ec2-key.pem
-      IdentitiesOnly yes
-      ServerAliveInterval 60
-      ProxyCommand pwsh -Command "& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' ssm start-session --region ap-northeast-1 --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
-   ```
-
-### スタックの削除
-
-```bash
-# 全スタックを削除
-cdk destroy --all
-
-# 特定のスタックのみ削除
-cdk destroy ec2-remote-workspace-dev-developer1
+```
+Outputs:
+ec2-remote-workspace-dev-developer1.InstanceId = i-0123456789abcdef0
+ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
 ```
 
 ---
 
-## 🔧 実装フェーズ
+## 📦 プリインストールソフトウェア
 
-### Phase 1: 基盤構築（CDKプロジェクトセットアップ）
-- [x] CDKプロジェクト初期化
-- [x] 共通設定・型定義
-- [x] VPC Construct作成（Public Subnetのみ、Internet Gateway）
-- [x] セキュリティグループ作成（全インバウンドブロック、アウトバウンドHTTPS許可）
+### Ubuntu 24.04 LTS 標準搭載
 
-### Phase 2: セキュリティ構成
-- [x] IAMロール作成（EC2用、SSM接続権限）
-- [x] セキュリティグループ作成（インバウンドSSH禁止）
-- [x] インスタンスプロファイル設定
+| カテゴリ | ソフトウェア |
+|---------|-------------|
+| **AWS** | SSM Agent（Systems Manager接続用） |
 
-### Phase 3: EC2ワークスペース構成
-- [x] EC2 Construct作成
-- [x] User Dataスクリプト作成（Docker, Git等のインストール）
-- [x] EBS設定（gp3 100GB）
-- [x] 個人用スタックのパラメータ化
+### User Dataスクリプトで自動インストール
 
-### Phase 4: 接続・運用ツール
-- [x] SessionManager接続用スクリプト
-- [ ] VS Code Remote接続設定ガイド
-- [ ] 自動起動/停止スケジュール（コスト削減）
+EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh](lib/scripts/user-data.sh)）。
 
-### Phase 5: ドキュメント・テスト
-- [x] テストコード作成
-- [ ] セットアップガイド作成
-- [ ] トラブルシューティングガイド
-- [ ] CloudFormationテンプレート出力
+| カテゴリ | ソフトウェア |
+|---------|-------------|
+| **コンテナ** | Docker, Docker Compose |
+| **AWS** | AWS CLI v2 |
+| **開発ツール** | Git, vim, nano, curl, wget, jq, tree, htop |
+| **ビルドツール** | build-essential |
+| **システム設定** | 4GB スワップ領域、タイムゾーン（Asia/Tokyo） |
+
+---
+
+## 🔗 VS Code Remote-SSH接続
+
+SessionManager経由でVS Code Remote-SSHを使用してEC2に接続できます。
+
+### 前提条件（Windows）
+
+- PowerShell 5.1以降
+- VS Code + [Remote - SSH 拡張機能](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh)
+- AWS CLI v2
+- Session Manager Plugin
+
+### セットアップ手順
+
+#### 1. インスタンスIDを取得
+
+AWSコンソールまたはCLIでデプロイしたEC2インスタンスのIDを確認します。
+
+```bash
+# Linux/Mac/Windows (PowerShell)
+aws ec2 describe-instances \
+  --filters "Name=tag:Owner,Values=<username>" \
+  --query 'Reservations[].Instances[].InstanceId' \
+  --output text
+```
+
+#### 2. セットアップスクリプトを実行
+
+**Windows:**
+
+```powershell
+.\scripts\setup-remote-ssh.ps1
+```
+
+**Linux/Mac:**
+
+```bash
+./scripts/setup-remote-ssh.sh
+```
+
+スクリプトが以下を行います：
+- EC2インスタンスIDの入力を受け付け
+- SSHホスト名の設定（デフォルト: `ec2`）
+- AWSリージョンの設定（デフォルト: `ap-northeast-1`）
+- AWS SSM Parameter Storeから秘密鍵を取得
+- `~/.ssh/config` にSSM経由の接続設定を追加
+
+#### 3. VS Codeから接続
+
+1. VS Codeを開く
+2. `Ctrl + Shift + P` → `Remote-SSH: Connect to Host...`
+3. 設定したホスト名（例: `ec2`）を選択
+4. プラットフォーム選択画面が表示されたら **Linux** を選択
+5. 接続完了
+
+---
+
+## 🗑️ スタックの削除
+
+```bash
+# 全スタックを削除
+pnpm cdk destroy --all
+
+# 特定のスタックのみ削除
+pnpm cdk destroy ec2-remote-workspace-dev-developer1
+
+# ネットワークスタックは最後に削除（依存関係のため）
+pnpm cdk destroy ec2-remote-workspace-dev-network
+```
+
+> ⚠️ EBSボリュームはインスタンス削除時に一緒に削除されます。必要なデータは事前にバックアップしてください。
 
 ---
 
 ## 💰 コスト見積もり
 
 ### 前提条件
-- 使用時間: 平日8時間 × 月20日 = **160時間/月**
-- リージョン: ap-northeast-1（東京）
+
+- 使用時間：平日8時間 × 月20日 = **160時間/月**
+- リージョン：ap-northeast-1（東京）
 - インスタンス停止時はEC2料金は発生しない（EBSは継続課金）
 
 ### 月額コスト（1ユーザーあたり）
 
 | リソース | スペック | 単価 | 月額コスト |
-|---------|---------|------|-----------|
-| **EC2 (t3.large)** | 2vCPU / 8GB RAM | $0.1088/時間 | **$17.41** (160時間) |
-| **EBS (gp3)** | 100GB | $0.096/GB/月 | **$9.60** |
-| **EBS IOPS** | 3000 IOPS (無料枠内) | $0 | **$0** |
-| **EBS スループット** | 125 MB/s (無料枠内) | $0 | **$0** |
-| **データ転送 (Out)** | 10GB想定 | $0.114/GB | **$1.14** |
+|----------|---------|------|-----------|
+| EC2 (t3.large) | 2vCPU / 8GB | $0.1088/時間 | **$17.41** |
+| EBS (gp3) | 100GB | $0.096/GB/月 | **$9.60** |
+| データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
+| **合計** | | | **約 $28/月** |
 
-※ Public Subnet採用によりNAT Gateway/VPC Endpointsのコストは不要
+### チーム規模別コスト
 
-### 月額合計
-
-| パターン | 構成 | 月額コスト (USD) | 月額コスト (JPY) |
-|---------|------|-----------------|-----------------|
-| **1ユーザー** | 個人利用 | **約 $28** | **約 ¥4,200** |
-| **5ユーザー** | チーム利用 | **約 $141** | **約 ¥21,150** |
-| **10ユーザー** | チーム利用 | **約 $282** | **約 ¥42,300** |
+| 規模 | 月額コスト (USD) | 月額コスト (JPY) |
+|------|-----------------|-----------------|
+| 1ユーザー | 約 $28 | 約 ¥4,200 |
+| 5ユーザー | 約 $141 | 約 ¥21,150 |
+| 10ユーザー | 約 $282 | 約 ¥42,300 |
 
 ※ 1 USD = 150 JPY で計算
 
 ### コスト最適化オプション
 
-| オプション | 効果 | 削減額（月） |
-|-----------|------|-------------|
-| **Savings Plans (1年)** | EC2 30%割引 | -$5.22/ユーザー |
-| **スポットインスタンス** | 最大70%割引（中断リスクあり） | -$12/ユーザー |
-| **自動停止スケジュール** | 平日18時以降停止 | -$0 (既に想定済み) |
-| **t3.medium に変更** | 4GB RAMで十分な場合 | -$8.70/ユーザー |
+| オプション | 効果 |
+|-----------|------|
+| Savings Plans (1年) | EC2 約30%割引 |
+| t3.medium に変更 | EC2コスト約50%削減 |
+| インスタンス自動停止 | 未使用時間のEC2コスト削減 |
 
 ---
 
-## 🖥️ EC2 インスタンススペック詳細
+## 📁 ディレクトリ構成
 
-### 推奨構成: t3.large
-
-| 項目 | スペック |
-|------|---------|
-| vCPU | 2 |
-| メモリ | 8 GB |
-| ネットワーク | 最大 5 Gbps |
-| EBS帯域幅 | 最大 2,085 Mbps |
-| OS | **Ubuntu 24.04 LTS** |
-
-### プリインストールソフトウェア
-
-```bash
-# User Dataで自動インストール
-- SSM Agent (SessionManager接続用)
-- Docker & Docker Compose
-- Git
-- Node.js (via nvm)
-- Python 3.x
-- AWS CLI v2
-- VS Code Server (自動接続用)
-- 開発に必要な基本ツール (vim, curl, wget, jq等)
+```
+ec2-remote-workspace/
+├── bin/
+│   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
+├── lib/
+│   ├── constructs/
+│   │   ├── vpc-construct.ts      # VPC構成
+│   │   ├── security-construct.ts # セキュリティグループ・IAM
+│   │   └── ec2-construct.ts      # EC2インスタンス
+│   ├── stacks/
+│   │   ├── network-stack.ts      # 共有ネットワークスタック
+│   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
+│   ├── config/
+│   │   └── workspace-config.ts   # 設定ファイル読み込み
+│   └── scripts/
+│       └── user-data.sh          # EC2初期化スクリプト
+├── scripts/
+│   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
+│   └── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
+├── test/                         # テストコード
+├── workspace-config.json         # ユーザー・プロジェクト設定
+├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
+├── cdk.json                      # CDK設定
+├── package.json
+├── pnpm-lock.yaml
+└── tsconfig.json
 ```
 
 ---
 
-## 🔐 セキュリティ設計
+## 🧪 テスト
 
-### ネットワークセキュリティ
-- ✅ EC2はPublic Subnetに配置（パブリックIP付与）
-- ✅ SSH (Port 22) を含む**全インバウンドトラフィックを完全にブロック**
-- ✅ アウトバウンドはHTTPS(443)のみ許可
-  - `git clone`, `apt install`, `docker pull` 等は全てアウトバウンド通信なので問題なく動作
-  - セキュリティグループはステートフルなので、リクエストへのレスポンスは自動的に許可
-- ✅ Internet Gateway経由で外部通信可能（SessionManager接続もHTTPS経由）
-
-### IAM設計
-- ✅ EC2インスタンスプロファイルに最小権限のIAMロール
-- ✅ SSM接続に必要な権限のみ付与
-- ✅ ユーザーごとに接続許可をIAMポリシーで制御可能
-
-### 監査・ログ
-- ✅ SessionManagerのセッションログをCloudWatch Logsに記録
-- ✅ CloudTrailでAPI操作を記録
-
----
-
-## 📝 次のステップ
-
-この実装計画が承認されたら、以下の順序で実装を進めます：
-
-1. **CDKプロジェクトの初期化**
-2. **ネットワークスタックの実装**
-3. **ワークスペーススタックの実装**
-4. **接続スクリプト・ドキュメントの作成**
-5. **テスト・デプロイ**
+```bash
+# テストを実行
+pnpm test
+```
 
 ---
 
 ## 📚 参考資料
 
-- [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)
-- [VS Code Remote - SSH with SSM](https://docs.aws.amazon.com/toolkit-for-vscode/latest/userguide/remote-development.html)
+- [VS Code Remote - SSH](https://code.visualstudio.com/docs/remote/ssh)
 - [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/v2/guide/home.html)
+- [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)
