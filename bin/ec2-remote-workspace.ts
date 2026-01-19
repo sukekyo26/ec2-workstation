@@ -31,7 +31,7 @@ const networkStack = new NetworkStack(app, `${projectName}-${environment}-networ
   projectName,
   environment,
   vpcCidr,
-  description: `Network stack for ${projectName} (${environment}) - VPC, Subnet, IGW`,
+  description: `Network stack for ${projectName} (${environment}) - VPC, Subnet, IGW, Flow Logs`,
   tags: {
     Project: projectName,
     Environment: environment,

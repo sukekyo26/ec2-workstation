@@ -110,4 +110,44 @@ describe('NetworkStack', () => {
             });
         });
     });
+
+    describe('VPC Flow Logs', () => {
+        test('VPC Flow Logsが作成される', () => {
+            template.resourceCountIs('AWS::EC2::FlowLog', 1);
+        });
+
+        test('Flow Logs用CloudWatch Logsグループが作成される', () => {
+            template.hasResourceProperties('AWS::Logs::LogGroup', {
+                LogGroupName: '/vpc/flow-logs/test-project-test',
+                RetentionInDays: 30,
+            });
+        });
+
+        test('Flow Logs用IAMロールが作成される', () => {
+            template.hasResourceProperties('AWS::IAM::Role', {
+                RoleName: 'test-project-test-flow-log-role',
+                AssumeRolePolicyDocument: {
+                    Statement: Match.arrayWith([
+                        Match.objectLike({
+                            Principal: {
+                                Service: 'vpc-flow-logs.amazonaws.com',
+                            },
+                        }),
+                    ]),
+                },
+            });
+        });
+
+        test('Flow LogsがREJECTトラフィックを記録する（デフォルト）', () => {
+            template.hasResourceProperties('AWS::EC2::FlowLog', {
+                TrafficType: 'REJECT',
+            });
+        });
+
+        test('Flow LogsがCloudWatch Logsに出力される', () => {
+            template.hasResourceProperties('AWS::EC2::FlowLog', {
+                LogDestinationType: 'cloud-watch-logs',
+            });
+        });
+    });
 });

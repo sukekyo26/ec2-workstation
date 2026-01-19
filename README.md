@@ -46,7 +46,7 @@ flowchart TB
     SSM -->|"IAM認証"| EC2A
     SSM -->|"IAM認証"| EC2B
     SSM -->|"監査ログ"| CW
-    EC2A & EC2B -->|"アウトバウンド<br/>HTTPS (443)"| IGW
+    EC2A & EC2B -->|"アウトバウンド<br/>HTTPS/HTTP/DNS"| IGW
     IGW --> Internet["🌍 Internet<br/>apt, docker pull, git等"]
 
     style EC2A fill:#ff9900,color:#fff
@@ -126,10 +126,10 @@ VPCとSubnetはチームメンバー間で共有し、EC2インスタンスの�
 
 ```mermaid
 flowchart TB
-    subgraph Security["🔐 3層のセキュリティ"]
+    subgraph Security["🔐 多層のセキュリティ"]
         L1["1️⃣ IAM認証<br/>SessionManager接続時に必須"]
-        L2["2️⃣ リソースタグ<br/>Ownerタグで自分のインスタンスのみ許可"]
-        L3["3️⃣ セキュリティグループ<br/>全インバウンドブロック"]
+        L2["2️⃣ セキュリティグループ<br/>全インバウンドブロック"]
+        L3["3️⃣ 監査ログ<br/>VPC Flow Logs & Session Logs"]
     end
     L1 --> L2 --> L3
 ```
@@ -137,11 +137,12 @@ flowchart TB
 | セキュリティ層 | 説明 |
 |---------------|------|
 | **IAM認証** | SessionManager接続にはAWS認証情報が必要 |
-| **リソースタグによる制限** | `Owner`タグで自分のインスタンスのみアクセス可能 |
 | **セキュリティグループ** | インバウンド：全拒否、アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
-| **監査ログ** | CloudWatch Logsに全セッションを記録 |
+| **VPC Flow Logs** | 拒否されたトラフィックをCloudWatch Logsに記録（セキュリティ監査用、保持期間：1ヶ月） |
+| **セッションログ** | SessionManagerの全セッションをCloudWatch Logsに記録 |
 | **EBS暗号化** | 全ボリュームをAWS管理キーで暗号化 |
 | **IMDSv2強制** | インスタンスメタデータサービスv2を強制（SSRF対策） |
+| **リソースタグ** | `Owner`タグでリソースを識別（管理・フィルタリング用） |
 
 ---
 
@@ -396,7 +397,16 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 | EC2 (t3.large) | 2vCPU / 8GB | $0.1088/時間 | **$17.41** |
 | EBS (gp3) | 100GB | $0.096/GB/月 | **$9.60** |
 | データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
-| **合計** | | | **約 $28/月** |
+| **小計（ユーザーごと）** | | | **約 $28/月** |
+
+### 共有リソースコスト（チーム全体）
+
+| リソース | 説明 | 月額コスト |
+|----------|------|-----------|
+| VPC Flow Logs | CloudWatch Logsへのログ取り込み | **約 $0.76/GB** |
+| CloudWatch Logs | セッションログ + Flow Logs保存 | **$0.033/GB/月** |
+
+> 💡 VPC Flow LogsはREJECTトラフィックのみ記録する設定のため、ログ量は通常数MB～数十MB/月程度です。
 
 ### チーム規模別コスト
 
