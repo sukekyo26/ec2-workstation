@@ -8,6 +8,12 @@
         "volumeSize": 80,
         "volumeType": "gp3"
     },
+    "autoStopConfig": {
+        "cpuThreshold": 5,
+        "cpuEvaluationMinutes": 10,
+        "scheduledStopHour": 23,
+        "scheduledStopMinute": 0
+    },
     "users": [
         {
             "username": "developer1",

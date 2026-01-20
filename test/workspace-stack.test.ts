@@ -223,4 +223,50 @@ describe('WorkspaceStack - カスタム設定', () => {
             ]),
         });
     });
+
+    test('カスタム自動停止設定が適用される', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStack3', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: {
+                account: '123456789012',
+                region: 'ap-northeast-1',
+            },
+        });
+
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStack3', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: {
+                username: 'testuser3',
+            },
+            autoStopConfig: {
+                cpuThreshold: 10,
+                cpuEvaluationMinutes: 15,
+                scheduledStopHour: 22,
+                scheduledStopMinute: 30,
+            },
+            env: {
+                account: '123456789012',
+                region: 'ap-northeast-1',
+            },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+
+        // CloudWatch AlarmがカスタムCPU閾値で作成される
+        template.hasResourceProperties('AWS::CloudWatch::Alarm', {
+            Threshold: 10,
+            EvaluationPeriods: 3, // 15分 / 5分 = 3期間
+        });
+
+        // EventBridge Scheduleがカスタム時刻で作成される
+        template.hasResourceProperties('AWS::Scheduler::Schedule', {
+            ScheduleExpression: 'cron(30 22 * * ? *)',
+        });
+    });
 });

@@ -178,10 +178,12 @@ flowchart TB
 | 機能 | 方式 | 説明 |
 |------|------|------|
 | **自動起動** | ProxyCommand | SSH接続時にインスタンスが停止中なら自動起動し、起動完了まで待機 |
-| **CPU監視停止** | CloudWatch Alarm | CPU使用率が5%未満の状態が10分間続くと自動停止 |
-| **定時停止** | EventBridge Scheduler | 毎日23:00（JST）に自動停止 |
+| **CPU監視停止** | CloudWatch Alarm | CPU使用率が閾値未満の状態が指定期間続くと自動停止（設定可能） |
+| **定時停止** | EventBridge Scheduler | 毎日指定時刻（JST）に自動停止（設定可能） |
 
 > 💡 **コスト削減効果**: 使用していない時間帯のEC2料金を削減できます。インスタンスが停止中でもEBS料金は発生しますが、EC2の時間課金は発生しません。
+>
+> ⚙️ **設定変更**: `workspace-config.json` の `autoStopConfig` で CPU閾値、監視期間、定時停止時刻をカスタマイズできます。
 
 ---
 
@@ -237,6 +239,12 @@ pnpm install
     "volumeSize": 80,
     "volumeType": "gp3"
   },
+  "autoStopConfig": {
+    "cpuThreshold": 5,
+    "cpuEvaluationMinutes": 10,
+    "scheduledStopHour": 23,
+    "scheduledStopMinute": 0
+  },
   "users": [
     {
       "username": "developer1",
@@ -264,6 +272,10 @@ pnpm install
 | `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2インスタンスタイプ |
 | `defaultInstanceConfig.volumeSize` | | `80` | EBSボリュームサイズ（GB） |
 | `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
+| `autoStopConfig.cpuThreshold` | | `5` | CPU使用率閾値（%）- この値以下が続くと停止 |
+| `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU監視期間（分）- この期間低負荷が続くと停止 |
+| `autoStopConfig.scheduledStopHour` | | `23` | 定時停止時刻（時、0-23、Asia/Tokyo） |
+| `autoStopConfig.scheduledStopMinute` | | `0` | 定時停止時刻（分、0-59） |
 | `users` | ✅ | - | ユーザー配列（1人以上必須） |
 | `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
 | `users[].displayName` | | - | 表示名 |

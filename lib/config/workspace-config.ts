@@ -19,6 +19,20 @@ export interface InstanceConfig {
 }
 
 /**
+ * 自動停止設定
+ */
+export interface AutoStopConfig {
+  /** CPU使用率閾値（%）- この値以下が続くと停止（デフォルト: 5） */
+  readonly cpuThreshold: number;
+  /** CPU監視期間（分）- この期間低負荷が続くと停止（デフォルト: 10） */
+  readonly cpuEvaluationMinutes: number;
+  /** 定時停止時刻（時、0-23、Asia/Tokyo）（デフォルト: 23） */
+  readonly scheduledStopHour: number;
+  /** 定時停止時刻（分、0-59）（デフォルト: 0） */
+  readonly scheduledStopMinute: number;
+}
+
+/**
  * 個人のワークスペース設定
  */
 export interface WorkspaceUserConfig {
@@ -42,6 +56,8 @@ export interface ProjectConfig {
   readonly vpcCidr: string;
   /** デフォルトのインスタンス設定 */
   readonly defaultInstanceConfig: InstanceConfig;
+  /** 自動停止設定 */
+  readonly autoStopConfig: AutoStopConfig;
   /** ワークスペースユーザー一覧 */
   readonly users: WorkspaceUserConfig[];
 }
@@ -56,6 +72,16 @@ export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
 };
 
 /**
+ * デフォルトの自動停止設定
+ */
+export const DEFAULT_AUTO_STOP_CONFIG: AutoStopConfig = {
+  cpuThreshold: 5,
+  cpuEvaluationMinutes: 10,
+  scheduledStopHour: 23,
+  scheduledStopMinute: 0,
+};
+
+/**
  * プロジェクトのデフォルト設定
  */
 export const DEFAULT_PROJECT_CONFIG: Omit<ProjectConfig, 'users'> = {
@@ -63,6 +89,7 @@ export const DEFAULT_PROJECT_CONFIG: Omit<ProjectConfig, 'users'> = {
   environment: 'dev',
   vpcCidr: '10.0.0.0/16',
   defaultInstanceConfig: DEFAULT_INSTANCE_CONFIG,
+  autoStopConfig: DEFAULT_AUTO_STOP_CONFIG,
 };
 
 /**
@@ -184,6 +211,14 @@ export function validateAndParseConfig(rawConfig: unknown): ProjectConfig {
       : {}),
   };
 
+  // 自動停止設定のマージ
+  const autoStopConfig: AutoStopConfig = {
+    ...DEFAULT_AUTO_STOP_CONFIG,
+    ...(typeof config.autoStopConfig === 'object' && config.autoStopConfig !== null
+      ? (config.autoStopConfig as Partial<AutoStopConfig>)
+      : {}),
+  };
+
   return {
     projectName:
       typeof config.projectName === 'string'
@@ -196,6 +231,7 @@ export function validateAndParseConfig(rawConfig: unknown): ProjectConfig {
     vpcCidr:
       typeof config.vpcCidr === 'string' ? config.vpcCidr : DEFAULT_PROJECT_CONFIG.vpcCidr,
     defaultInstanceConfig,
+    autoStopConfig,
     users,
   };
 }

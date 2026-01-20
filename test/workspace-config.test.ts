@@ -4,6 +4,7 @@ import {
     loadProjectConfig,
     validateAndParseConfig,
     DEFAULT_INSTANCE_CONFIG,
+    DEFAULT_AUTO_STOP_CONFIG,
     DEFAULT_PROJECT_CONFIG,
     WorkspaceUserConfig,
 } from '../lib/config/workspace-config';
@@ -249,6 +250,63 @@ describe('workspace-config', () => {
             expect(DEFAULT_INSTANCE_CONFIG.instanceType).toBe('t3.medium');
             expect(DEFAULT_INSTANCE_CONFIG.volumeSize).toBe(80);
             expect(DEFAULT_INSTANCE_CONFIG.volumeType).toBe('gp3');
+        });
+    });
+
+    describe('DEFAULT_AUTO_STOP_CONFIG', () => {
+        test('デフォルト値が正しい', () => {
+            expect(DEFAULT_AUTO_STOP_CONFIG.cpuThreshold).toBe(5);
+            expect(DEFAULT_AUTO_STOP_CONFIG.cpuEvaluationMinutes).toBe(10);
+            expect(DEFAULT_AUTO_STOP_CONFIG.scheduledStopHour).toBe(23);
+            expect(DEFAULT_AUTO_STOP_CONFIG.scheduledStopMinute).toBe(0);
+        });
+    });
+
+    describe('validateAndParseConfig - autoStopConfig', () => {
+        test('autoStopConfigが省略された場合デフォルト値を使用', () => {
+            const rawConfig = {
+                users: [{ username: 'developer1' }],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.autoStopConfig).toEqual(DEFAULT_AUTO_STOP_CONFIG);
+        });
+
+        test('autoStopConfigの一部を指定した場合、残りはデフォルト値', () => {
+            const rawConfig = {
+                users: [{ username: 'developer1' }],
+                autoStopConfig: {
+                    cpuThreshold: 10,
+                    scheduledStopHour: 22,
+                },
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.autoStopConfig.cpuThreshold).toBe(10);
+            expect(config.autoStopConfig.cpuEvaluationMinutes).toBe(10); // デフォルト
+            expect(config.autoStopConfig.scheduledStopHour).toBe(22);
+            expect(config.autoStopConfig.scheduledStopMinute).toBe(0); // デフォルト
+        });
+
+        test('autoStopConfigを完全に指定', () => {
+            const rawConfig = {
+                users: [{ username: 'developer1' }],
+                autoStopConfig: {
+                    cpuThreshold: 15,
+                    cpuEvaluationMinutes: 20,
+                    scheduledStopHour: 21,
+                    scheduledStopMinute: 30,
+                },
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.autoStopConfig.cpuThreshold).toBe(15);
+            expect(config.autoStopConfig.cpuEvaluationMinutes).toBe(20);
+            expect(config.autoStopConfig.scheduledStopHour).toBe(21);
+            expect(config.autoStopConfig.scheduledStopMinute).toBe(30);
         });
     });
 });

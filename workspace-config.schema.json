@@ -56,6 +56,40 @@
                 }
             }
         },
+        "autoStopConfig": {
+            "type": "object",
+            "description": "自動停止設定",
+            "properties": {
+                "cpuThreshold": {
+                    "type": "number",
+                    "description": "CPU使用率閾値（%）- この値以下が続くと停止",
+                    "default": 5,
+                    "minimum": 1,
+                    "maximum": 100
+                },
+                "cpuEvaluationMinutes": {
+                    "type": "number",
+                    "description": "CPU監視期間（分）- この期間低負荷が続くと停止",
+                    "default": 10,
+                    "minimum": 5,
+                    "maximum": 60
+                },
+                "scheduledStopHour": {
+                    "type": "number",
+                    "description": "定時停止時刻（時、0-23、Asia/Tokyo）",
+                    "default": 23,
+                    "minimum": 0,
+                    "maximum": 23
+                },
+                "scheduledStopMinute": {
+                    "type": "number",
+                    "description": "定時停止時刻（分、0-59）",
+                    "default": 0,
+                    "minimum": 0,
+                    "maximum": 59
+                }
+            }
+        },
         "users": {
             "type": "array",
             "description": "ワークスペースユーザー一覧",

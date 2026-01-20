@@ -9,8 +9,10 @@ import { AutoStopConstruct } from '../constructs/auto-stop-construct';
 import {
     WorkspaceUserConfig,
     InstanceConfig,
+    AutoStopConfig,
     getInstanceConfig,
     DEFAULT_INSTANCE_CONFIG,
+    DEFAULT_AUTO_STOP_CONFIG,
 } from '../config/workspace-config';
 
 /**
@@ -27,6 +29,8 @@ export interface WorkspaceStackProps extends cdk.StackProps {
     readonly userConfig: WorkspaceUserConfig;
     /** デフォルトインスタンス設定 */
     readonly defaultInstanceConfig?: InstanceConfig;
+    /** 自動停止設定 */
+    readonly autoStopConfig?: AutoStopConfig;
 }
 
 /**
@@ -49,6 +53,7 @@ export class WorkspaceStack extends cdk.Stack {
         const { vpc, projectName, environment, userConfig } = props;
         const defaultConfig = props.defaultInstanceConfig || DEFAULT_INSTANCE_CONFIG;
         const instanceConfig = getInstanceConfig(userConfig, defaultConfig);
+        const autoStopConfig = props.autoStopConfig || DEFAULT_AUTO_STOP_CONFIG;
 
         // Security Construct
         const security = new SecurityConstruct(this, 'Security', {
@@ -89,10 +94,10 @@ export class WorkspaceStack extends cdk.Stack {
             projectName,
             environment,
             username: userConfig.username,
-            cpuThreshold: 5, // CPU使用率5%以下
-            cpuEvaluationPeriods: 2, // 10分間（5分 x 2）
-            scheduledStopHour: 23, // 毎日23時（JST）
-            scheduledStopMinute: 0,
+            cpuThreshold: autoStopConfig.cpuThreshold,
+            cpuEvaluationPeriods: Math.ceil(autoStopConfig.cpuEvaluationMinutes / 5), // 5分単位に変換
+            scheduledStopHour: autoStopConfig.scheduledStopHour,
+            scheduledStopMinute: autoStopConfig.scheduledStopMinute,
         });
 
         // Outputs
