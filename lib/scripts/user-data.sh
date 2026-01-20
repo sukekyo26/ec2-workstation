@@ -43,6 +43,7 @@ apt-get install -y \
     gnupg \
     lsb-release \
     software-properties-common \
+    uuid-runtime \
     build-essential \
     apt-transport-https \
     dnsutils \

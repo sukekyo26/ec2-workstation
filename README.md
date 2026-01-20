@@ -303,7 +303,7 @@ EC2起動時に以下のソフトウェアが自動でインストールされ�
 |---------|-------------|
 | **コンテナ** | Docker, Docker Compose |
 | **AWS** | AWS CLI v2 |
-| **開発ツール** | Git, vim, nano, curl, wget, jq, tree, htop |
+| **開発ツール** | Git, vim, nano, curl, wget, jq, tree, htop, uuidgen |
 | **ビルドツール** | build-essential |
 | **システム設定** | 4GB スワップ領域、タイムゾーン（Asia/Tokyo） |
 
