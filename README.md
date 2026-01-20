@@ -92,8 +92,8 @@ flowchart LR
 |---------|------|------|
 | IaC | AWS CDK (TypeScript) | 型安全なインフラ定義 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
-| インスタンス | t3.large (デフォルト) | 2vCPU / 8GB RAM |
-| ストレージ | EBS gp3 100GB | 高速I/O、コスト効率 |
+| インスタンス | t3.medium (デフォルト) | 2vCPU / 4GB RAM |
+| ストレージ | EBS gp3 80GB | 高速I/O、コスト効率 |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
 | パッケージ管理 | pnpm | 高速な依存関係管理 |
 
@@ -233,8 +233,8 @@ pnpm install
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
-    "instanceType": "t3.large",
-    "volumeSize": 100,
+    "instanceType": "t3.medium",
+    "volumeSize": 80,
     "volumeType": "gp3"
   },
   "users": [
@@ -261,8 +261,8 @@ pnpm install
 | `projectName` | | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
 | `environment` | | `dev` | 環境名（dev, staging, prod） |
 | `vpcCidr` | | `10.0.0.0/16` | VPCのCIDRブロック |
-| `defaultInstanceConfig.instanceType` | | `t3.large` | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | | `100` | EBSボリュームサイズ（GB） |
+| `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2インスタンスタイプ |
+| `defaultInstanceConfig.volumeSize` | | `80` | EBSボリュームサイズ（GB） |
 | `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
 | `users` | ✅ | - | ユーザー配列（1人以上必須） |
 | `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
@@ -454,10 +454,10 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 
 | リソース | スペック | 単価 | 月額コスト |
 |----------|---------|------|-----------|
-| EC2 (t3.large) | 2vCPU / 8GB | $0.1088/時間 | **$17.41** |
-| EBS (gp3) | 100GB | $0.096/GB/月 | **$9.60** |
+| EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/時間 | **$8.70** |
+| EBS (gp3) | 80GB | $0.096/GB/月 | **$7.68** |
 | データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
-| **小計（ユーザーごと）** | | | **約 $28/月** |
+| **小計（ユーザーごと）** | | | **約 $17.5/月** |
 
 ### 共有リソースコスト（チーム全体）
 
@@ -472,9 +472,9 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 
 | 規模 | 月額コスト (USD) | 月額コスト (JPY) |
 |------|-----------------|-----------------|
-| 1ユーザー | 約 $28 | 約 ¥4,200 |
-| 5ユーザー | 約 $141 | 約 ¥21,150 |
-| 10ユーザー | 約 $282 | 約 ¥42,300 |
+| 1ユーザー | 約 $17.5 | 約 ¥2,625 |
+| 5ユーザー | 約 $87.5 | 約 ¥13,125 |
+| 10ユーザー | 約 $175 | 約 ¥26,250 |
 
 ※ 1 USD = 150 JPY で計算
 
@@ -483,7 +483,7 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 | オプション | 効果 |
 |-----------|------|
 | Savings Plans (1年) | EC2 約30%割引 |
-| t3.medium に変更 | EC2コスト約50%削減 |
+| t3.small に変更 | EC2コスト約50%削減 |
 | インスタンス自動停止 | 未使用時間のEC2コスト削減 |
 
 ---

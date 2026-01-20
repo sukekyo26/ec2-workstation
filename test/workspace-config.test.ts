@@ -189,8 +189,8 @@ describe('workspace-config', () => {
             const result = getInstanceConfig(userConfig);
 
             expect(result).toEqual(DEFAULT_INSTANCE_CONFIG);
-            expect(result.instanceType).toBe('t3.large');
-            expect(result.volumeSize).toBe(100);
+            expect(result.instanceType).toBe('t3.medium');
+            expect(result.volumeSize).toBe(80);
             expect(result.volumeType).toBe('gp3');
         });
 
@@ -198,14 +198,14 @@ describe('workspace-config', () => {
             const userConfig: WorkspaceUserConfig = {
                 username: 'testuser',
                 instanceConfig: {
-                    instanceType: 't3.medium',
+                    instanceType: 't3.small',
                 },
             };
 
             const result = getInstanceConfig(userConfig);
 
-            expect(result.instanceType).toBe('t3.medium');
-            expect(result.volumeSize).toBe(100); // デフォルト
+            expect(result.instanceType).toBe('t3.small');
+            expect(result.volumeSize).toBe(80); // デフォルト
             expect(result.volumeType).toBe('gp3'); // デフォルト
         });
 
@@ -246,8 +246,8 @@ describe('workspace-config', () => {
 
     describe('DEFAULT_INSTANCE_CONFIG', () => {
         test('デフォルト値が正しい', () => {
-            expect(DEFAULT_INSTANCE_CONFIG.instanceType).toBe('t3.large');
-            expect(DEFAULT_INSTANCE_CONFIG.volumeSize).toBe(100);
+            expect(DEFAULT_INSTANCE_CONFIG.instanceType).toBe('t3.medium');
+            expect(DEFAULT_INSTANCE_CONFIG.volumeSize).toBe(80);
             expect(DEFAULT_INSTANCE_CONFIG.volumeType).toBe('gp3');
         });
     });

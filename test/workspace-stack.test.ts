@@ -47,9 +47,9 @@ describe('WorkspaceStack', () => {
             template.resourceCountIs('AWS::EC2::Instance', 1);
         });
 
-        test('デフォルトでt3.largeインスタンスが使用される', () => {
+        test('デフォルトでt3.mediumインスタンスが使用される', () => {
             template.hasResourceProperties('AWS::EC2::Instance', {
-                InstanceType: 't3.large',
+                InstanceType: 't3.medium',
             });
         });
 
@@ -101,13 +101,13 @@ describe('WorkspaceStack', () => {
             });
         });
 
-        test('デフォルトで100GBのボリュームサイズ', () => {
+        test('デフォルトで80GBのボリュームサイズ', () => {
             template.hasResourceProperties('AWS::EC2::Instance', {
                 BlockDeviceMappings: Match.arrayWith([
                     Match.objectLike({
                         DeviceName: '/dev/sda1',
                         Ebs: Match.objectLike({
-                            VolumeSize: 100,
+                            VolumeSize: 80,
                         }),
                     }),
                 ]),

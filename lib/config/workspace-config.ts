@@ -10,7 +10,7 @@ import * as path from 'path';
  * EC2インスタンスのスペック設定
  */
 export interface InstanceConfig {
-  /** インスタンスタイプ (例: t3.large) */
+  /** インスタンスタイプ (例: t3.medium) */
   readonly instanceType: string;
   /** EBSボリュームサイズ (GB) */
   readonly volumeSize: number;
@@ -50,8 +50,8 @@ export interface ProjectConfig {
  * デフォルトのインスタンス設定
  */
 export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
-  instanceType: 't3.large',
-  volumeSize: 100,
+  instanceType: 't3.medium',
+  volumeSize: 80,
   volumeType: 'gp3',
 };
 

@@ -36,12 +36,12 @@
                 "instanceType": {
                     "type": "string",
                     "description": "インスタンスタイプ",
-                    "default": "t3.large"
+                    "default": "t3.medium"
                 },
                 "volumeSize": {
                     "type": "number",
                     "description": "EBSボリュームサイズ (GB)",
-                    "default": 100,
+                    "default": 80,
                     "minimum": 20,
                     "maximum": 1000
                 },

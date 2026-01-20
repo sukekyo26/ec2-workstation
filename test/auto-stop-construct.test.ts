@@ -28,7 +28,7 @@ describe('AutoStopConstruct', () => {
         // テスト用EC2インスタンスを作成
         instance = new ec2.Instance(stack, 'TestInstance', {
             vpc,
-            instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE),
+            instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
             machineImage: ec2.MachineImage.latestAmazonLinux2023(),
         });
 
@@ -191,7 +191,7 @@ describe('AutoStopConstruct', () => {
 
             const defaultInstance = new ec2.Instance(defaultStack, 'DefaultInstance', {
                 vpc: defaultVpc,
-                instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.LARGE),
+                instanceType: ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MEDIUM),
                 machineImage: ec2.MachineImage.latestAmazonLinux2023(),
             });
 

@@ -4,8 +4,8 @@
     "environment": "dev",
     "vpcCidr": "10.0.0.0/16",
     "defaultInstanceConfig": {
-        "instanceType": "t3.large",
-        "volumeSize": 100,
+        "instanceType": "t3.medium",
+        "volumeSize": 80,
         "volumeType": "gp3"
     },
     "users": [
