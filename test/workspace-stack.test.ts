@@ -147,7 +147,8 @@ describe('WorkspaceStack', () => {
         });
 
         test('IAMロールが作成される', () => {
-            template.resourceCountIs('AWS::IAM::Role', 1);
+            // EC2インスタンスロール + EventBridge Schedulerロール
+            template.resourceCountIs('AWS::IAM::Role', 2);
         });
 
         test('インスタンスプロファイルが作成される', () => {

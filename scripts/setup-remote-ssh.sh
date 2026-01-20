@@ -154,21 +154,27 @@ echo -e "${CYAN}Setting file permissions...${NC}"
 chmod 600 "$SECRET_KEY_PATH"
 
 # ============================================
+# Copy auto-start script to .ssh directory
+# ============================================
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+AUTO_START_SCRIPT="start-ec2-and-wait.sh"
+AUTO_START_SCRIPT_PATH="$SSH_CONFIG_DIR/$AUTO_START_SCRIPT"
+
+echo -e "${CYAN}Copying auto-start script...${NC}"
+cp "$SCRIPT_DIR/$AUTO_START_SCRIPT" "$AUTO_START_SCRIPT_PATH"
+chmod +x "$AUTO_START_SCRIPT_PATH"
+echo -e "${GREEN}Created: $AUTO_START_SCRIPT_PATH${NC}"
+
+# ============================================
 # Add configuration to SSH config file
 # ============================================
 echo ""
 echo -e "${CYAN}Updating SSH config file...${NC}"
 
-# SSHコマンドをOSに応じて設定
-if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS
-    PROXY_COMMAND="ProxyCommand sh -c \"aws ssm start-session --region $REGION --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p\""
-else
-    # Linux
-    PROXY_COMMAND="ProxyCommand sh -c \"aws ssm start-session --region $REGION --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p\""
-fi
+# ProxyCommandを自動起動スクリプトに設定
+PROXY_COMMAND="ProxyCommand \"$AUTO_START_SCRIPT_PATH\" %h $REGION %p"
 
-SSH_CONFIG_ENTRY="# Remote development EC2
+SSH_CONFIG_ENTRY="# Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
    HostName $INSTANCE_ID
    User $USER

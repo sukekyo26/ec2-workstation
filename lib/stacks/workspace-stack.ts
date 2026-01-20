@@ -5,6 +5,7 @@ import * as path from 'path';
 import { Construct } from 'constructs';
 import { SecurityConstruct } from '../constructs/security-construct';
 import { Ec2Construct } from '../constructs/ec2-construct';
+import { AutoStopConstruct } from '../constructs/auto-stop-construct';
 import {
     WorkspaceUserConfig,
     InstanceConfig,
@@ -81,6 +82,18 @@ export class WorkspaceStack extends cdk.Stack {
 
         this.instanceId = ec2Instance.instanceId;
         this.sessionLogGroupName = security.sessionLogGroup.logGroupName;
+
+        // Auto Stop Construct（自動停止機能）
+        const autoStop = new AutoStopConstruct(this, 'AutoStop', {
+            instance: ec2Instance.instance,
+            projectName,
+            environment,
+            username: userConfig.username,
+            cpuThreshold: 5, // CPU使用率5%以下
+            cpuEvaluationPeriods: 2, // 10分間（5分 x 2）
+            scheduledStopHour: 23, // 毎日23時（JST）
+            scheduledStopMinute: 0,
+        });
 
         // Outputs
         new cdk.CfnOutput(this, 'InstanceId', {

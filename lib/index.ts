@@ -6,6 +6,7 @@ export { WorkspaceStack } from './stacks/workspace-stack';
 export { VpcConstruct } from './constructs/vpc-construct';
 export { SecurityConstruct } from './constructs/security-construct';
 export { Ec2Construct } from './constructs/ec2-construct';
+export { AutoStopConstruct } from './constructs/auto-stop-construct';
 
 // Re-export config
 export * from './config/workspace-config';

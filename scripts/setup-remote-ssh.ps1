@@ -157,23 +157,35 @@ icacls $SECRET_KEY_PATH /inheritance:r | Out-Null
 icacls $SECRET_KEY_PATH /grant "$($env:USERNAME):F" | Out-Null
 
 # ============================================
+# Copy auto-start script to .ssh directory
+# ============================================
+$SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
+$AUTO_START_SCRIPT = "start-ec2-and-wait.ps1"
+$AUTO_START_SCRIPT_PATH = "$SSH_CONFIG_DIR\$AUTO_START_SCRIPT"
+
+Write-Host "Copying auto-start script..." -ForegroundColor Cyan
+Copy-Item -Path "$SCRIPT_DIR\$AUTO_START_SCRIPT" -Destination $AUTO_START_SCRIPT_PATH -Force
+Write-Host "Created: $AUTO_START_SCRIPT_PATH" -ForegroundColor Green
+
+# ============================================
 # Convert path to Unix-style for SSH config
 # ============================================
 $SECRET_KEY_PATH_UNIX = $SECRET_KEY_PATH -replace '\\', '/'
+$AUTO_START_SCRIPT_PATH_UNIX = $AUTO_START_SCRIPT_PATH -replace '\\', '/'
 
 # ============================================
 # Add configuration to SSH config file
 # ============================================
 Write-Host "`nUpdating SSH config file..." -ForegroundColor Cyan
 $sshConfigContent = @"
-# Remote development EC2
+# Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
    HostName $INSTANCE_ID
    User $USER
    IdentityFile $SECRET_KEY_PATH_UNIX
    IdentitiesOnly yes
    ServerAliveInterval 60
-   ProxyCommand powershell -Command "& 'C:\Program Files\Amazon\AWSCLIV2\aws.exe' ssm start-session --region $REGION --target %h --document-name AWS-StartSSHSession --parameters portNumber=%p"
+   ProxyCommand powershell -ExecutionPolicy Bypass -File "$AUTO_START_SCRIPT_PATH_UNIX" %h $REGION %p
 "@
 
 Add-Content -Path $SSH_CONFIG_PATH -Value $sshConfigContent

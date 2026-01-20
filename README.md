@@ -144,6 +144,45 @@ flowchart TB
 | **IMDSv2強制** | インスタンスメタデータサービスv2を強制（SSRF対策） |
 | **リソースタグ** | `Owner`タグでリソースを識別（管理・フィルタリング用） |
 
+### 自動起動・自動停止
+
+コスト削減のため、EC2インスタンスの自動起動・自動停止機能を提供しています。
+
+```mermaid
+flowchart TB
+    subgraph AutoStart["🚀 自動起動"]
+        direction TB
+        A1["VS Code Remote-SSH接続"]
+        A2["ProxyCommandでインスタンス状態確認"]
+        A3{"インスタンス<br/>起動中?"}
+        A4["インスタンス起動<br/>(aws ec2 start-instances)"]
+        A5["起動完了まで待機<br/>(aws ec2 wait instance-running)"]
+        A6["SSMセッション開始"]
+
+        A1 --> A2 --> A3
+        A3 -->|"No"| A4 --> A5 --> A6
+        A3 -->|"Yes"| A6
+    end
+
+    subgraph AutoStop["🛑 自動停止"]
+        direction TB
+        B1["CPU監視<br/>(CloudWatch Alarm)"]
+        B2["定時停止<br/>(EventBridge Scheduler)"]
+        B3["EC2インスタンス停止"]
+
+        B1 -->|"CPU < 5%<br/>10分間"| B3
+        B2 -->|"毎日23:00 JST"| B3
+    end
+```
+
+| 機能 | 方式 | 説明 |
+|------|------|------|
+| **自動起動** | ProxyCommand | SSH接続時にインスタンスが停止中なら自動起動し、起動完了まで待機 |
+| **CPU監視停止** | CloudWatch Alarm | CPU使用率が5%未満の状態が10分間続くと自動停止 |
+| **定時停止** | EventBridge Scheduler | 毎日23:00（JST）に自動停止 |
+
+> 💡 **コスト削減効果**: 使用していない時間帯のEC2料金を削減できます。インスタンスが停止中でもEBS料金は発生しますが、EC2の時間課金は発生しません。
+
 ---
 
 ## 📋 前提条件
@@ -161,7 +200,7 @@ flowchart TB
 
 - AWSアカウント
 - IAMユーザーまたはルートユーザー
-  - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + CDKデプロイ権限
+  - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + CDKデプロイ権限 + EC2起動権限
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
 - CDK Bootstrap済み（`cdk bootstrap`）
@@ -353,7 +392,8 @@ aws ec2 describe-instances \
 - SSHホスト名の設定（デフォルト: `ec2`）
 - AWSリージョンの設定（デフォルト: `ap-northeast-1`）
 - AWS SSM Parameter Storeから秘密鍵を取得
-- `~/.ssh/config` にSSM経由の接続設定を追加
+- 自動起動スクリプト（`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`）を `~/.ssh/` にコピー
+- `~/.ssh/config` にSSM経由の接続設定を追加（ProxyCommandで自動起動を有効化）
 
 #### 3. VS Codeから接続
 
@@ -362,6 +402,26 @@ aws ec2 describe-instances \
 3. 設定したホスト名（例: `ec2`）を選択
 4. プラットフォーム選択画面が表示されたら **Linux** を選択
 5. 接続完了
+
+> 💡 **自動起動機能**: VS Code接続時、EC2インスタンスが停止中の場合は自動的に起動してSSM Agent接続完了まで待機します（最大5分）。初回接続時は起動に2-3分かかる場合があります。
+
+#### 4. 手動でEC2インスタンスを起動（オプション）
+
+VS Code接続前に手動で起動したい場合は、以下のスクリプトを実行できます。
+
+**Windows:**
+
+```powershell
+.\scripts\start-ec2.ps1
+```
+
+**Linux/Mac:**
+
+```bash
+./scripts/start-ec2.sh
+```
+
+スクリプトは対話的にインスタンスIDとリージョンを尋ね、起動とSSM Agent接続完了まで待機します。
 
 ---
 
@@ -438,7 +498,8 @@ ec2-remote-workspace/
 │   ├── constructs/
 │   │   ├── vpc-construct.ts      # VPC構成
 │   │   ├── security-construct.ts # セキュリティグループ・IAM
-│   │   └── ec2-construct.ts      # EC2インスタンス
+│   │   ├── ec2-construct.ts      # EC2インスタンス
+│   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
 │   ├── stacks/
 │   │   ├── network-stack.ts      # 共有ネットワークスタック
 │   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
@@ -448,7 +509,11 @@ ec2-remote-workspace/
 │       └── user-data.sh          # EC2初期化スクリプト
 ├── scripts/
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
-│   └── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
+│   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
+│   ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
+│   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
+│   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
+│   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
 ├── test/                         # テストコード
 ├── workspace-config.json         # ユーザー・プロジェクト設定
 ├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
