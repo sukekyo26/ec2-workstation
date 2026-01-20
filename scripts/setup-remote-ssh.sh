@@ -180,6 +180,8 @@ Host $SSH_HOST
    User $USER
    IdentityFile $SECRET_KEY_PATH
    IdentitiesOnly yes
+   StrictHostKeyChecking no
+   UserKnownHostsFile /dev/null
    ServerAliveInterval 60
    $PROXY_COMMAND
 "

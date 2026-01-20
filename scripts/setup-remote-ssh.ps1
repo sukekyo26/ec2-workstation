@@ -184,6 +184,8 @@ Host $SSH_HOST
    User $USER
    IdentityFile $SECRET_KEY_PATH_UNIX
    IdentitiesOnly yes
+   StrictHostKeyChecking no
+   UserKnownHostsFile /dev/null
    ServerAliveInterval 60
    ProxyCommand powershell -ExecutionPolicy Bypass -File "$AUTO_START_SCRIPT_PATH_UNIX" %h $REGION %p
 "@
