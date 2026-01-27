@@ -23,15 +23,42 @@ param(
     [string]$PortNumber
 )
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = "Continue"
 
 # AWS CLI path
 $awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
 
+# stderr writer for ProxyCommand environment (UTF8 without BOM)
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$stderrWriter = [System.IO.StreamWriter]::new([Console]::OpenStandardError(), $utf8NoBom)
+$stderrWriter.AutoFlush = $true
+$stderrWriter.NewLine = "`n"
+
+function Write-Stderr {
+    param([string]$Message)
+    $stderrWriter.WriteLine($Message)
+}
+
 function Write-Log {
     param([string]$Message)
-    Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message" -ForegroundColor Cyan | Out-Null
-    [Console]::Error.WriteLine("[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message")
+    Write-Stderr "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
+}
+
+function Write-AwsAuthenticationError {
+    Write-Stderr ""
+    Write-Stderr "============================================"
+    Write-Stderr "ERROR: AWS authentication failed"
+    Write-Stderr "============================================"
+    Write-Stderr ""
+    Write-Stderr "Your AWS credentials may be expired or not configured."
+    Write-Stderr ""
+    Write-Stderr "Please run the following command to authenticate:"
+    Write-Stderr ""
+    Write-Stderr "    aws login"
+    Write-Stderr ""
+    Write-Stderr "Then try connecting again."
+    Write-Stderr "============================================"
+    Write-Stderr ""
 }
 
 function Wait-SSMAgentReady {
@@ -60,7 +87,8 @@ function Wait-SSMAgentReady {
         Start-Sleep -Seconds $RetryIntervalSeconds
     }
 
-    throw "Timeout waiting for SSM Agent to become ready after $($MaxRetries * $RetryIntervalSeconds) seconds"
+    Write-Stderr "Timeout waiting for SSM Agent to become ready after $($MaxRetries * $RetryIntervalSeconds) seconds"
+    exit 1
 }
 
 try {
@@ -72,7 +100,10 @@ try {
         --output text 2>&1
 
     if ($LASTEXITCODE -ne 0) {
-        throw "Failed to get instance state: $state"
+        # 認証エラーの可能性があるためメッセージを表示
+        Write-AwsAuthenticationError
+        Write-Stderr "Failed to get instance state: $state"
+        exit 1
     }
 
     Write-Log "Instance $InstanceId state: $state"
@@ -86,7 +117,8 @@ try {
             --region $Region 2>&1
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Failed to start instance: $result"
+            Write-Stderr "Failed to start instance: $result"
+            exit 1
         }
 
         Write-Log "Waiting for instance to be running..."
@@ -96,7 +128,8 @@ try {
             --region $Region 2>&1
 
         if ($LASTEXITCODE -ne 0) {
-            throw "Timeout waiting for instance to start"
+            Write-Stderr "Timeout waiting for instance to start"
+            exit 1
         }
 
         # SSM Agentが接続されるまで待機
@@ -154,6 +187,6 @@ try {
         --parameters "portNumber=$PortNumber"
 
 } catch {
-    [Console]::Error.WriteLine("Error: $_")
+    Write-Stderr "Error: $_"
     exit 1
 }

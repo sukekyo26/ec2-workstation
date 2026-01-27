@@ -177,7 +177,26 @@ $AUTO_START_SCRIPT_PATH_UNIX = $AUTO_START_SCRIPT_PATH -replace '\\', '/'
 # Add configuration to SSH config file
 # ============================================
 Write-Host "`nUpdating SSH config file..." -ForegroundColor Cyan
-$sshConfigContent = @"
+
+# Remove existing host entry if exists
+if (Test-Path $SSH_CONFIG_PATH) {
+    $configContent = [System.IO.File]::ReadAllText($SSH_CONFIG_PATH)
+    # Normalize line endings to LF
+    $configContent = $configContent -replace "`r`n", "`n"
+
+    # Remove existing entry for the same host (including comment line above it)
+    $pattern = "(?m)^# Remote development EC2.*`n^Host $SSH_HOST`n(?:^   .+`n)*"
+    if ($configContent -match $pattern) {
+        Write-Host "Removing existing configuration for '$SSH_HOST'..." -ForegroundColor Yellow
+        $configContent = $configContent -replace $pattern, ""
+        # Remove trailing empty lines
+        $configContent = $configContent.TrimEnd("`n") + "`n"
+    }
+} else {
+    $configContent = ""
+}
+
+$sshConfigEntry = @"
 # Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
    HostName $INSTANCE_ID
@@ -190,7 +209,11 @@ Host $SSH_HOST
    ProxyCommand powershell -ExecutionPolicy Bypass -File "$AUTO_START_SCRIPT_PATH_UNIX" %h $REGION %p
 "@
 
-Add-Content -Path $SSH_CONFIG_PATH -Value $sshConfigContent
+# Append new entry
+$newContent = $configContent + $sshConfigEntry + "`n"
+
+# Write with LF line endings
+[System.IO.File]::WriteAllText($SSH_CONFIG_PATH, $newContent, [System.Text.UTF8Encoding]::new($false))
 Write-Host "Updated: $SSH_CONFIG_PATH" -ForegroundColor Green
 
 Write-Host "`n✓ Configuration complete!" -ForegroundColor Green

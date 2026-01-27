@@ -21,6 +21,24 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >&2
 }
 
+# AWS認証エラーメッセージを表示
+show_aws_authentication_error() {
+    echo "" >&2
+    echo "============================================" >&2
+    echo "ERROR: AWS authentication failed" >&2
+    echo "============================================" >&2
+    echo "" >&2
+    echo "Your AWS credentials may be expired or not configured." >&2
+    echo "" >&2
+    echo "Please run the following command to authenticate:" >&2
+    echo "" >&2
+    echo "    aws login" >&2
+    echo "" >&2
+    echo "Then try connecting again." >&2
+    echo "============================================" >&2
+    echo "" >&2
+}
+
 # SSM Agentの接続状態を確認して待機
 wait_ssm_agent_ready() {
     local instance_id="$1"
@@ -48,7 +66,7 @@ wait_ssm_agent_ready() {
 
     log "Error: Timeout waiting for SSM Agent to become ready after $((max_retries * retry_interval)) seconds"
     return 1
-fi
+}
 
 # EC2インスタンスの状態を確認
 if ! STATE=$(aws ec2 describe-instances \
@@ -56,6 +74,8 @@ if ! STATE=$(aws ec2 describe-instances \
     --region "$REGION" \
     --query "Reservations[0].Instances[0].State.Name" \
     --output text 2>&1); then
+    # 認証エラーの可能性があるためメッセージを表示
+    show_aws_authentication_error
     log "Error: Failed to get instance state: $STATE"
     exit 1
 fi

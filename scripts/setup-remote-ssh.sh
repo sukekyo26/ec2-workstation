@@ -171,6 +171,35 @@ echo -e "${GREEN}Created: $AUTO_START_SCRIPT_PATH${NC}"
 echo ""
 echo -e "${CYAN}Updating SSH config file...${NC}"
 
+# Remove existing host entry if exists
+if [ -f "$SSH_CONFIG_PATH" ]; then
+    # Check if host already exists
+    if grep -q "^Host $SSH_HOST$" "$SSH_CONFIG_PATH"; then
+        echo -e "${YELLOW}Removing existing configuration for '$SSH_HOST'...${NC}"
+        # Create temp file without the existing entry
+        # Remove comment line + Host line + all following lines starting with spaces until next non-space line or EOF
+        awk -v host="$SSH_HOST" '
+            BEGIN { skip = 0; prev_comment = "" }
+            /^# Remote development EC2/ { prev_comment = $0; next }
+            /^Host / {
+                if ($2 == host) {
+                    skip = 1
+                    prev_comment = ""
+                    next
+                } else {
+                    if (prev_comment != "") print prev_comment
+                    prev_comment = ""
+                    skip = 0
+                }
+            }
+            /^   / { if (skip) next }
+            /^[^ ]/ { if (skip && !/^Host /) skip = 0 }
+            { if (!skip) { if (prev_comment != "") { print prev_comment; prev_comment = "" } print } }
+        ' "$SSH_CONFIG_PATH" > "$SSH_CONFIG_PATH.tmp"
+        mv "$SSH_CONFIG_PATH.tmp" "$SSH_CONFIG_PATH"
+    fi
+fi
+
 # ProxyCommandを自動起動スクリプトに設定
 PROXY_COMMAND="ProxyCommand \"$AUTO_START_SCRIPT_PATH\" %h $REGION %p"
 
