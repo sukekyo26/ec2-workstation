@@ -1,27 +1,27 @@
 {
-    "$schema": "./workspace-config.schema.json",
-    "projectName": "ec2-remote-workspace",
-    "environment": "dev",
-    "vpcCidr": "10.0.0.0/16",
-    "defaultInstanceConfig": {
-        "instanceType": "t3.medium",
-        "volumeSize": 80,
-        "volumeType": "gp3"
+  "$schema": "./workspace-config.schema.json",
+  "projectName": "ec2-remote-workspace",
+  "environment": "dev",
+  "vpcCidr": "10.0.0.0/16",
+  "defaultInstanceConfig": {
+    "instanceType": "t3.medium",
+    "volumeSize": 80,
+    "volumeType": "gp3"
+  },
+  "autoStopConfig": {
+    "cpuThreshold": 3,
+    "cpuEvaluationMinutes": 30,
+    "scheduledStopHour": 23,
+    "scheduledStopMinute": 0
+  },
+  "users": [
+    {
+      "username": "developer1",
+      "displayName": "Developer One"
     },
-    "autoStopConfig": {
-        "cpuThreshold": 5,
-        "cpuEvaluationMinutes": 10,
-        "scheduledStopHour": 23,
-        "scheduledStopMinute": 0
-    },
-    "users": [
-        {
-            "username": "developer1",
-            "displayName": "Developer One"
-        },
-        {
-            "username": "developer2",
-            "displayName": "Developer Two"
-        }
-    ]
+    {
+      "username": "developer2",
+      "displayName": "Developer Two"
+    }
+  ]
 }
