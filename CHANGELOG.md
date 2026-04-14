@@ -1,0 +1,33 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Add modular CDK architecture with separate VPC, Security, EC2, and AutoStop constructs
+- Add JSON-based workspace configuration (`workspace-config.json`) with JSON Schema validation
+- Add NetworkStack (shared VPC/Subnet/IGW) and WorkspaceStack (per-user EC2) separation
+- Add SessionManager-based secure connectivity (no SSH port exposure, IAM authentication)
+- Add Security Group with all inbound blocked and outbound limited to HTTPS/HTTP/DNS
+- Add EBS encryption with AWS managed keys and IMDSv2 enforcement
+- Add VPC Flow Logs (REJECT only) with 1-month retention for security audit compliance
+- Add SSH key pair generation and storage in SSM Parameter Store for Remote-SSH connectivity
+- Add setup scripts for VS Code Remote-SSH (PowerShell for Windows, shell for Linux/Mac)
+- Add auto-start feature via ProxyCommand that starts stopped EC2 instances on SSH connection
+- Add auto-stop features with CloudWatch CPU alarm and EventBridge scheduled stop
+- Add customizable auto-stop configuration (`autoStopConfig`) in `workspace-config.json`
+- Add user-data script with Docker, AWS CLI v2, Git, and development tools pre-installation
+- Add SSH host key checking skip configuration for seamless remote connections
+- Add per-user instance configuration override support
+- Add comprehensive test coverage for all constructs and stacks
+
+### Changed
+
+- Change default instance type from t3.large to t3.medium and EBS volume from 100GB to 80GB
+- Change EBS volume to delete on instance termination
+- Migrate to pnpm as primary package manager
