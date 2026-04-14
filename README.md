@@ -1,28 +1,30 @@
+> 🇯🇵 [日本語版はこちら](docs/README.ja.md)
+
 # EC2 Remote Workspace
 
-AWS CDKを使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。
+A project that builds a secure Linux development environment on EC2 using AWS CDK.
 
-## 📋 プロジェクト概要
+## 📋 Project Overview
 
-### 主な特徴
+### Key Features
 
-- **SessionManager経由のセキュアな接続** - SSH(22)ポートを開放せず、IAM認証でセキュアにアクセス
-- **チーム開発対応** - 設定ファイル（`workspace-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
-- **DevContainer対応** - Docker環境がプリインストールされており、VS Code DevContainerでの開発が可能
-- **Infrastructure as Code** - AWS CDKによる再現可能なインフラ構築
+- **Secure Connection via SessionManager** - Access securely with IAM authentication without opening SSH (22) port
+- **Team Development Support** - Define users in a configuration file (`workspace-config.json`) and provide each member with an independent EC2 environment
+- **DevContainer Support** - Docker environment is pre-installed, enabling development with VS Code DevContainers
+- **Infrastructure as Code** - Reproducible infrastructure provisioning with AWS CDK
 
-### 想定ユースケース
+### Use Cases
 
-| ケース | 説明 |
-|--------|------|
-| **ローカルPCに制限がある場合** | 管理者権限なし、WSL使用不可、社内ポリシーでの制限など |
-| **チーム開発環境の統一** | 全メンバーが同一構成の開発環境を使用 |
-| **セキュアなリモート開発** | SSH不使用、IAM認証、監査ログ対応 |
-| **高スペックな開発環境が必要** | ローカルPCよりもパワフルなEC2インスタンスを使用 |
+| Case | Description |
+|------|-------------|
+| **Limited Local PC** | No admin privileges, WSL unavailable, corporate policy restrictions, etc. |
+| **Unified Team Development Environment** | All members use identically configured development environments |
+| **Secure Remote Development** | No SSH, IAM authentication, audit logging |
+| **High-Spec Development Environment Needed** | Use EC2 instances more powerful than local PCs |
 
 ---
 
-## 🏗️ アーキテクチャ
+## 🏗️ Architecture
 
 ```mermaid
 flowchart TB
@@ -35,19 +37,19 @@ flowchart TB
             IGW["🌐 Internet Gateway"]
         end
         SSM["AWS Systems Manager<br/>Session Manager"]
-        CW["CloudWatch Logs<br/>セッションログ"]
+        CW["CloudWatch Logs<br/>Session Logs"]
     end
 
-    subgraph Local["ローカルPC"]
+    subgraph Local["Local PC"]
         VSCode["VS Code<br/>+ Remote-SSH"]
     end
 
     VSCode -->|"HTTPS (443)<br/>SessionManager"| SSM
-    SSM -->|"IAM認証"| EC2A
-    SSM -->|"IAM認証"| EC2B
-    SSM -->|"監査ログ"| CW
-    EC2A & EC2B -->|"アウトバウンド<br/>HTTPS/HTTP/DNS"| IGW
-    IGW --> Internet["🌍 Internet<br/>apt, docker pull, git等"]
+    SSM -->|"IAM Auth"| EC2A
+    SSM -->|"IAM Auth"| EC2B
+    SSM -->|"Audit Logs"| CW
+    EC2A & EC2B -->|"Outbound<br/>HTTPS/HTTP/DNS"| IGW
+    IGW --> Internet["🌍 Internet<br/>apt, docker pull, git, etc."]
 
     style EC2A fill:#ff9900,color:#fff
     style EC2B fill:#ff9900,color:#fff
@@ -55,11 +57,11 @@ flowchart TB
     style VPC fill:#f0f0f0
 ```
 
-### リソース構成
+### Resource Structure
 
 ```mermaid
 flowchart LR
-    subgraph NetworkStack["📦 Network Stack (共有)"]
+    subgraph NetworkStack["📦 Network Stack (Shared)"]
         VPC["VPC"]
         Subnet["Public Subnet"]
         IGW["Internet Gateway"]
@@ -86,147 +88,147 @@ flowchart LR
 
 ---
 
-## 🔧 技術スタック
+## 🔧 Technology Stack
 
-| カテゴリ | 技術 | 説明 |
-|---------|------|------|
-| IaC | AWS CDK (TypeScript) | 型安全なインフラ定義 |
-| OS | Ubuntu 24.04 LTS | 2029年までサポート |
-| インスタンス | t3.medium (デフォルト) | 2vCPU / 4GB RAM |
-| ストレージ | EBS gp3 80GB | 高速I/O、コスト効率 |
-| 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
-| パッケージ管理 | pnpm | 高速な依存関係管理 |
+| Category | Technology | Description |
+|----------|-----------|-------------|
+| IaC | AWS CDK (TypeScript) | Type-safe infrastructure definitions |
+| OS | Ubuntu 24.04 LTS | Supported until 2029 |
+| Instance | t3.medium (default) | 2vCPU / 4GB RAM |
+| Storage | EBS gp3 80GB | High-speed I/O, cost-efficient |
+| Connectivity | SSM SessionManager | No SSH required, IAM authentication |
+| Package Manager | pnpm | Fast dependency management |
 
-### Public Subnet採用について
+### Why Public Subnet?
 
-一般的にはPrivate Subnet + NAT Gatewayがベストプラクティスですが、本プロジェクトでは**Public Subnet**を採用しています。
+While Private Subnet + NAT Gateway is generally considered best practice, this project uses a **Public Subnet**.
 
-| 項目 | 説明 |
-|------|------|
-| **コスト削減** | NAT Gateway ($45/月) + VPC Endpoints ($30/月) = **月$75削減** |
-| **セキュリティ担保** | セキュリティグループで**全インバウンドをブロック**（SSHポート含む）<br/>アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
-| **IAM認証** | SessionManager接続にはIAM認証が必須 |
-| **監査ログ** | 全セッションをCloudWatch Logsに記録 |
+| Item | Description |
+|------|-------------|
+| **Cost Reduction** | NAT Gateway ($45/mo) + VPC Endpoints ($30/mo) = **$75/mo savings** |
+| **Security Assurance** | Security Group **blocks all inbound traffic** (including SSH port)<br/>Outbound: Only HTTPS (443), HTTP (80), DNS (53) allowed |
+| **IAM Authentication** | IAM authentication is required for SessionManager connections |
+| **Audit Logs** | All sessions are logged to CloudWatch Logs |
 
-> ⚠️ パブリックIPが付与されますが、セキュリティグループで全インバウンドをブロックするため、外部から直接接続することはできません。
+> ⚠️ A public IP is assigned, but since the Security Group blocks all inbound traffic, direct external connections are not possible.
 
-### VPC/Subnet共有設計
+### VPC/Subnet Shared Design
 
-VPCとSubnetはチームメンバー間で共有し、EC2インスタンスのみ個人ごとに分離します。
+The VPC and Subnet are shared among team members, with only EC2 instances isolated per individual.
 
-| リソース | 共有/分離 | 理由 |
-|----------|----------|------|
-| VPC | 共有 | コスト削減、管理容易 |
-| Public Subnet | 共有 | 個別作成の必要なし |
-| EC2インスタンス | **分離** | 完全に独立した開発環境 |
-| セキュリティグループ | **分離** | インスタンスごとの通信制御 |
-| IAMロール | **分離** | 最小権限の原則 |
+| Resource | Shared/Isolated | Reason |
+|----------|----------------|--------|
+| VPC | Shared | Cost reduction, easier management |
+| Public Subnet | Shared | No need for individual creation |
+| EC2 Instance | **Isolated** | Fully independent development environment |
+| Security Group | **Isolated** | Per-instance traffic control |
+| IAM Role | **Isolated** | Principle of least privilege |
 
-### セキュリティ
+### Security
 
 ```mermaid
 flowchart TB
-    subgraph Security["🔐 多層のセキュリティ"]
-        L1["1️⃣ IAM認証<br/>SessionManager接続時に必須"]
-        L2["2️⃣ セキュリティグループ<br/>全インバウンドブロック"]
-        L3["3️⃣ 監査ログ<br/>VPC Flow Logs & Session Logs"]
+    subgraph Security["🔐 Multi-Layer Security"]
+        L1["1️⃣ IAM Authentication<br/>Required for SessionManager connections"]
+        L2["2️⃣ Security Group<br/>All inbound traffic blocked"]
+        L3["3️⃣ Audit Logs<br/>VPC Flow Logs & Session Logs"]
     end
     L1 --> L2 --> L3
 ```
 
-| セキュリティ層 | 説明 |
-|---------------|------|
-| **IAM認証** | SessionManager接続にはAWS認証情報が必要 |
-| **セキュリティグループ** | インバウンド：全拒否、アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
-| **VPC Flow Logs** | 拒否されたトラフィックをCloudWatch Logsに記録（セキュリティ監査用、保持期間：1ヶ月） |
-| **セッションログ** | SessionManagerの全セッションをCloudWatch Logsに記録 |
-| **EBS暗号化** | 全ボリュームをAWS管理キーで暗号化 |
-| **IMDSv2強制** | インスタンスメタデータサービスv2を強制（SSRF対策） |
-| **リソースタグ** | `Owner`タグでリソースを識別（管理・フィルタリング用） |
+| Security Layer | Description |
+|---------------|-------------|
+| **IAM Authentication** | AWS credentials are required for SessionManager connections |
+| **Security Group** | Inbound: All denied, Outbound: Only HTTPS (443), HTTP (80), DNS (53) allowed |
+| **VPC Flow Logs** | Rejected traffic is logged to CloudWatch Logs (for security auditing, retention: 1 month) |
+| **Session Logs** | All SessionManager sessions are logged to CloudWatch Logs |
+| **EBS Encryption** | All volumes are encrypted with AWS managed keys |
+| **IMDSv2 Enforcement** | Instance Metadata Service v2 is enforced (SSRF protection) |
+| **Resource Tags** | Resources are identified by the `Owner` tag (for management and filtering) |
 
-### 自動起動・自動停止
+### Auto Start / Auto Stop
 
-コスト削減のため、EC2インスタンスの自動起動・自動停止機能を提供しています。
+Auto start and auto stop features for EC2 instances are provided to reduce costs.
 
 ```mermaid
 flowchart TB
-    subgraph AutoStart["🚀 自動起動"]
+    subgraph AutoStart["🚀 Auto Start"]
         direction TB
-        A1["VS Code Remote-SSH接続"]
-        A2["ProxyCommandでインスタンス状態確認"]
-        A3{"インスタンス<br/>起動中?"}
-        A4["インスタンス起動<br/>(aws ec2 start-instances)"]
-        A5["起動完了まで待機<br/>(aws ec2 wait instance-running)"]
-        A6["SSMセッション開始"]
+        A1["VS Code Remote-SSH Connection"]
+        A2["Check instance state via ProxyCommand"]
+        A3{"Instance<br/>running?"}
+        A4["Start instance<br/>(aws ec2 start-instances)"]
+        A5["Wait until running<br/>(aws ec2 wait instance-running)"]
+        A6["Start SSM session"]
 
         A1 --> A2 --> A3
         A3 -->|"No"| A4 --> A5 --> A6
         A3 -->|"Yes"| A6
     end
 
-    subgraph AutoStop["🛑 自動停止"]
+    subgraph AutoStop["🛑 Auto Stop"]
         direction TB
-        B1["CPU監視<br/>(CloudWatch Alarm)"]
-        B2["定時停止<br/>(EventBridge Scheduler)"]
-        B3["EC2インスタンス停止"]
+        B1["CPU Monitoring<br/>(CloudWatch Alarm)"]
+        B2["Scheduled Stop<br/>(EventBridge Scheduler)"]
+        B3["Stop EC2 Instance"]
 
-        B1 -->|"CPU < 5%<br/>10分間"| B3
-        B2 -->|"毎日23:00 JST"| B3
+        B1 -->|"CPU < 5%<br/>for 10 min"| B3
+        B2 -->|"Daily 23:00 JST"| B3
     end
 ```
 
-| 機能 | 方式 | 説明 |
-|------|------|------|
-| **自動起動** | ProxyCommand | SSH接続時にインスタンスが停止中なら自動起動し、起動完了まで待機 |
-| **CPU監視停止** | CloudWatch Alarm | CPU使用率が閾値未満の状態が指定期間続くと自動停止（設定可能） |
-| **定時停止** | EventBridge Scheduler | 毎日指定時刻（JST）に自動停止（設定可能） |
+| Feature | Method | Description |
+|---------|--------|-------------|
+| **Auto Start** | ProxyCommand | Automatically starts the instance if stopped during SSH connection and waits for startup to complete |
+| **CPU Monitoring Stop** | CloudWatch Alarm | Automatically stops the instance if CPU usage stays below the threshold for a specified period (configurable) |
+| **Scheduled Stop** | EventBridge Scheduler | Automatically stops the instance daily at a specified time in JST (configurable) |
 
-> 💡 **コスト削減効果**: 使用していない時間帯のEC2料金を削減できます。インスタンスが停止中でもEBS料金は発生しますが、EC2の時間課金は発生しません。
+> 💡 **Cost Savings**: Reduces EC2 charges during unused hours. While EBS charges still apply when the instance is stopped, EC2 hourly charges do not.
 >
-> ⚙️ **設定変更**: `workspace-config.json` の `autoStopConfig` で CPU閾値、監視期間、定時停止時刻をカスタマイズできます。
+> ⚙️ **Configuration**: Customize the CPU threshold, monitoring period, and scheduled stop time in the `autoStopConfig` section of `workspace-config.json`.
 
 ---
 
-## 📋 前提条件
+## 📋 Prerequisites
 
-### 必要なツール
+### Required Tools
 
-| ツール | バージョン | インストール |
-|--------|-----------|-------------|
-| Node.js | 22+ | [ダウンロード](https://nodejs.org/) |
+| Tool | Version | Installation |
+|------|---------|-------------|
+| Node.js | 24+ | [Download](https://nodejs.org/) |
 | pnpm | 10+ | `npm install -g pnpm` |
-| AWS CLI v2 | **2.32.0以降推奨** | [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
-| Session Manager Plugin | 最新 | [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) |
+| AWS CLI v2 | **2.32.0 or later recommended** | [Installation Guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
+| Session Manager Plugin | Latest | [Installation Guide](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) |
 
-### AWS環境
+### AWS Environment
 
-- AWSアカウント
-- IAMユーザーまたはルートユーザー
-  - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + CDKデプロイ権限 + EC2起動権限
-  - ルートユーザーの場合：追加権限不要
-- AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
-- CDK Bootstrap済み（`cdk bootstrap`）
+- AWS account
+- IAM user or root user
+  - For IAM users: `SignInLocalDevelopmentAccess` + CDK deployment permissions + EC2 start permissions
+  - For root users: No additional permissions required
+- Check AWS CLI version: `aws --version` (2.32.0 or later recommended)
+- CDK bootstrapped (`cdk bootstrap`)
 
 ---
 
-## 🚀 使用方法
+## 🚀 Usage
 
-### 1. リポジトリのクローン
+### 1. Clone the Repository
 
 ```bash
 git clone <repository-url>
 cd ec2-remote-workspace
 ```
 
-### 2. 依存関係のインストール
+### 2. Install Dependencies
 
 ```bash
 pnpm install
 ```
 
-### 3. ユーザー設定
+### 3. User Configuration
 
-`workspace-config.json` を編集してプロジェクト設定とユーザーを定義します。
+Edit `workspace-config.json` to define project settings and users.
 
 ```json
 {
@@ -262,73 +264,73 @@ pnpm install
 }
 ```
 
-#### 設定項目
+#### Configuration Items
 
-| 項目 | 必須 | デフォルト | 説明 |
-|------|:----:|-----------|------|
-| `projectName` | | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
-| `environment` | | `dev` | 環境名（dev, staging, prod） |
-| `vpcCidr` | | `10.0.0.0/16` | VPCのCIDRブロック |
-| `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | | `80` | EBSボリュームサイズ（GB） |
-| `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
-| `autoStopConfig.cpuThreshold` | | `5` | CPU使用率閾値（%）- この値以下が続くと停止 |
-| `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU監視期間（分）- この期間低負荷が続くと停止 |
-| `autoStopConfig.scheduledStopHour` | | `23` | 定時停止時刻（時、0-23、Asia/Tokyo） |
-| `autoStopConfig.scheduledStopMinute` | | `0` | 定時停止時刻（分、0-59） |
-| `users` | ✅ | - | ユーザー配列（1人以上必須） |
-| `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
-| `users[].displayName` | | - | 表示名 |
-| `users[].instanceConfig` | | - | ユーザー個別のインスタンス設定（デフォルトを上書き） |
+| Item | Required | Default | Description |
+|------|:--------:|---------|-------------|
+| `projectName` | | `ec2-remote-workspace` | Project name (used for resource naming) |
+| `environment` | | `dev` | Environment name (dev, staging, prod) |
+| `vpcCidr` | | `10.0.0.0/16` | VPC CIDR block |
+| `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2 instance type |
+| `defaultInstanceConfig.volumeSize` | | `80` | EBS volume size (GB) |
+| `defaultInstanceConfig.volumeType` | | `gp3` | EBS volume type |
+| `autoStopConfig.cpuThreshold` | | `5` | CPU usage threshold (%) - stops when usage stays below this value |
+| `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU monitoring period (minutes) - stops after sustained low usage for this period |
+| `autoStopConfig.scheduledStopHour` | | `23` | Scheduled stop time (hour, 0-23, Asia/Tokyo) |
+| `autoStopConfig.scheduledStopMinute` | | `0` | Scheduled stop time (minute, 0-59) |
+| `users` | ✅ | - | User array (at least one required) |
+| `users[].username` | ✅ | - | Username (lowercase alphanumeric, hyphens, underscores) |
+| `users[].displayName` | | - | Display name |
+| `users[].instanceConfig` | | - | Per-user instance configuration (overrides defaults) |
 
-### 4. AWS認証
+### 4. AWS Authentication
 
-AWS CLI 2.32.0以降では、`aws login` コマンドでブラウザ認証が可能です（推奨）。
+With AWS CLI 2.32.0 or later, browser-based authentication is available via the `aws login` command (recommended).
 
 ```bash
-# ブラウザで認証（AWS CLI 2.32.0以降）
+# Authenticate via browser (AWS CLI 2.32.0 or later)
 aws login
 ```
 
-> **✨ `aws login` のメリット:**
-> - Identity Center不要でブラウザ認証可能
-> - 一時認証情報が15分ごとに自動リフレッシュ
-> - 長期アクセスキーの漏洩リスクを排除
-> - IAMユーザーには `SignInLocalDevelopmentAccess` マネージドポリシーの付与が必要
+> **✨ Benefits of `aws login`:**
+> - Browser-based authentication without requiring Identity Center
+> - Temporary credentials auto-refresh every 15 minutes
+> - Eliminates the risk of long-term access key leaks
+> - IAM users need the `SignInLocalDevelopmentAccess` managed policy attached
 
 <details>
-<summary>従来の認証方法（AWS CLI 2.31.0以前）</summary>
+<summary>Legacy authentication methods (AWS CLI 2.31.0 or earlier)</summary>
 
 ```bash
-# AWS SSOの場合
+# For AWS SSO
 aws sso login --profile <profile-name>
 
-# IAMユーザーの場合（非推奨）
+# For IAM users (not recommended)
 aws configure
 ```
 
 </details>
 
-### 5. CDK Bootstrap（初回のみ）
+### 5. CDK Bootstrap (First Time Only)
 
 ```bash
 pnpm cdk bootstrap
 ```
 
-### 6. デプロイ
+### 6. Deploy
 
 ```bash
-# 全スタックをデプロイ
+# Deploy all stacks
 pnpm cdk deploy --all
 
-# 特定のスタックのみデプロイ
-pnpm cdk deploy ec2-remote-workspace-dev-network       # ネットワークのみ
-pnpm cdk deploy ec2-remote-workspace-dev-developer1    # 特定ユーザーのみ
+# Deploy specific stacks only
+pnpm cdk deploy ec2-remote-workspace-dev-network       # Network only
+pnpm cdk deploy ec2-remote-workspace-dev-developer1    # Specific user only
 ```
 
-### 7. デプロイ確認
+### 7. Verify Deployment
 
-デプロイ完了後、各スタックの出力でインスタンスIDと接続コマンドが表示されます。
+After deployment is complete, the instance ID and connection command will be displayed in each stack's outputs.
 
 ```
 Outputs:
@@ -338,44 +340,44 @@ ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --tar
 
 ---
 
-## 📦 プリインストールソフトウェア
+## 📦 Pre-installed Software
 
-### Ubuntu 24.04 LTS 標準搭載
+### Included in Ubuntu 24.04 LTS
 
-| カテゴリ | ソフトウェア |
-|---------|-------------|
-| **AWS** | SSM Agent（Systems Manager接続用） |
+| Category | Software |
+|----------|----------|
+| **AWS** | SSM Agent (for Systems Manager connectivity) |
 
-### User Dataスクリプトで自動インストール
+### Automatically Installed via User Data Script
 
-EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh](lib/scripts/user-data.sh)）。
+The following software is automatically installed at EC2 launch ([user-data.sh](lib/scripts/user-data.sh)).
 
-| カテゴリ | ソフトウェア |
-|---------|-------------|
-| **コンテナ** | Docker, Docker Compose |
+| Category | Software |
+|----------|----------|
+| **Containers** | Docker, Docker Compose |
 | **AWS** | AWS CLI v2 |
-| **開発ツール** | Git, vim, nano, curl, wget, jq, tree, htop, uuidgen |
-| **ビルドツール** | build-essential |
-| **システム設定** | 4GB スワップ領域、タイムゾーン（Asia/Tokyo） |
+| **Development Tools** | Git, vim, nano, curl, wget, jq, tree, htop, uuidgen |
+| **Build Tools** | build-essential |
+| **System Settings** | 4GB swap space, timezone (Asia/Tokyo) |
 
 ---
 
-## 🔗 VS Code Remote-SSH接続
+## 🔗 VS Code Remote-SSH Connection
 
-SessionManager経由でVS Code Remote-SSHを使用してEC2に接続できます。
+You can connect to EC2 using VS Code Remote-SSH via SessionManager.
 
-### 前提条件（Windows）
+### Prerequisites (Windows)
 
-- PowerShell 5.1以降
-- VS Code + [Remote - SSH 拡張機能](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh)
+- PowerShell 5.1 or later
+- VS Code + [Remote - SSH Extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh)
 - AWS CLI v2
 - Session Manager Plugin
 
-### セットアップ手順
+### Setup Steps
 
-#### 1. インスタンスIDを取得
+#### 1. Get the Instance ID
 
-AWSコンソールまたはCLIでデプロイしたEC2インスタンスのIDを確認します。
+Check the deployed EC2 instance ID via the AWS Console or CLI.
 
 ```bash
 # Linux/Mac/Windows (PowerShell)
@@ -385,7 +387,7 @@ aws ec2 describe-instances \
   --output text
 ```
 
-#### 2. セットアップスクリプトを実行
+#### 2. Run the Setup Script
 
 **Windows:**
 
@@ -399,27 +401,27 @@ aws ec2 describe-instances \
 ./scripts/setup-remote-ssh.sh
 ```
 
-スクリプトが以下を行います：
-- EC2インスタンスIDの入力を受け付け
-- SSHホスト名の設定（デフォルト: `ec2`）
-- AWSリージョンの設定（デフォルト: `ap-northeast-1`）
-- AWS SSM Parameter Storeから秘密鍵を取得
-- 自動起動スクリプト（`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`）を `~/.ssh/` にコピー
-- `~/.ssh/config` にSSM経由の接続設定を追加（ProxyCommandで自動起動を有効化）
+The script performs the following:
+- Prompts for the EC2 instance ID
+- Configures the SSH host name (default: `ec2`)
+- Configures the AWS region (default: `ap-northeast-1`)
+- Retrieves the private key from AWS SSM Parameter Store
+- Copies the auto-start script (`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`) to `~/.ssh/`
+- Adds an SSM-based connection entry to `~/.ssh/config` (with auto-start enabled via ProxyCommand)
 
-#### 3. VS Codeから接続
+#### 3. Connect from VS Code
 
-1. VS Codeを開く
+1. Open VS Code
 2. `Ctrl + Shift + P` → `Remote-SSH: Connect to Host...`
-3. 設定したホスト名（例: `ec2`）を選択
-4. プラットフォーム選択画面が表示されたら **Linux** を選択
-5. 接続完了
+3. Select the configured host name (e.g., `ec2`)
+4. If prompted for the platform, select **Linux**
+5. Connection complete
 
-> 💡 **自動起動機能**: VS Code接続時、EC2インスタンスが停止中の場合は自動的に起動してSSM Agent接続完了まで待機します（最大5分）。初回接続時は起動に2-3分かかる場合があります。
+> 💡 **Auto Start Feature**: When connecting via VS Code, if the EC2 instance is stopped, it will automatically start and wait until the SSM Agent connection is ready (up to 5 minutes). The first connection may take 2-3 minutes for startup.
 
-#### 4. 手動でEC2インスタンスを起動（オプション）
+#### 4. Manually Start the EC2 Instance (Optional)
 
-VS Code接続前に手動で起動したい場合は、以下のスクリプトを実行できます。
+If you want to manually start the instance before connecting via VS Code, run the following script.
 
 **Windows:**
 
@@ -433,103 +435,103 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 ./scripts/start-ec2.sh
 ```
 
-スクリプトは対話的にインスタンスIDとリージョンを尋ね、起動とSSM Agent接続完了まで待機します。
+The script interactively asks for the instance ID and region, then starts the instance and waits until the SSM Agent connection is ready.
 
 ---
 
-## 🗑️ スタックの削除
+## 🗑️ Stack Deletion
 
 ```bash
-# 全スタックを削除
+# Delete all stacks
 pnpm cdk destroy --all
 
-# 特定のスタックのみ削除
+# Delete a specific stack only
 pnpm cdk destroy ec2-remote-workspace-dev-developer1
 
-# ネットワークスタックは最後に削除（依存関係のため）
+# Delete the network stack last (due to dependencies)
 pnpm cdk destroy ec2-remote-workspace-dev-network
 ```
 
-> ⚠️ EBSボリュームはインスタンス削除時に一緒に削除されます。必要なデータは事前にバックアップしてください。
+> ⚠️ EBS volumes are deleted together with the instance. Please back up any necessary data beforehand.
 
 ---
 
-## 💰 コスト見積もり
+## 💰 Cost Estimate
 
-### 前提条件
+### Assumptions
 
-- 使用時間：平日8時間 × 月20日 = **160時間/月**
-- リージョン：ap-northeast-1（東京）
-- インスタンス停止時はEC2料金は発生しない（EBSは継続課金）
+- Usage: 8 hours/weekday × 20 days/month = **160 hours/month**
+- Region: ap-northeast-1 (Tokyo)
+- EC2 charges do not apply when the instance is stopped (EBS charges continue)
 
-### 月額コスト（1ユーザーあたり）
+### Monthly Cost (Per User)
 
-| リソース | スペック | 単価 | 月額コスト |
-|----------|---------|------|-----------|
-| EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/時間 | **$8.70** |
-| EBS (gp3) | 80GB | $0.096/GB/月 | **$7.68** |
-| データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
-| **小計（ユーザーごと）** | | | **約 $17.5/月** |
+| Resource | Spec | Unit Price | Monthly Cost |
+|----------|------|-----------|-------------|
+| EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/hour | **$8.70** |
+| EBS (gp3) | 80GB | $0.096/GB/month | **$7.68** |
+| Data Transfer | 10GB estimated | $0.114/GB | **$1.14** |
+| **Subtotal (per user)** | | | **~$17.5/month** |
 
-### 共有リソースコスト（チーム全体）
+### Shared Resource Costs (Entire Team)
 
-| リソース | 説明 | 月額コスト |
-|----------|------|-----------|
-| VPC Flow Logs | CloudWatch Logsへのログ取り込み | **約 $0.76/GB** |
-| CloudWatch Logs | セッションログ + Flow Logs保存 | **$0.033/GB/月** |
+| Resource | Description | Monthly Cost |
+|----------|-------------|-------------|
+| VPC Flow Logs | Log ingestion to CloudWatch Logs | **~$0.76/GB** |
+| CloudWatch Logs | Session Logs + Flow Logs storage | **$0.033/GB/month** |
 
-> 💡 VPC Flow LogsはREJECTトラフィックのみ記録する設定のため、ログ量は通常数MB～数十MB/月程度です。
+> 💡 Since VPC Flow Logs are configured to record only REJECT traffic, the log volume is typically a few MB to tens of MB per month.
 
-### チーム規模別コスト
+### Cost by Team Size
 
-| 規模 | 月額コスト (USD) | 月額コスト (JPY) |
-|------|-----------------|-----------------|
-| 1ユーザー | 約 $17.5 | 約 ¥2,625 |
-| 5ユーザー | 約 $87.5 | 約 ¥13,125 |
-| 10ユーザー | 約 $175 | 約 ¥26,250 |
+| Scale | Monthly Cost (USD) | Monthly Cost (JPY) |
+|-------|-------------------|-------------------|
+| 1 user | ~$17.5 | ~¥2,625 |
+| 5 users | ~$87.5 | ~¥13,125 |
+| 10 users | ~$175 | ~¥26,250 |
 
-※ 1 USD = 150 JPY で計算
+※ Calculated at 1 USD = 150 JPY
 
-### コスト最適化オプション
+### Cost Optimization Options
 
-| オプション | 効果 |
-|-----------|------|
-| Savings Plans (1年) | EC2 約30%割引 |
-| t3.small に変更 | EC2コスト約50%削減 |
-| インスタンス自動停止 | 未使用時間のEC2コスト削減 |
+| Option | Effect |
+|--------|--------|
+| Savings Plans (1 year) | ~30% discount on EC2 |
+| Switch to t3.small | ~50% reduction in EC2 costs |
+| Instance auto stop | Reduce EC2 costs during unused hours |
 
 ---
 
-## 📁 ディレクトリ構成
+## 📁 Directory Structure
 
 ```
 ec2-remote-workspace/
 ├── bin/
-│   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
+│   └── ec2-remote-workspace.ts   # CDK app entry point
 ├── lib/
 │   ├── constructs/
-│   │   ├── vpc-construct.ts      # VPC構成
-│   │   ├── security-construct.ts # セキュリティグループ・IAM
-│   │   ├── ec2-construct.ts      # EC2インスタンス
-│   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
+│   │   ├── vpc-construct.ts      # VPC configuration
+│   │   ├── security-construct.ts # Security Group & IAM
+│   │   ├── ec2-construct.ts      # EC2 instance
+│   │   └── auto-stop-construct.ts # Auto stop (CPU monitoring & scheduled stop)
 │   ├── stacks/
-│   │   ├── network-stack.ts      # 共有ネットワークスタック
-│   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
+│   │   ├── network-stack.ts      # Shared network stack
+│   │   └── workspace-stack.ts    # Individual workspace stack
 │   ├── config/
-│   │   └── workspace-config.ts   # 設定ファイル読み込み
+│   │   └── workspace-config.ts   # Configuration file loader
 │   └── scripts/
-│       └── user-data.sh          # EC2初期化スクリプト
+│       └── user-data.sh          # EC2 initialization script
 ├── scripts/
-│   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
-│   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
-│   ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
-│   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
-│   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
-│   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
-├── test/                         # テストコード
-├── workspace-config.json         # ユーザー・プロジェクト設定
-├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
-├── cdk.json                      # CDK設定
+│   ├── setup-remote-ssh.sh       # SSH setup script (Linux/Mac)
+│   ├── setup-remote-ssh.ps1      # SSH setup script (Windows)
+│   ├── start-ec2-and-wait.sh     # EC2 auto-start script (for ProxyCommand, Linux/Mac)
+│   ├── start-ec2-and-wait.ps1    # EC2 auto-start script (for ProxyCommand, Windows)
+│   ├── start-ec2.sh              # EC2 manual start script (Linux/Mac)
+│   └── start-ec2.ps1             # EC2 manual start script (Windows)
+├── test/                         # Test code
+├── workspace-config.json         # User & project configuration
+├── workspace-config.schema.json  # Configuration file JSON schema
+├── cdk.json                      # CDK configuration
 ├── package.json
 ├── pnpm-lock.yaml
 └── tsconfig.json
@@ -537,16 +539,16 @@ ec2-remote-workspace/
 
 ---
 
-## 🧪 テスト
+## 🧪 Tests
 
 ```bash
-# テストを実行
+# Run tests
 pnpm test
 ```
 
 ---
 
-## 📚 参考資料
+## 📚 References
 
 - [VS Code Remote - SSH](https://code.visualstudio.com/docs/remote/ssh)
 - [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/v2/guide/home.html)
