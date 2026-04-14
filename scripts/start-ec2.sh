@@ -60,7 +60,8 @@ wait_ssm_agent_ready() {
 
     log "Waiting for SSM Agent to be ready..."
 
-    for ((i=1; i<=max_retries; i++)); do
+    local i=1
+    while [ "$i" -le "$max_retries" ]; do
         ping_status=$(aws ssm describe-instance-information \
             --region "$region" \
             --filters "Key=InstanceIds,Values=$instance_id" \
@@ -74,11 +75,12 @@ wait_ssm_agent_ready() {
 
         log "SSM Agent not ready yet (attempt $i/$max_retries, status: $ping_status)"
         sleep "$retry_interval"
+        i=$((i + 1))
     done
 
     echo -e "${RED}Error: Timeout waiting for SSM Agent to become ready after $((max_retries * retry_interval)) seconds${NC}" >&2
     return 1
-fi
+}
 
 log "Checking EC2 instance state..."
 

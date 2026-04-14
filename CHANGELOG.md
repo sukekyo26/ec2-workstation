@@ -28,3 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add per-user instance configuration override support
 - Add optional Elastic IP (static public IP) support with project-level default and per-user override
 - Add comprehensive test coverage for all constructs and stacks
+
+### Fixed
+
+- Fix shell syntax error in `scripts/start-ec2.sh` (`fi` instead of `}` closing a function, C-style for loop replaced with while loop)
