@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-14
+
 ### Added
 
 - モジュラー CDK アーキテクチャを追加（VPC・Security・EC2・AutoStop コンストラクトを分離）
