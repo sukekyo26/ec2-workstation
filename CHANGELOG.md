@@ -25,9 +25,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add SSH host key checking skip configuration for seamless remote connections
 - Add per-user instance configuration override support
 - Add comprehensive test coverage for all constructs and stacks
-
-### Changed
-
-- Change default instance type from t3.large to t3.medium and EBS volume from 100GB to 80GB
-- Change EBS volume to delete on instance termination
-- Migrate to pnpm as primary package manager
