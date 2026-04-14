@@ -1,6 +1,7 @@
 import {
     validateUsername,
     getInstanceConfig,
+    resolveElasticIp,
     loadProjectConfig,
     validateAndParseConfig,
     DEFAULT_INSTANCE_CONFIG,
@@ -262,6 +263,44 @@ describe('workspace-config', () => {
         });
     });
 
+    describe('DEFAULT_PROJECT_CONFIG', () => {
+        test('enableElasticIpのデフォルト値がfalse', () => {
+            expect(DEFAULT_PROJECT_CONFIG.enableElasticIp).toBe(false);
+        });
+    });
+
+    describe('resolveElasticIp', () => {
+        test('ユーザー設定なし、プロジェクトデフォルトなし → false', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser' };
+            expect(resolveElasticIp(userConfig)).toBe(false);
+        });
+
+        test('ユーザー設定なし、プロジェクトデフォルト true → true', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser' };
+            expect(resolveElasticIp(userConfig, true)).toBe(true);
+        });
+
+        test('ユーザー true、プロジェクトデフォルト false → true', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: true };
+            expect(resolveElasticIp(userConfig, false)).toBe(true);
+        });
+
+        test('ユーザー false、プロジェクトデフォルト true → false', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: false };
+            expect(resolveElasticIp(userConfig, true)).toBe(false);
+        });
+
+        test('ユーザー true、プロジェクトデフォルト true → true', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: true };
+            expect(resolveElasticIp(userConfig, true)).toBe(true);
+        });
+
+        test('ユーザー false、プロジェクトデフォルト false → false', () => {
+            const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: false };
+            expect(resolveElasticIp(userConfig, false)).toBe(false);
+        });
+    });
+
     describe('validateAndParseConfig - autoStopConfig', () => {
         test('autoStopConfigが省略された場合デフォルト値を使用', () => {
             const rawConfig = {
@@ -307,6 +346,67 @@ describe('workspace-config', () => {
             expect(config.autoStopConfig.cpuEvaluationMinutes).toBe(20);
             expect(config.autoStopConfig.scheduledStopHour).toBe(21);
             expect(config.autoStopConfig.scheduledStopMinute).toBe(30);
+        });
+    });
+
+    describe('validateAndParseConfig - enableElasticIp', () => {
+        test('enableElasticIpが省略された場合デフォルト false', () => {
+            const rawConfig = {
+                users: [{ username: 'developer1' }],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.enableElasticIp).toBe(false);
+        });
+
+        test('プロジェクトレベル enableElasticIp: true が正しくパースされる', () => {
+            const rawConfig = {
+                enableElasticIp: true,
+                users: [{ username: 'developer1' }],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.enableElasticIp).toBe(true);
+        });
+
+        test('プロジェクトレベル enableElasticIp: false が正しくパースされる', () => {
+            const rawConfig = {
+                enableElasticIp: false,
+                users: [{ username: 'developer1' }],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.enableElasticIp).toBe(false);
+        });
+
+        test('ユーザーレベル enableElasticIp が正しくパースされる', () => {
+            const rawConfig = {
+                users: [
+                    { username: 'developer1', enableElasticIp: true },
+                    { username: 'developer2', enableElasticIp: false },
+                    { username: 'developer3' },
+                ],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.users[0].enableElasticIp).toBe(true);
+            expect(config.users[1].enableElasticIp).toBe(false);
+            expect(config.users[2].enableElasticIp).toBeUndefined();
+        });
+
+        test('enableElasticIpがboolean以外の場合デフォルト値が使われる', () => {
+            const rawConfig = {
+                enableElasticIp: 'yes',
+                users: [{ username: 'developer1' }],
+            };
+
+            const config = validateAndParseConfig(rawConfig);
+
+            expect(config.enableElasticIp).toBe(false);
         });
     });
 });

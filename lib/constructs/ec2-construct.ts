@@ -24,6 +24,8 @@ export interface Ec2ConstructProps {
     readonly instanceConfig: InstanceConfig;
     /** User Dataスクリプト */
     readonly userData: ec2.UserData;
+    /** Elastic IP を有効にするか */
+    readonly enableElasticIp?: boolean;
 }
 
 /**
@@ -40,6 +42,8 @@ export class Ec2Construct extends Construct {
     public readonly instanceId: string;
     /** SSHキーペア */
     public readonly keyPair: ec2.KeyPair;
+    /** Elastic IP（有効な場合のみ） */
+    public readonly elasticIp?: ec2.CfnEIP;
 
     constructor(scope: Construct, id: string, props: Ec2ConstructProps) {
         super(scope, id);
@@ -113,5 +117,26 @@ export class Ec2Construct extends Construct {
 
         // 自動停止スケジュール用タグ（AWS Instance Schedulerと連携可能）
         cdk.Tags.of(this.instance).add('Schedule', 'office-hours');
+
+        // Elastic IP（有効な場合のみ）
+        if (props.enableElasticIp) {
+            const eip = new ec2.CfnEIP(this, 'ElasticIp', {
+                domain: 'vpc',
+                tags: [
+                    { key: 'Name', value: `${resourcePrefix}-eip` },
+                    { key: 'Owner', value: props.username },
+                    { key: 'Project', value: props.projectName },
+                    { key: 'Environment', value: props.environment },
+                    { key: 'ManagedBy', value: 'CDK' },
+                ],
+            });
+
+            new ec2.CfnEIPAssociation(this, 'ElasticIpAssociation', {
+                allocationId: eip.attrAllocationId,
+                instanceId: this.instance.instanceId,
+            });
+
+            this.elasticIp = eip;
+        }
     }
 }

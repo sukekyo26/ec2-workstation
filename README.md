@@ -278,10 +278,12 @@ Edit `workspace-config.json` to define project settings and users.
 | `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU monitoring period (minutes) - stops after sustained low usage for this period |
 | `autoStopConfig.scheduledStopHour` | | `23` | Scheduled stop time (hour, 0-23, Asia/Tokyo) |
 | `autoStopConfig.scheduledStopMinute` | | `0` | Scheduled stop time (minute, 0-59) |
+| `enableElasticIp` | | `false` | Assign Elastic IP (static public IP) to all users by default. Per-user override available. |
 | `users` | ✅ | - | User array (at least one required) |
 | `users[].username` | ✅ | - | Username (lowercase alphanumeric, hyphens, underscores) |
 | `users[].displayName` | | - | Display name |
 | `users[].instanceConfig` | | - | Per-user instance configuration (overrides defaults) |
+| `users[].enableElasticIp` | | - | Per-user Elastic IP override (overrides project-level `enableElasticIp`) |
 
 ### 4. AWS Authentication
 
@@ -463,6 +465,7 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 - Usage: 8 hours/weekday × 20 days/month = **160 hours/month**
 - Region: ap-northeast-1 (Tokyo)
 - EC2 charges do not apply when the instance is stopped (EBS charges continue)
+- Elastic IP charges ($0.005/hour) apply even when the instance is stopped
 
 ### Monthly Cost (Per User)
 
@@ -471,6 +474,7 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 | EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/hour | **$8.70** |
 | EBS (gp3) | 80GB | $0.096/GB/month | **$7.68** |
 | Data Transfer | 10GB estimated | $0.114/GB | **$1.14** |
+| Elastic IP | Optional (if enabled) | $0.005/hour | **$3.65** |
 | **Subtotal (per user)** | | | **~$17.5/month** |
 
 ### Shared Resource Costs (Entire Team)

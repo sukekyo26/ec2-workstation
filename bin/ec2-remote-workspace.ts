@@ -15,7 +15,7 @@ const app = new cdk.App();
 // workspace-config.json でユーザーとプロジェクト設定を定義
 // ============================================================
 const projectConfig = loadProjectConfig();
-const { projectName, environment, vpcCidr, users, defaultInstanceConfig, autoStopConfig } = projectConfig;
+const { projectName, environment, vpcCidr, users, defaultInstanceConfig, autoStopConfig, enableElasticIp } = projectConfig;
 
 // AWS環境設定
 const env: cdk.Environment = {
@@ -60,6 +60,7 @@ for (const userConfig of users) {
       userConfig,
       defaultInstanceConfig,
       autoStopConfig,
+      enableElasticIp,
       description: `Workspace for ${userConfig.username} (${environment})`,
       tags: {
         Project: projectName,

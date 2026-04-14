@@ -270,3 +270,156 @@ describe('WorkspaceStack - カスタム設定', () => {
         });
     });
 });
+
+describe('WorkspaceStack - Elastic IP', () => {
+    test('デフォルトではEIPが作成されない', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip1', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip1', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser' },
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.resourceCountIs('AWS::EC2::EIP', 0);
+        template.resourceCountIs('AWS::EC2::EIPAssociation', 0);
+    });
+
+    test('enableElasticIp: true でEIPが作成される', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip2', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip2', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser' },
+            enableElasticIp: true,
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.resourceCountIs('AWS::EC2::EIP', 1);
+        template.resourceCountIs('AWS::EC2::EIPAssociation', 1);
+    });
+
+    test('EIP有効時にEIPにOwnerタグが設定される', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip3', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip3', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser' },
+            enableElasticIp: true,
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.hasResourceProperties('AWS::EC2::EIP', {
+            Tags: Match.arrayWith([
+                Match.objectLike({ Key: 'Owner', Value: 'testuser' }),
+            ]),
+        });
+        template.hasResourceProperties('AWS::EC2::EIP', {
+            Tags: Match.arrayWith([
+                Match.objectLike({ Key: 'Name', Value: 'test-project-test-testuser-eip' }),
+            ]),
+        });
+    });
+
+    test('EIP有効時にElasticIpAddress Outputが存在する', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip4', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip4', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser' },
+            enableElasticIp: true,
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.hasOutput('ElasticIpAddress', {});
+        template.hasOutput('ElasticIpAllocationId', {});
+    });
+
+    test('ユーザーレベルのenableElasticIpがプロジェクトデフォルトを上書きする', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip5', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        // プロジェクトデフォルト true、ユーザーレベル false
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip5', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser', enableElasticIp: false },
+            enableElasticIp: true,
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.resourceCountIs('AWS::EC2::EIP', 0);
+    });
+
+    test('ユーザーレベル enableElasticIp: true がプロジェクトデフォルト false を上書きする', () => {
+        const app = new cdk.App();
+
+        const networkStack = new NetworkStack(app, 'TestNetworkStackEip6', {
+            projectName: 'test-project',
+            environment: 'test',
+            vpcCidr: '10.0.0.0/16',
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        // プロジェクトデフォルト false、ユーザーレベル true
+        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip6', {
+            vpc: networkStack.vpc,
+            projectName: 'test-project',
+            environment: 'test',
+            userConfig: { username: 'testuser', enableElasticIp: true },
+            enableElasticIp: false,
+            env: { account: '123456789012', region: 'ap-northeast-1' },
+        });
+
+        const template = Template.fromStack(workspaceStack);
+        template.resourceCountIs('AWS::EC2::EIP', 1);
+    });
+});

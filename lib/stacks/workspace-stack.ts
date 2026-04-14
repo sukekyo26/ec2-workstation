@@ -11,6 +11,7 @@ import {
     InstanceConfig,
     AutoStopConfig,
     getInstanceConfig,
+    resolveElasticIp,
     DEFAULT_INSTANCE_CONFIG,
     DEFAULT_AUTO_STOP_CONFIG,
 } from '../config/workspace-config';
@@ -31,6 +32,8 @@ export interface WorkspaceStackProps extends cdk.StackProps {
     readonly defaultInstanceConfig?: InstanceConfig;
     /** 自動停止設定 */
     readonly autoStopConfig?: AutoStopConfig;
+    /** Elastic IP のプロジェクトデフォルト */
+    readonly enableElasticIp?: boolean;
 }
 
 /**
@@ -54,6 +57,7 @@ export class WorkspaceStack extends cdk.Stack {
         const defaultConfig = props.defaultInstanceConfig || DEFAULT_INSTANCE_CONFIG;
         const instanceConfig = getInstanceConfig(userConfig, defaultConfig);
         const autoStopConfig = props.autoStopConfig || DEFAULT_AUTO_STOP_CONFIG;
+        const enableElasticIp = resolveElasticIp(userConfig, props.enableElasticIp);
 
         // Security Construct
         const security = new SecurityConstruct(this, 'Security', {
@@ -83,6 +87,7 @@ export class WorkspaceStack extends cdk.Stack {
             username: userConfig.username,
             instanceConfig,
             userData,
+            enableElasticIp,
         });
 
         this.instanceId = ec2Instance.instanceId;
@@ -121,5 +126,19 @@ export class WorkspaceStack extends cdk.Stack {
             value: userConfig.username,
             description: 'Workspace owner',
         });
+
+        // Elastic IP Outputs（有効な場合のみ）
+        if (ec2Instance.elasticIp) {
+            new cdk.CfnOutput(this, 'ElasticIpAddress', {
+                value: ec2Instance.elasticIp.attrPublicIp,
+                description: `Elastic IP address for ${userConfig.username}`,
+                exportName: `${projectName}-${environment}-${userConfig.username}-elastic-ip`,
+            });
+
+            new cdk.CfnOutput(this, 'ElasticIpAllocationId', {
+                value: ec2Instance.elasticIp.attrAllocationId,
+                description: `Elastic IP allocation ID for ${userConfig.username}`,
+            });
+        }
     }
 }

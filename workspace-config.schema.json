@@ -56,6 +56,11 @@
         }
       }
     },
+    "enableElasticIp": {
+      "type": "boolean",
+      "description": "Elastic IP（固定パブリックIP）をデフォルトで全ユーザーに割り当てるか。ユーザーごとに上書き可能。",
+      "default": false
+    },
     "autoStopConfig": {
       "type": "object",
       "description": "自動停止設定",
@@ -129,6 +134,10 @@
                 ]
               }
             }
+          },
+          "enableElasticIp": {
+            "type": "boolean",
+            "description": "Elastic IP（固定パブリックIP）を有効にするか（プロジェクトデフォルトを上書き）"
           }
         }
       }

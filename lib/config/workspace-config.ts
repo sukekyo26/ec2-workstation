@@ -42,6 +42,8 @@ export interface WorkspaceUserConfig {
   readonly displayName?: string;
   /** インスタンス設定（オプション、デフォルト値を使用） */
   readonly instanceConfig?: Partial<InstanceConfig>;
+  /** Elastic IP を有効にするか（プロジェクトデフォルトを上書き） */
+  readonly enableElasticIp?: boolean;
 }
 
 /**
@@ -58,6 +60,8 @@ export interface ProjectConfig {
   readonly defaultInstanceConfig: InstanceConfig;
   /** 自動停止設定 */
   readonly autoStopConfig: AutoStopConfig;
+  /** Elastic IP のデフォルト有効化設定 */
+  readonly enableElasticIp: boolean;
   /** ワークスペースユーザー一覧 */
   readonly users: WorkspaceUserConfig[];
 }
@@ -90,6 +94,7 @@ export const DEFAULT_PROJECT_CONFIG: Omit<ProjectConfig, 'users'> = {
   vpcCidr: '10.0.0.0/16',
   defaultInstanceConfig: DEFAULT_INSTANCE_CONFIG,
   autoStopConfig: DEFAULT_AUTO_STOP_CONFIG,
+  enableElasticIp: false,
 };
 
 /**
@@ -111,6 +116,17 @@ export function getInstanceConfig(
     ...defaultConfig,
     ...userConfig.instanceConfig,
   };
+}
+
+/**
+ * ユーザーの Elastic IP 有効化状態を解決する
+ * ユーザー設定 > プロジェクトデフォルト の優先順位
+ */
+export function resolveElasticIp(
+  userConfig: WorkspaceUserConfig,
+  projectDefault: boolean = false
+): boolean {
+  return userConfig.enableElasticIp ?? projectDefault;
 }
 
 /**
@@ -200,6 +216,8 @@ export function validateAndParseConfig(rawConfig: unknown): ProjectConfig {
         typeof userObj.instanceConfig === 'object' && userObj.instanceConfig !== null
           ? (userObj.instanceConfig as Partial<InstanceConfig>)
           : undefined,
+      enableElasticIp:
+        typeof userObj.enableElasticIp === 'boolean' ? userObj.enableElasticIp : undefined,
     });
   }
 
@@ -232,6 +250,10 @@ export function validateAndParseConfig(rawConfig: unknown): ProjectConfig {
       typeof config.vpcCidr === 'string' ? config.vpcCidr : DEFAULT_PROJECT_CONFIG.vpcCidr,
     defaultInstanceConfig,
     autoStopConfig,
+    enableElasticIp:
+      typeof config.enableElasticIp === 'boolean'
+        ? config.enableElasticIp
+        : DEFAULT_PROJECT_CONFIG.enableElasticIp,
     users,
   };
 }

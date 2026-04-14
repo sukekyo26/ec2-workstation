@@ -278,10 +278,12 @@ pnpm install
 | `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU監視期間（分）- この期間低負荷が続くと停止 |
 | `autoStopConfig.scheduledStopHour` | | `23` | 定時停止時刻（時、0-23、Asia/Tokyo） |
 | `autoStopConfig.scheduledStopMinute` | | `0` | 定時停止時刻（分、0-59） |
+| `enableElasticIp` | | `false` | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
 | `users` | ✅ | - | ユーザー配列（1人以上必須） |
 | `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
 | `users[].displayName` | | - | 表示名 |
 | `users[].instanceConfig` | | - | ユーザー個別のインスタンス設定（デフォルトを上書き） |
+| `users[].enableElasticIp` | | - | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
 
 ### 4. AWS認証
 
@@ -463,6 +465,7 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 - 使用時間：平日8時間 × 月20日 = **160時間/月**
 - リージョン：ap-northeast-1（東京）
 - インスタンス停止時はEC2料金は発生しない（EBSは継続課金）
+- Elastic IP 有効時は停止中も $0.005/時間 が課金される
 
 ### 月額コスト（1ユーザーあたり）
 
@@ -471,6 +474,7 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 | EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/時間 | **$8.70** |
 | EBS (gp3) | 80GB | $0.096/GB/月 | **$7.68** |
 | データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
+| Elastic IP | オプション（有効時） | $0.005/時間 | **$3.65** |
 | **小計（ユーザーごと）** | | | **約 $17.5/月** |
 
 ### 共有リソースコスト（チーム全体）
