@@ -1,0 +1,87 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths: [package.json]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (tag only, no release)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  # ── Version check ──────────────────────────────────────
+  check-version:
+    name: Check version change
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      changed: ${{ steps.version.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from package.json
+        id: version
+        run: |
+          version=$(node -p "require('./package.json').version")
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "Detected version: ${version} (tag: ${tag})"
+
+          if git tag -l "${tag}" | grep -q "${tag}"; then
+            echo "Tag ${tag} already exists — skipping"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "New version detected"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── CI ─────────────────────────────────────────────────
+  ci:
+    name: CI
+    needs: [check-version]
+    if: needs.check-version.outputs.changed == 'true'
+    uses: ./.github/workflows/ci.yml
+
+  # ── Tag ────────────────────────────────────────────────
+  tag:
+    name: Create version tag
+    needs: [check-version, ci]
+    if: needs.check-version.outputs.changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ needs.check-version.outputs.tag }}" \
+            -m "Release ${{ needs.check-version.outputs.tag }}"
+          git push origin "${{ needs.check-version.outputs.tag }}"
+
+  # ── GitHub Release ─────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [check-version, tag]
+    if: >-
+      needs.check-version.outputs.changed == 'true' &&
+      !(github.event_name == 'workflow_dispatch' && inputs.dry_run)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ needs.check-version.outputs.tag }}
+          generate_release_notes: true

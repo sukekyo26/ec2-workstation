@@ -10,6 +10,9 @@
     "deploy:network": "cdk deploy '*-network' --require-approval never",
     "deploy:workspaces": "cdk deploy --all --require-approval never"
   },
+  "engines": {
+    "node": ">=24"
+  },
   "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "aws-cdk-lib": "^2.235.0",
