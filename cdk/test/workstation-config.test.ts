@@ -3,8 +3,8 @@ import {
     resolveElasticIp,
     loadProjectConfig,
     InstanceConfig,
-    WorkspaceUserConfig,
-} from '../lib/config/workspace-config';
+    WorkstationUserConfig,
+} from '../lib/config/workstation-config';
 import * as fs from 'fs';
 
 // fsモジュールをモック（スキーマ自体は require で読まれるためモックの影響を受けない）
@@ -70,7 +70,7 @@ describe('loadProjectConfig', () => {
 
     test('$schema キーを含む設定を受け入れる', () => {
         const config = loadConfig({
-            $schema: './workspace-config.schema.json',
+            $schema: './workstation-config.schema.json',
             ...validConfig(),
         });
 
@@ -118,62 +118,62 @@ describe('loadProjectConfig', () => {
             const raw = validConfig();
             delete raw[key];
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('users が空配列の場合エラー', () => {
             const raw = validConfig();
             raw.users = [];
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('username のパターン違反でエラー', () => {
             const raw = validConfig();
             raw.users = [{ username: 'Invalid-User' }];
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('username が無いユーザーはエラー', () => {
             const raw = validConfig();
             raw.users = [{ displayName: 'Dev One' }];
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('未知のキー（typo）はエラー', () => {
             const raw = { ...validConfig(), enableElasticIP: true };
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('型違反（enableElasticIp が文字列）はエラー', () => {
             const raw = validConfig();
             raw.enableElasticIp = 'yes';
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('明示的な null はエラー', () => {
             const raw = validConfig();
             raw.defaultInstanceConfig = null;
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('environment の enum 違反でエラー', () => {
             const raw = validConfig();
             raw.environment = 'production';
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('autoStopConfig の必須項目欠落でエラー', () => {
             const raw = validConfig();
             raw.autoStopConfig = { cpuThreshold: 5 };
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('volumeSize の範囲違反でエラー', () => {
@@ -184,7 +184,7 @@ describe('loadProjectConfig', () => {
                 volumeType: 'gp3',
             };
 
-            expect(() => loadConfig(raw)).toThrow('violates workspace-config.schema.json');
+            expect(() => loadConfig(raw)).toThrow('violates workstation-config.schema.json');
         });
 
         test('エラーメッセージに違反箇所のパスが含まれる', () => {
@@ -198,7 +198,7 @@ describe('loadProjectConfig', () => {
 
 describe('getInstanceConfig', () => {
     test('デフォルト設定を返す（ユーザー設定なし）', () => {
-        const userConfig: WorkspaceUserConfig = {
+        const userConfig: WorkstationUserConfig = {
             username: 'testuser',
         };
 
@@ -208,7 +208,7 @@ describe('getInstanceConfig', () => {
     });
 
     test('ユーザー設定で一部をオーバーライド', () => {
-        const userConfig: WorkspaceUserConfig = {
+        const userConfig: WorkstationUserConfig = {
             username: 'testuser',
             instanceConfig: {
                 instanceType: 't3.small',
@@ -223,7 +223,7 @@ describe('getInstanceConfig', () => {
     });
 
     test('ユーザー設定で全てをオーバーライド', () => {
-        const userConfig: WorkspaceUserConfig = {
+        const userConfig: WorkstationUserConfig = {
             username: 'testuser',
             instanceConfig: {
                 instanceType: 't3.xlarge',
@@ -242,22 +242,22 @@ describe('getInstanceConfig', () => {
 
 describe('resolveElasticIp', () => {
     test('ユーザー設定なし、プロジェクトデフォルト false → false', () => {
-        const userConfig: WorkspaceUserConfig = { username: 'testuser' };
+        const userConfig: WorkstationUserConfig = { username: 'testuser' };
         expect(resolveElasticIp(userConfig, false)).toBe(false);
     });
 
     test('ユーザー設定なし、プロジェクトデフォルト true → true', () => {
-        const userConfig: WorkspaceUserConfig = { username: 'testuser' };
+        const userConfig: WorkstationUserConfig = { username: 'testuser' };
         expect(resolveElasticIp(userConfig, true)).toBe(true);
     });
 
     test('ユーザー true、プロジェクトデフォルト false → true', () => {
-        const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: true };
+        const userConfig: WorkstationUserConfig = { username: 'testuser', enableElasticIp: true };
         expect(resolveElasticIp(userConfig, false)).toBe(true);
     });
 
     test('ユーザー false、プロジェクトデフォルト true → false', () => {
-        const userConfig: WorkspaceUserConfig = { username: 'testuser', enableElasticIp: false };
+        const userConfig: WorkstationUserConfig = { username: 'testuser', enableElasticIp: false };
         expect(resolveElasticIp(userConfig, true)).toBe(false);
     });
 });

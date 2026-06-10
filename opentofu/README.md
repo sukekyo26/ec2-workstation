@@ -1,7 +1,7 @@
 # OpenTofu Implementation
 
 AWS CDK 実装（`../cdk/`）と同じインフラを OpenTofu で構築する実装です。
-設定はリポジトリルートの `workspace-config.json` を CDK と共有します。
+設定はリポジトリルートの `workstation-config.json` を CDK と共有します。
 
 ## ⚠️ CDK との排他利用
 
@@ -9,7 +9,7 @@ AWS CDK 実装（`../cdk/`）と同じインフラを OpenTofu で構築する�
 
 両実装は同じ物理リソース名（IAM ロール名・セキュリティグループ名・キーペア名・ロググループ名）を使うため、二重 apply は名前衝突で失敗します。ただし衝突検出までに一部リソースが作成されることがあります。OpenTofu 版を試す場合は次のいずれかにしてください:
 
-- `workspace-config.json` の `environment` を変える（例: `dev` → `dev-tofu`）
+- `workstation-config.json` の `environment` を変える（例: `dev` → `dev-tofu`）
 - 別の AWS アカウントを使う
 
 ## 前提条件
@@ -74,10 +74,10 @@ tofu plan
 tofu apply
 
 # 出力確認（インスタンス ID・SSM 接続コマンド等）
-tofu output workspaces
+tofu output workstations
 ```
 
-ユーザーの追加・変更はリポジトリルートの `workspace-config.json` を編集して `tofu apply` します。
+ユーザーの追加・変更はリポジトリルートの `workstation-config.json` を編集して `tofu apply` します。
 ユーザー名がリソースのキーになっているため、ユーザーの追加・削除は他ユーザーのリソースに影響しません。
 
 ## 接続
@@ -95,10 +95,10 @@ apply 後の運用（VS Code Remote-SSH 設定・EC2 起動）は CDK 版と同�
 | OpenTofu | CDK |
 |----------|-----|
 | `modules/network/` | `cdk/lib/stacks/network-stack.ts` + `vpc-construct.ts` |
-| `modules/workspace/main.tf` | `security-construct.ts` + `ec2-construct.ts` |
-| `modules/workspace/keypair.tf` | `ec2.KeyPair`（ED25519 + SSM 保存） |
-| `modules/workspace/autostop.tf` | `auto-stop-construct.ts` |
-| `locals.tf` | `cdk/lib/config/workspace-config.ts`（デフォルト適用・マージ） |
+| `modules/workstation/main.tf` | `security-construct.ts` + `ec2-construct.ts` |
+| `modules/workstation/keypair.tf` | `ec2.KeyPair`（ED25519 + SSM 保存） |
+| `modules/workstation/autostop.tf` | `auto-stop-construct.ts` |
+| `locals.tf` | `cdk/lib/config/workstation-config.ts`（デフォルト適用・マージ） |
 
 ### 挙動の差異
 

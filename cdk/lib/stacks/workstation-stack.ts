@@ -7,17 +7,17 @@ import { SecurityConstruct } from '../constructs/security-construct';
 import { Ec2Construct } from '../constructs/ec2-construct';
 import { AutoStopConstruct } from '../constructs/auto-stop-construct';
 import {
-    WorkspaceUserConfig,
+    WorkstationUserConfig,
     InstanceConfig,
     AutoStopConfig,
     getInstanceConfig,
     resolveElasticIp,
-} from '../config/workspace-config';
+} from '../config/workstation-config';
 
 /**
- * Workspace Stackのプロパティ
+ * Workstation Stackのプロパティ
  */
-export interface WorkspaceStackProps extends cdk.StackProps {
+export interface WorkstationStackProps extends cdk.StackProps {
     /** VPC（NetworkStackから渡される） */
     readonly vpc: ec2.IVpc;
     /** プロジェクト名 */
@@ -25,7 +25,7 @@ export interface WorkspaceStackProps extends cdk.StackProps {
     /** 環境名 */
     readonly environment: string;
     /** ユーザー設定 */
-    readonly userConfig: WorkspaceUserConfig;
+    readonly userConfig: WorkstationUserConfig;
     /** デフォルトインスタンス設定 */
     readonly defaultInstanceConfig: InstanceConfig;
     /** 自動停止設定 */
@@ -35,20 +35,20 @@ export interface WorkspaceStackProps extends cdk.StackProps {
 }
 
 /**
- * Workspace Stack
- * 個人用のEC2ワークスペースを作成
+ * Workstation Stack
+ * 個人用のEC2ワークステーションを作成
  * - セキュリティグループ
  * - IAMロール・インスタンスプロファイル
  * - EC2インスタンス
  * - CloudWatch Logsグループ（セッションログ用）
  */
-export class WorkspaceStack extends cdk.Stack {
+export class WorkstationStack extends cdk.Stack {
     /** EC2インスタンスID */
     public readonly instanceId: string;
     /** セッションログのロググループ名 */
     public readonly sessionLogGroupName: string;
 
-    constructor(scope: Construct, id: string, props: WorkspaceStackProps) {
+    constructor(scope: Construct, id: string, props: WorkstationStackProps) {
         super(scope, id, props);
 
         const { vpc, projectName, environment, userConfig } = props;
@@ -121,7 +121,7 @@ export class WorkspaceStack extends cdk.Stack {
 
         new cdk.CfnOutput(this, 'Owner', {
             value: userConfig.username,
-            description: 'Workspace owner',
+            description: 'Workstation owner',
         });
 
         // Elastic IP Outputs（有効な場合のみ）

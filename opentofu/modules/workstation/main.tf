@@ -1,4 +1,4 @@
-# 個人用ワークスペース (CDK: WorkspaceStack の Security/Ec2 construct と同等)
+# 個人用ワークステーション (CDK: WorkstationStack の Security/Ec2 construct と同等)
 # - SG: 全インバウンド拒否、アウトバウンドは HTTPS/HTTP/DNS のみ
 # - SSM SessionManager 接続 (SSH ポート非開放)
 # - Ubuntu 24.04 LTS / EBS 暗号化 / IMDSv2 強制
@@ -13,7 +13,7 @@ locals {
 
 resource "aws_security_group" "this" {
   name        = "${local.resource_prefix}-sg"
-  description = "Security group for ${var.username} workspace - All inbound blocked"
+  description = "Security group for ${var.username} workstation - All inbound blocked"
   vpc_id      = var.vpc_id
 
   tags = {
@@ -76,7 +76,7 @@ data "aws_iam_policy_document" "instance_assume" {
 
 resource "aws_iam_role" "instance" {
   name               = "${local.resource_prefix}-instance-role"
-  description        = "IAM role for ${var.username} workspace EC2 instance"
+  description        = "IAM role for ${var.username} workstation EC2 instance"
   assume_role_policy = data.aws_iam_policy_document.instance_assume.json
 
   tags = {

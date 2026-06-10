@@ -2,7 +2,7 @@
 set -eux
 
 # ============================================================
-# EC2 Remote Workspace - User Data Script
+# EC2 Remote Workstation - User Data Script
 # Ubuntu 24.04 LTS用初期化スクリプト
 # ============================================================
 
@@ -10,7 +10,7 @@ set -eux
 exec > >(tee /var/log/user-data.log | logger -t user-data -s 2>/dev/console) 2>&1
 
 echo "=========================================="
-echo "Starting EC2 Remote Workspace Setup"
+echo "Starting EC2 Remote Workstation Setup"
 echo "Date: $(date)"
 echo "=========================================="
 
@@ -85,7 +85,7 @@ echo "AWS CLI version:"
 aws --version
 
 # 開発用ディレクトリ作成
-echo "[5/6] Setting up workspace directory..."
+echo "[5/6] Setting up workstation directory..."
 mkdir -p /home/ubuntu/work
 chown -R ubuntu:ubuntu /home/ubuntu/work
 
@@ -108,7 +108,7 @@ fi
 
 # 完了メッセージ
 echo "=========================================="
-echo "EC2 Remote Workspace Setup Complete!"
+echo "EC2 Remote Workstation Setup Complete!"
 echo "Date: $(date)"
 echo "=========================================="
 echo ""

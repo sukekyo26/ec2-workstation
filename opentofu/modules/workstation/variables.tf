@@ -9,7 +9,7 @@ variable "environment" {
 }
 
 variable "username" {
-  description = "Workspace owner username"
+  description = "Workstation owner username"
   type        = string
 }
 
