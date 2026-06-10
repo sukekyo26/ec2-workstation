@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add OpenTofu implementation (`opentofu/`) that provisions the same infrastructure as the CDK implementation, sharing `workspace-config.json`, `shared/user-data.sh`, and the operation scripts
+
 ## [0.1.0] - 2026-04-14
 
 ### Added

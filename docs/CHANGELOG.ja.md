@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### 追加
+
+- CDK 実装と同じインフラを構築する OpenTofu 実装（`opentofu/`）を追加（`workspace-config.json`・`shared/user-data.sh`・運用スクリプトを共有）
+
 ## [0.1.0] - 2026-04-14
 
 ### Added
