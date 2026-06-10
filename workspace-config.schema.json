@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "Workspace Configuration",
-  "description": "EC2 Remote Workspace の設定スキーマ。全項目必須（users[].instanceConfig / users[].enableElasticIp / users[].displayName を除く）。このスキーマが設定の唯一の仕様であり、CDK 実行時（ajv）と CI（ajv-cli）で強制される。",
+  "description": "EC2 Workstation の設定スキーマ。全項目必須（users[].instanceConfig / users[].enableElasticIp / users[].displayName を除く）。このスキーマが設定の唯一の仕様であり、CDK 実行時（ajv）と CI（ajv-cli）で強制される。",
   "type": "object",
   "required": [
     "projectName",

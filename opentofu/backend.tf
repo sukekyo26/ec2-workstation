@@ -5,7 +5,7 @@ terraform {
     #
     #   tofu init \
     #     -backend-config="bucket=<your-state-bucket>" \
-    #     -backend-config="key=ec2-remote-workspace/dev/terraform.tfstate" \
+    #     -backend-config="key=ec2-workstation/dev/terraform.tfstate" \
     #     -backend-config="region=ap-northeast-1"
     #
     # use_lockfile: S3 ネイティブロック (OpenTofu 1.10+)。DynamoDB テーブル不要。

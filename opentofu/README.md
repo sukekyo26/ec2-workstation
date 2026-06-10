@@ -64,7 +64,7 @@ cd opentofu
 # 初期化（backend 設定はアカウント固有のため -backend-config で注入）
 tofu init \
   -backend-config="bucket=<your-state-bucket>" \
-  -backend-config="key=ec2-remote-workspace/dev/terraform.tfstate" \
+  -backend-config="key=ec2-workstation/dev/terraform.tfstate" \
   -backend-config="region=ap-northeast-1"
 
 # 差分確認

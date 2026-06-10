@@ -1,4 +1,4 @@
-# EC2 Remote Workspace
+# EC2 Workstation
 
 AWS CDK または OpenTofu を使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。両実装は同じインフラを作成するため、好みの IaC ツールを選択できます。
 
@@ -227,7 +227,7 @@ flowchart TB
 
 ```bash
 git clone <repository-url>
-cd ec2-remote-workspace
+cd ec2-workstation
 ```
 
 ### 2. ユーザー設定
@@ -275,6 +275,8 @@ cd ec2-remote-workspace
 #### 設定項目
 
 設定の仕様は `workspace-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
+
+> 💡 `projectName` はリポジトリ名とは独立した値です（全リソースの物理名のプレフィックスになるため、変更すると既存リソースがすべて再作成されます）。本リポジトリ同梱の設定では既存デプロイ維持のため `ec2-remote-workspace` のままにしています。
 
 | 項目 | 必須 | 説明 |
 |------|:----:|------|
@@ -356,7 +358,7 @@ cd opentofu
 
 # 初期化（初回のみ。state バケットの作成手順は opentofu/README.md 参照）
 tofu init -backend-config="bucket=<your-state-bucket>" \
-          -backend-config="key=ec2-remote-workspace/dev/terraform.tfstate" \
+          -backend-config="key=ec2-workstation/dev/terraform.tfstate" \
           -backend-config="region=ap-northeast-1"
 
 # 差分確認とデプロイ
@@ -569,10 +571,10 @@ tofu destroy
 ## 📁 ディレクトリ構成
 
 ```
-ec2-remote-workspace/
+ec2-workstation/
 ├── cdk/                          # AWS CDK 実装
 │   ├── bin/
-│   │   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
+│   │   └── ec2-workstation.ts        # CDKアプリエントリポイント
 │   ├── lib/
 │   │   ├── constructs/
 │   │   │   ├── vpc-construct.ts      # VPC構成
