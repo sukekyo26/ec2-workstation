@@ -352,7 +352,7 @@ ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --tar
 
 ### Automatically Installed via User Data Script
 
-The following software is automatically installed at EC2 launch ([user-data.sh](lib/scripts/user-data.sh)).
+The following software is automatically installed at EC2 launch ([user-data.sh](shared/user-data.sh)).
 
 | Category | Software |
 |----------|----------|
@@ -510,21 +510,25 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 
 ```
 ec2-remote-workspace/
-├── bin/
-│   └── ec2-remote-workspace.ts   # CDK app entry point
-├── lib/
-│   ├── constructs/
-│   │   ├── vpc-construct.ts      # VPC configuration
-│   │   ├── security-construct.ts # Security Group & IAM
-│   │   ├── ec2-construct.ts      # EC2 instance
-│   │   └── auto-stop-construct.ts # Auto stop (CPU monitoring & scheduled stop)
-│   ├── stacks/
-│   │   ├── network-stack.ts      # Shared network stack
-│   │   └── workspace-stack.ts    # Individual workspace stack
-│   ├── config/
-│   │   └── workspace-config.ts   # Configuration file loader
-│   └── scripts/
-│       └── user-data.sh          # EC2 initialization script
+├── cdk/                          # AWS CDK implementation
+│   ├── bin/
+│   │   └── ec2-remote-workspace.ts   # CDK app entry point
+│   ├── lib/
+│   │   ├── constructs/
+│   │   │   ├── vpc-construct.ts      # VPC configuration
+│   │   │   ├── security-construct.ts # Security Group & IAM
+│   │   │   ├── ec2-construct.ts      # EC2 instance
+│   │   │   └── auto-stop-construct.ts # Auto stop (CPU monitoring & scheduled stop)
+│   │   ├── stacks/
+│   │   │   ├── network-stack.ts      # Shared network stack
+│   │   │   └── workspace-stack.ts    # Individual workspace stack
+│   │   └── config/
+│   │       └── workspace-config.ts   # Configuration file loader
+│   ├── test/                         # Test code
+│   ├── cdk.json                      # CDK configuration
+│   └── tsconfig.json
+├── shared/
+│   └── user-data.sh              # EC2 initialization script (shared across IaC tools)
 ├── scripts/
 │   ├── setup-remote-ssh.sh       # SSH setup script (Linux/Mac)
 │   ├── setup-remote-ssh.ps1      # SSH setup script (Windows)
@@ -532,13 +536,10 @@ ec2-remote-workspace/
 │   ├── start-ec2-and-wait.ps1    # EC2 auto-start script (for ProxyCommand, Windows)
 │   ├── start-ec2.sh              # EC2 manual start script (Linux/Mac)
 │   └── start-ec2.ps1             # EC2 manual start script (Windows)
-├── test/                         # Test code
 ├── workspace-config.json         # User & project configuration
 ├── workspace-config.schema.json  # Configuration file JSON schema
-├── cdk.json                      # CDK configuration
 ├── package.json
-├── pnpm-lock.yaml
-└── tsconfig.json
+└── pnpm-lock.yaml
 ```
 
 ---

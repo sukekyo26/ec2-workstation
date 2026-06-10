@@ -130,19 +130,19 @@ export function resolveElasticIp(
 }
 
 /**
- * 設定ファイルのデフォルトパス
+ * 設定ファイルのデフォルトパス（リポジトリルート直下、cwd 非依存）
  */
-const DEFAULT_CONFIG_PATH = 'workspace-config.json';
+const DEFAULT_CONFIG_PATH = path.join(__dirname, '../../../workspace-config.json');
 
 /**
  * 設定ファイルからプロジェクト設定を読み込む
  *
- * @param configPath 設定ファイルのパス（オプション、デフォルト: workspace-config.json）
+ * @param configPath 設定ファイルのパス（オプション、デフォルト: リポジトリルートの workspace-config.json）
  * @returns プロジェクト設定
  * @throws 設定ファイルが見つからない、またはパースできない場合
  */
 export function loadProjectConfig(configPath?: string): ProjectConfig {
-  const resolvedPath = configPath || path.join(process.cwd(), DEFAULT_CONFIG_PATH);
+  const resolvedPath = configPath || DEFAULT_CONFIG_PATH;
 
   if (!fs.existsSync(resolvedPath)) {
     throw new Error(

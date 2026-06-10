@@ -69,7 +69,7 @@ export class WorkspaceStack extends cdk.Stack {
 
         // User Dataスクリプトを読み込む
         const userDataScript = fs.readFileSync(
-            path.join(__dirname, '../scripts/user-data.sh'),
+            path.join(__dirname, '../../../shared/user-data.sh'),
             'utf8'
         );
 
