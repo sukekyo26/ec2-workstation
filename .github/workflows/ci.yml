@@ -57,6 +57,28 @@ jobs:
   #     - name: CDK Synth
   #       run: pnpm synth
 
+  opentofu:
+    name: OpenTofu Format & Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup OpenTofu
+        uses: opentofu/setup-opentofu@v1
+
+      - name: Format check
+        run: tofu fmt -check -recursive
+        working-directory: opentofu
+
+      - name: Init (no backend)
+        run: tofu init -backend=false
+        working-directory: opentofu
+
+      - name: Validate
+        run: tofu validate
+        working-directory: opentofu
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
