@@ -4,6 +4,9 @@
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}"
+
+  # VPC CIDR のプレフィックス長に関わらず /24 を切り出す (CDK の cidrMask: 24 と同等)
+  public_subnet_cidr = cidrsubnet(var.vpc_cidr, 24 - tonumber(split("/", var.vpc_cidr)[1]), 0)
 }
 
 data "aws_availability_zones" "available" {
@@ -22,7 +25,7 @@ resource "aws_vpc" "this" {
 
 resource "aws_subnet" "public" {
   vpc_id                  = aws_vpc.this.id
-  cidr_block              = cidrsubnet(var.vpc_cidr, 8, 0)
+  cidr_block              = local.public_subnet_cidr
   availability_zone       = data.aws_availability_zones.available.names[0]
   map_public_ip_on_launch = true
 
