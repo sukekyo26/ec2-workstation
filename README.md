@@ -237,7 +237,7 @@ cd ec2-workstation
 ```json
 {
   "$schema": "./workspace-config.schema.json",
-  "projectName": "ec2-remote-workspace",
+  "projectName": "ec2-workstation",
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
@@ -276,7 +276,7 @@ cd ec2-workstation
 
 設定の仕様は `workspace-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
 
-> 💡 `projectName` はリポジトリ名とは独立した値です（全リソースの物理名のプレフィックスになるため、変更すると既存リソースがすべて再作成されます）。本リポジトリ同梱の設定では既存デプロイ維持のため `ec2-remote-workspace` のままにしています。
+> ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のスタック/リソースを削除してください。
 
 | 項目 | 必須 | 説明 |
 |------|:----:|------|
@@ -347,8 +347,8 @@ pnpm cdk bootstrap
 pnpm cdk deploy --all
 
 # 特定のスタックのみデプロイ
-pnpm cdk deploy ec2-remote-workspace-dev-network       # ネットワークのみ
-pnpm cdk deploy ec2-remote-workspace-dev-developer1    # 特定ユーザーのみ
+pnpm cdk deploy ec2-workstation-dev-network       # ネットワークのみ
+pnpm cdk deploy ec2-workstation-dev-developer1    # 特定ユーザーのみ
 ```
 
 #### OpenTofu でデプロイする場合
@@ -376,8 +376,8 @@ state の保護（秘密鍵が state に記録されるため重要）を含む�
 
 ```
 Outputs:
-ec2-remote-workspace-dev-developer1.InstanceId = i-0123456789abcdef0
-ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
+ec2-workstation-dev-developer1.InstanceId = i-0123456789abcdef0
+ec2-workstation-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
 ```
 
 **OpenTofu の場合**:
@@ -498,10 +498,10 @@ cd cdk
 pnpm cdk destroy --all
 
 # 特定のスタックのみ削除
-pnpm cdk destroy ec2-remote-workspace-dev-developer1
+pnpm cdk destroy ec2-workstation-dev-developer1
 
 # ネットワークスタックは最後に削除（依存関係のため）
-pnpm cdk destroy ec2-remote-workspace-dev-network
+pnpm cdk destroy ec2-workstation-dev-network
 ```
 
 **OpenTofu の場合**:
