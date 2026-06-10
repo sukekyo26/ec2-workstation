@@ -4,6 +4,19 @@ import { Template, Match } from 'aws-cdk-lib/assertions';
 import { NetworkStack } from '../lib/stacks/network-stack';
 import { WorkspaceStack } from '../lib/stacks/workspace-stack';
 
+const TEST_INSTANCE_CONFIG = {
+    instanceType: 't3.medium',
+    volumeSize: 80,
+    volumeType: 'gp3' as const,
+};
+
+const TEST_AUTO_STOP_CONFIG = {
+    cpuThreshold: 5,
+    cpuEvaluationMinutes: 10,
+    scheduledStopHour: 23,
+    scheduledStopMinute: 0,
+};
+
 describe('WorkspaceStack', () => {
     let app: cdk.App;
     let networkStack: NetworkStack;
@@ -33,6 +46,9 @@ describe('WorkspaceStack', () => {
                 username: 'testuser',
                 displayName: 'Test User',
             },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
+            enableElasticIp: false,
             env: {
                 account: '123456789012',
                 region: 'ap-northeast-1',
@@ -201,6 +217,9 @@ describe('WorkspaceStack - カスタム設定', () => {
                     volumeType: 'gp3',
                 },
             },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
+            enableElasticIp: false,
             env: {
                 account: '123456789012',
                 region: 'ap-northeast-1',
@@ -244,6 +263,8 @@ describe('WorkspaceStack - カスタム設定', () => {
             userConfig: {
                 username: 'testuser3',
             },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            enableElasticIp: false,
             autoStopConfig: {
                 cpuThreshold: 10,
                 cpuEvaluationMinutes: 15,
@@ -287,6 +308,9 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser' },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
+            enableElasticIp: false,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
@@ -310,6 +334,8 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser' },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
             enableElasticIp: true,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
@@ -334,6 +360,8 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser' },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
             enableElasticIp: true,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
@@ -366,6 +394,8 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser' },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
             enableElasticIp: true,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
@@ -391,6 +421,8 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser', enableElasticIp: false },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
             enableElasticIp: true,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
@@ -415,6 +447,8 @@ describe('WorkspaceStack - Elastic IP', () => {
             projectName: 'test-project',
             environment: 'test',
             userConfig: { username: 'testuser', enableElasticIp: true },
+            defaultInstanceConfig: TEST_INSTANCE_CONFIG,
+            autoStopConfig: TEST_AUTO_STOP_CONFIG,
             enableElasticIp: false,
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });

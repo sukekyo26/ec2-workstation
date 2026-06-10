@@ -251,6 +251,7 @@ cd ec2-remote-workspace
     "scheduledStopHour": 23,
     "scheduledStopMinute": 0
   },
+  "enableElasticIp": false,
   "users": [
     {
       "username": "developer1",
@@ -270,24 +271,26 @@ cd ec2-remote-workspace
 
 #### 設定項目
 
-| 項目 | 必須 | デフォルト | 説明 |
-|------|:----:|-----------|------|
-| `projectName` | | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
-| `environment` | | `dev` | 環境名（dev, staging, prod） |
-| `vpcCidr` | | `10.0.0.0/16` | VPCのCIDRブロック |
-| `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | | `80` | EBSボリュームサイズ（GB） |
-| `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
-| `autoStopConfig.cpuThreshold` | | `5` | CPU使用率閾値（%）- この値以下が続くと停止 |
-| `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU監視期間（分）- この期間低負荷が続くと停止 |
-| `autoStopConfig.scheduledStopHour` | | `23` | 定時停止時刻（時、0-23、Asia/Tokyo） |
-| `autoStopConfig.scheduledStopMinute` | | `0` | 定時停止時刻（分、0-59） |
-| `enableElasticIp` | | `false` | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
-| `users` | ✅ | - | ユーザー配列（1人以上必須） |
-| `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
-| `users[].displayName` | | - | 表示名 |
-| `users[].instanceConfig` | | - | ユーザー個別のインスタンス設定（デフォルトを上書き） |
-| `users[].enableElasticIp` | | - | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
+設定の仕様は `workspace-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
+
+| 項目 | 必須 | 説明 |
+|------|:----:|------|
+| `projectName` | ✅ | プロジェクト名（リソース命名に使用） |
+| `environment` | ✅ | 環境名（dev, staging, prod） |
+| `vpcCidr` | ✅ | VPCのCIDRブロック |
+| `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ |
+| `defaultInstanceConfig.volumeSize` | ✅ | EBSボリュームサイズ（GB、20〜1000） |
+| `defaultInstanceConfig.volumeType` | ✅ | EBSボリュームタイプ（gp3 / gp2） |
+| `autoStopConfig.cpuThreshold` | ✅ | CPU使用率閾値（%）- この値以下が続くと停止 |
+| `autoStopConfig.cpuEvaluationMinutes` | ✅ | CPU監視期間（分）- この期間低負荷が続くと停止 |
+| `autoStopConfig.scheduledStopHour` | ✅ | 定時停止時刻（時、0-23、Asia/Tokyo） |
+| `autoStopConfig.scheduledStopMinute` | ✅ | 定時停止時刻（分、0-59） |
+| `enableElasticIp` | ✅ | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
+| `users` | ✅ | ユーザー配列（1人以上必須） |
+| `users[].username` | ✅ | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
+| `users[].displayName` | | 表示名 |
+| `users[].instanceConfig` | | ユーザー個別のインスタンス設定（`defaultInstanceConfig` を項目単位で上書き） |
+| `users[].enableElasticIp` | | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
 
 ### 3. AWS認証
 

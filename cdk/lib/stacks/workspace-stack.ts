@@ -12,8 +12,6 @@ import {
     AutoStopConfig,
     getInstanceConfig,
     resolveElasticIp,
-    DEFAULT_INSTANCE_CONFIG,
-    DEFAULT_AUTO_STOP_CONFIG,
 } from '../config/workspace-config';
 
 /**
@@ -29,11 +27,11 @@ export interface WorkspaceStackProps extends cdk.StackProps {
     /** ユーザー設定 */
     readonly userConfig: WorkspaceUserConfig;
     /** デフォルトインスタンス設定 */
-    readonly defaultInstanceConfig?: InstanceConfig;
+    readonly defaultInstanceConfig: InstanceConfig;
     /** 自動停止設定 */
-    readonly autoStopConfig?: AutoStopConfig;
+    readonly autoStopConfig: AutoStopConfig;
     /** Elastic IP のプロジェクトデフォルト */
-    readonly enableElasticIp?: boolean;
+    readonly enableElasticIp: boolean;
 }
 
 /**
@@ -54,9 +52,8 @@ export class WorkspaceStack extends cdk.Stack {
         super(scope, id, props);
 
         const { vpc, projectName, environment, userConfig } = props;
-        const defaultConfig = props.defaultInstanceConfig || DEFAULT_INSTANCE_CONFIG;
-        const instanceConfig = getInstanceConfig(userConfig, defaultConfig);
-        const autoStopConfig = props.autoStopConfig || DEFAULT_AUTO_STOP_CONFIG;
+        const instanceConfig = getInstanceConfig(userConfig, props.defaultInstanceConfig);
+        const autoStopConfig = props.autoStopConfig;
         const enableElasticIp = resolveElasticIp(userConfig, props.enableElasticIp);
 
         // Security Construct

@@ -11,11 +11,6 @@ variable "environment" {
 variable "username" {
   description = "Workspace owner username"
   type        = string
-
-  validation {
-    condition     = can(regex("^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$", var.username))
-    error_message = "Username must be 3-32 characters, lowercase alphanumeric with hyphens/underscores, starting and ending with alphanumeric."
-  }
 }
 
 variable "vpc_id" {
@@ -41,11 +36,6 @@ variable "volume_size" {
 variable "volume_type" {
   description = "Root EBS volume type"
   type        = string
-
-  validation {
-    condition     = contains(["gp3", "gp2"], var.volume_type)
-    error_message = "Volume type must be gp3 or gp2."
-  }
 }
 
 variable "user_data" {
