@@ -2,7 +2,7 @@
 
 # EC2 Remote Workspace
 
-AWS CDKを使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。
+AWS CDKを使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです（同等の OpenTofu 実装も利用できます）。
 
 ## 📋 プロジェクト概要
 
@@ -11,7 +11,7 @@ AWS CDKを使用して、EC2上にセキュアなLinux開発環境を構築す�
 - **SessionManager経由のセキュアな接続** - SSH(22)ポートを開放せず、IAM認証でセキュアにアクセス
 - **チーム開発対応** - 設定ファイル（`workspace-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
 - **DevContainer対応** - Docker環境がプリインストールされており、VS Code DevContainerでの開発が可能
-- **Infrastructure as Code** - AWS CDKによる再現可能なインフラ構築
+- **Infrastructure as Code** - AWS CDK または OpenTofu による再現可能なインフラ構築（両実装は同じ設定ファイルを共有）
 
 ### 想定ユースケース
 
@@ -92,7 +92,7 @@ flowchart LR
 
 | カテゴリ | 技術 | 説明 |
 |---------|------|------|
-| IaC | AWS CDK (TypeScript) | 型安全なインフラ定義 |
+| IaC | AWS CDK (TypeScript) / OpenTofu | 型安全なインフラ定義（どちらの実装も選択可能） |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
 | インスタンス | t3.medium (デフォルト) | 2vCPU / 4GB RAM |
 | ストレージ | EBS gp3 80GB | 高速I/O、コスト効率 |
@@ -340,6 +340,20 @@ ec2-remote-workspace-dev-developer1.InstanceId = i-0123456789abcdef0
 ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
 ```
 
+### OpenTofu でのデプロイ（代替手段）
+
+CDK の代わりに OpenTofu でも同じインフラを構築できます。両実装は `workspace-config.json`・user-data スクリプト・運用スクリプトを共有しているため、デプロイ後のワークフロー（Remote-SSH 設定、自動起動・停止）は同一です。
+
+```bash
+cd opentofu
+tofu init -backend-config="bucket=<your-state-bucket>" \
+          -backend-config="key=ec2-remote-workspace/dev/terraform.tfstate" \
+          -backend-config="region=ap-northeast-1"
+tofu apply
+```
+
+> ⚠️ 同一アカウント・同一 `projectName`/`environment` に CDK と OpenTofu の**両方を apply しないでください**（同じ物理リソース名を使用するため衝突します）。前提条件・state 保護の注意を含む詳細は [opentofu/README.md](../opentofu/README.md) を参照してください。
+
 ---
 
 ## 📦 プリインストールソフトウェア
@@ -527,6 +541,13 @@ ec2-remote-workspace/
 │   ├── test/                         # テストコード
 │   ├── cdk.json                      # CDK設定
 │   └── tsconfig.json
+├── opentofu/                     # OpenTofu 実装（CDK と同じインフラ）
+│   ├── modules/
+│   │   ├── network/              # VPC・サブネット・IGW・Flow Logs
+│   │   └── workspace/            # SG・IAM・EC2・キーペア・自動停止
+│   ├── locals.tf                 # workspace-config.json 読み込み（CDK と共有）
+│   ├── main.tf
+│   └── README.md                 # OpenTofu 利用ガイド
 ├── shared/
 │   └── user-data.sh              # EC2初期化スクリプト（IaCツール間で共有）
 ├── scripts/

@@ -2,7 +2,7 @@
 
 # EC2 Remote Workspace
 
-A project that builds a secure Linux development environment on EC2 using AWS CDK.
+A project that builds a secure Linux development environment on EC2 using AWS CDK (with an equivalent OpenTofu implementation also available).
 
 ## 📋 Project Overview
 
@@ -11,7 +11,7 @@ A project that builds a secure Linux development environment on EC2 using AWS CD
 - **Secure Connection via SessionManager** - Access securely with IAM authentication without opening SSH (22) port
 - **Team Development Support** - Define users in a configuration file (`workspace-config.json`) and provide each member with an independent EC2 environment
 - **DevContainer Support** - Docker environment is pre-installed, enabling development with VS Code DevContainers
-- **Infrastructure as Code** - Reproducible infrastructure provisioning with AWS CDK
+- **Infrastructure as Code** - Reproducible infrastructure provisioning with AWS CDK or OpenTofu (both implementations share the same configuration file)
 
 ### Use Cases
 
@@ -92,7 +92,7 @@ flowchart LR
 
 | Category | Technology | Description |
 |----------|-----------|-------------|
-| IaC | AWS CDK (TypeScript) | Type-safe infrastructure definitions |
+| IaC | AWS CDK (TypeScript) / OpenTofu | Type-safe infrastructure definitions (choose either implementation) |
 | OS | Ubuntu 24.04 LTS | Supported until 2029 |
 | Instance | t3.medium (default) | 2vCPU / 4GB RAM |
 | Storage | EBS gp3 80GB | High-speed I/O, cost-efficient |
@@ -340,6 +340,20 @@ ec2-remote-workspace-dev-developer1.InstanceId = i-0123456789abcdef0
 ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
 ```
 
+### Deploying with OpenTofu (Alternative)
+
+The same infrastructure can be provisioned with OpenTofu instead of CDK. Both implementations share `workspace-config.json`, the user-data script, and the operation scripts, so the post-deployment workflow (Remote-SSH setup, auto start/stop) is identical.
+
+```bash
+cd opentofu
+tofu init -backend-config="bucket=<your-state-bucket>" \
+          -backend-config="key=ec2-remote-workspace/dev/terraform.tfstate" \
+          -backend-config="region=ap-northeast-1"
+tofu apply
+```
+
+> ⚠️ Do **not** apply both CDK and OpenTofu to the same account with the same `projectName`/`environment` — they create resources with identical physical names. See [opentofu/README.md](opentofu/README.md) for details, prerequisites, and state protection notes.
+
 ---
 
 ## 📦 Pre-installed Software
@@ -527,6 +541,13 @@ ec2-remote-workspace/
 │   ├── test/                         # Test code
 │   ├── cdk.json                      # CDK configuration
 │   └── tsconfig.json
+├── opentofu/                     # OpenTofu implementation (same infrastructure as CDK)
+│   ├── modules/
+│   │   ├── network/              # VPC, Subnet, IGW, Flow Logs
+│   │   └── workspace/            # SG, IAM, EC2, Key Pair, Auto stop
+│   ├── locals.tf                 # workspace-config.json loader (shared with CDK)
+│   ├── main.tf
+│   └── README.md                 # OpenTofu usage guide
 ├── shared/
 │   └── user-data.sh              # EC2 initialization script (shared across IaC tools)
 ├── scripts/
