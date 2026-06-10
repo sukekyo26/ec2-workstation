@@ -14,6 +14,7 @@
     "scheduledStopHour": 23,
     "scheduledStopMinute": 0
   },
+  "enableElasticIp": false,
   "users": [
     {
       "username": "developer1",

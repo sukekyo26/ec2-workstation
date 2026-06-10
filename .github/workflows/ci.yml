@@ -7,6 +7,21 @@ on:
     branches: [develop]
 
 jobs:
+  validate-config:
+    name: Validate workspace-config
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 24
+
+      - name: Validate against JSON Schema
+        run: npx --yes ajv-cli@5 validate -s workspace-config.schema.json -d workspace-config.json
+
   build-and-test:
     name: Build & Test
     runs-on: ubuntu-latest

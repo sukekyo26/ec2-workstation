@@ -92,8 +92,8 @@ flowchart LR
 |---------|------|------|
 | IaC | AWS CDK (TypeScript) / OpenTofu | どちらか好みのツールを選択して利用 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
-| インスタンス | t3.medium (デフォルト) | 2vCPU / 4GB RAM |
-| ストレージ | EBS gp3 80GB | 高速I/O、コスト効率 |
+| インスタンス | EC2（タイプは `workspace-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
+| ストレージ | EBS gp3 / gp2（サイズ・タイプは `workspace-config.json` で指定） | 暗号化有効、高速I/O |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
 | パッケージ管理 | pnpm | 高速な依存関係管理 |
 
@@ -170,8 +170,8 @@ flowchart TB
         B2["定時停止<br/>(EventBridge Scheduler)"]
         B3["EC2インスタンス停止"]
 
-        B1 -->|"CPU < 5%<br/>10分間"| B3
-        B2 -->|"毎日23:00 JST"| B3
+        B1 -->|"CPU < 閾値が<br/>指定期間継続"| B3
+        B2 -->|"毎日指定時刻<br/>(JST)"| B3
     end
 ```
 
@@ -251,6 +251,7 @@ cd ec2-remote-workspace
     "scheduledStopHour": 23,
     "scheduledStopMinute": 0
   },
+  "enableElasticIp": false,
   "users": [
     {
       "username": "developer1",
@@ -262,32 +263,37 @@ cd ec2-remote-workspace
       "instanceConfig": {
         "instanceType": "t3.xlarge",
         "volumeSize": 200
-      }
+      },
+      "enableElasticIp": true
     }
   ]
 }
 ```
 
+> 💡 この例ではプロジェクトレベルの `enableElasticIp` は `false` のため、Elastic IP は `developer2` のみに割り当てられます（ユーザー単位の設定がプロジェクトデフォルトを上書き）。
+
 #### 設定項目
 
-| 項目 | 必須 | デフォルト | 説明 |
-|------|:----:|-----------|------|
-| `projectName` | | `ec2-remote-workspace` | プロジェクト名（リソース命名に使用） |
-| `environment` | | `dev` | 環境名（dev, staging, prod） |
-| `vpcCidr` | | `10.0.0.0/16` | VPCのCIDRブロック |
-| `defaultInstanceConfig.instanceType` | | `t3.medium` | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | | `80` | EBSボリュームサイズ（GB） |
-| `defaultInstanceConfig.volumeType` | | `gp3` | EBSボリュームタイプ |
-| `autoStopConfig.cpuThreshold` | | `5` | CPU使用率閾値（%）- この値以下が続くと停止 |
-| `autoStopConfig.cpuEvaluationMinutes` | | `10` | CPU監視期間（分）- この期間低負荷が続くと停止 |
-| `autoStopConfig.scheduledStopHour` | | `23` | 定時停止時刻（時、0-23、Asia/Tokyo） |
-| `autoStopConfig.scheduledStopMinute` | | `0` | 定時停止時刻（分、0-59） |
-| `enableElasticIp` | | `false` | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
-| `users` | ✅ | - | ユーザー配列（1人以上必須） |
-| `users[].username` | ✅ | - | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
-| `users[].displayName` | | - | 表示名 |
-| `users[].instanceConfig` | | - | ユーザー個別のインスタンス設定（デフォルトを上書き） |
-| `users[].enableElasticIp` | | - | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
+設定の仕様は `workspace-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
+
+| 項目 | 必須 | 説明 |
+|------|:----:|------|
+| `projectName` | ✅ | プロジェクト名（リソース命名に使用） |
+| `environment` | ✅ | 環境名（dev, staging, prod） |
+| `vpcCidr` | ✅ | VPCのCIDRブロック |
+| `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ |
+| `defaultInstanceConfig.volumeSize` | ✅ | EBSボリュームサイズ（GB、20〜1000） |
+| `defaultInstanceConfig.volumeType` | ✅ | EBSボリュームタイプ（gp3 / gp2） |
+| `autoStopConfig.cpuThreshold` | ✅ | CPU使用率閾値（%）- この値以下が続くと停止 |
+| `autoStopConfig.cpuEvaluationMinutes` | ✅ | CPU監視期間（分）- この期間低負荷が続くと停止 |
+| `autoStopConfig.scheduledStopHour` | ✅ | 定時停止時刻（時、0-23、Asia/Tokyo） |
+| `autoStopConfig.scheduledStopMinute` | ✅ | 定時停止時刻（分、0-59） |
+| `enableElasticIp` | ✅ | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
+| `users` | ✅ | ユーザー配列（1人以上必須） |
+| `users[].username` | ✅ | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
+| `users[].displayName` | | 表示名 |
+| `users[].instanceConfig` | | ユーザー個別のインスタンス設定（`defaultInstanceConfig` を項目単位で上書き） |
+| `users[].enableElasticIp` | | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
 
 ### 3. AWS認証
 

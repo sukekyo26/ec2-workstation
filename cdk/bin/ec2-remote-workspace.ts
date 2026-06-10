@@ -2,10 +2,7 @@
 import * as cdk from 'aws-cdk-lib';
 import { NetworkStack } from '../lib/stacks/network-stack';
 import { WorkspaceStack } from '../lib/stacks/workspace-stack';
-import {
-  loadProjectConfig,
-  validateUsername,
-} from '../lib/config/workspace-config';
+import { loadProjectConfig } from '../lib/config/workspace-config';
 
 const app = new cdk.App();
 
@@ -44,11 +41,6 @@ const networkStack = new NetworkStack(app, `${projectName}-${environment}-networ
 // workspace-config.json の users で定義されたユーザー分を作成
 // ============================================================
 for (const userConfig of users) {
-  if (!validateUsername(userConfig.username)) {
-    console.warn(`Skipping invalid username: ${userConfig.username}`);
-    continue;
-  }
-
   const workspaceStack = new WorkspaceStack(
     app,
     `${projectName}-${environment}-${userConfig.username}`,
