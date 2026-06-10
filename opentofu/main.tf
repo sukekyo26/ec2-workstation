@@ -6,8 +6,8 @@ module "network" {
   vpc_cidr     = local.vpc_cidr
 }
 
-module "workspace" {
-  source   = "./modules/workspace"
+module "workstation" {
+  source   = "./modules/workstation"
   for_each = local.users
 
   project_name = local.project_name

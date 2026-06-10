@@ -7,7 +7,7 @@ AWS CDK または OpenTofu を使用して、EC2上にセキュアなLinux開発
 ### 主な特徴
 
 - **SessionManager経由のセキュアな接続** - SSH(22)ポートを開放せず、IAM認証でセキュアにアクセス
-- **チーム開発対応** - 設定ファイル（`workspace-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
+- **チーム開発対応** - 設定ファイル（`workstation-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
 - **DevContainer対応** - Docker環境がプリインストールされており、VS Code DevContainerでの開発が可能
 - **Infrastructure as Code** - AWS CDK または OpenTofu による再現可能なインフラ構築（両実装は同じ設定ファイルを共有）
 
@@ -66,22 +66,22 @@ flowchart LR
         RT["Route Table"]
     end
 
-    subgraph WorkspaceA["📦 Workspace Stack (User A)"]
+    subgraph WorkstationA["📦 Workstation Stack (User A)"]
         EC2A["EC2 Instance"]
         SGA["Security Group"]
         IAMA["IAM Role"]
         KPA["SSH Key Pair"]
     end
 
-    subgraph WorkspaceB["📦 Workspace Stack (User B)"]
+    subgraph WorkstationB["📦 Workstation Stack (User B)"]
         EC2B["EC2 Instance"]
         SGB["Security Group"]
         IAMB["IAM Role"]
         KPB["SSH Key Pair"]
     end
 
-    NetworkStack --> WorkspaceA
-    NetworkStack --> WorkspaceB
+    NetworkStack --> WorkstationA
+    NetworkStack --> WorkstationB
 ```
 
 ---
@@ -92,8 +92,8 @@ flowchart LR
 |---------|------|------|
 | IaC | AWS CDK (TypeScript) / OpenTofu | どちらか好みのツールを選択して利用 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
-| インスタンス | EC2（タイプは `workspace-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
-| ストレージ | EBS gp3 / gp2（サイズ・タイプは `workspace-config.json` で指定） | 暗号化有効、高速I/O |
+| インスタンス | EC2（タイプは `workstation-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
+| ストレージ | EBS gp3 / gp2（サイズ・タイプは `workstation-config.json` で指定） | 暗号化有効、高速I/O |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
 | パッケージ管理 | pnpm | 高速な依存関係管理 |
 
@@ -183,7 +183,7 @@ flowchart TB
 
 > 💡 **コスト削減効果**: 使用していない時間帯のEC2料金を削減できます。インスタンスが停止中でもEBS料金は発生しますが、EC2の時間課金は発生しません。
 >
-> ⚙️ **設定変更**: `workspace-config.json` の `autoStopConfig` で CPU閾値、監視期間、定時停止時刻をカスタマイズできます。
+> ⚙️ **設定変更**: `workstation-config.json` の `autoStopConfig` で CPU閾値、監視期間、定時停止時刻をカスタマイズできます。
 
 ---
 
@@ -232,11 +232,11 @@ cd ec2-workstation
 
 ### 2. ユーザー設定
 
-`workspace-config.json` を編集してプロジェクト設定とユーザーを定義します。
+`workstation-config.json` を編集してプロジェクト設定とユーザーを定義します。
 
 ```json
 {
-  "$schema": "./workspace-config.schema.json",
+  "$schema": "./workstation-config.schema.json",
   "projectName": "ec2-workstation",
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
@@ -274,7 +274,7 @@ cd ec2-workstation
 
 #### 設定項目
 
-設定の仕様は `workspace-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
+設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
 
 > ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のスタック/リソースを削除してください。
 
@@ -328,7 +328,7 @@ aws configure
 ### 4. デプロイ
 
 CDK と OpenTofu のどちらでも同じインフラを構築できます。好みのツールを選んでください。
-両実装は `workspace-config.json`・user-data スクリプト・運用スクリプトを共有しているため、デプロイ後のワークフロー（Remote-SSH 設定、自動起動・停止）はどちらを選んでも同一です。
+両実装は `workstation-config.json`・user-data スクリプト・運用スクリプトを共有しているため、デプロイ後のワークフロー（Remote-SSH 設定、自動起動・停止）はどちらを選んでも同一です。
 
 > ⚠️ 同一アカウント・同一 `projectName`/`environment` に CDK と OpenTofu の**両方を apply しないでください**（同じ物理リソース名を使用するため衝突します）。
 
@@ -383,7 +383,7 @@ ec2-workstation-dev-developer1.ConnectCommand = aws ssm start-session --target i
 **OpenTofu の場合**:
 
 ```bash
-tofu output workspaces
+tofu output workstations
 ```
 
 ---
@@ -512,7 +512,7 @@ cd opentofu
 # 全リソースを削除（依存関係は自動解決）
 tofu destroy
 
-# 特定ユーザーのみ削除する場合は workspace-config.json の users から
+# 特定ユーザーのみ削除する場合は workstation-config.json の users から
 # 該当ユーザーを削除して tofu apply
 ```
 
@@ -583,9 +583,9 @@ ec2-workstation/
 │   │   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
 │   │   ├── stacks/
 │   │   │   ├── network-stack.ts      # 共有ネットワークスタック
-│   │   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
+│   │   │   └── workstation-stack.ts    # 個人用ワークステーションスタック
 │   │   └── config/
-│   │       └── workspace-config.ts   # 設定ファイル読み込み
+│   │       └── workstation-config.ts   # 設定ファイル読み込み
 │   ├── test/                         # テストコード
 │   ├── cdk.json                      # CDK設定
 │   ├── package.json
@@ -594,8 +594,8 @@ ec2-workstation/
 ├── opentofu/                     # OpenTofu 実装（CDK と同じインフラ）
 │   ├── modules/
 │   │   ├── network/              # VPC・サブネット・IGW・Flow Logs
-│   │   └── workspace/            # SG・IAM・EC2・キーペア・自動停止
-│   ├── locals.tf                 # workspace-config.json 読み込み（CDK と共有）
+│   │   └── workstation/            # SG・IAM・EC2・キーペア・自動停止
+│   ├── locals.tf                 # workstation-config.json 読み込み（CDK と共有）
 │   ├── main.tf
 │   └── README.md                 # OpenTofu 利用ガイド
 ├── shared/
@@ -607,8 +607,8 @@ ec2-workstation/
 │   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
 │   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
 │   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
-├── workspace-config.json         # ユーザー・プロジェクト設定
-└── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
+├── workstation-config.json         # ユーザー・プロジェクト設定
+└── workstation-config.schema.json  # 設定ファイルのJSONスキーマ
 ```
 
 ---

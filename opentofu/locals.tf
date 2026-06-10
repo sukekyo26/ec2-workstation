@@ -1,9 +1,9 @@
-# workspace-config.json (リポジトリルート、CDK 実装と共有) を読み込む。
-# 設定の仕様（必須項目・型・値域）は workspace-config.schema.json が唯一の定義で、
+# workstation-config.json (リポジトリルート、CDK 実装と共有) を読み込む。
+# 設定の仕様（必須項目・型・値域）は workstation-config.schema.json が唯一の定義で、
 # CDK 実行時 (ajv) と CI (ajv-cli) が強制する。ここでは検証・デフォルト適用を行わず、
 # per-user override のマージのみ行う。
 locals {
-  raw_config = jsondecode(file("${path.module}/../workspace-config.json"))
+  raw_config = jsondecode(file("${path.module}/../workstation-config.json"))
 
   project_name = local.raw_config.projectName
   environment  = local.raw_config.environment

@@ -44,7 +44,7 @@ export class SecurityConstruct extends Construct {
         this.securityGroup = new ec2.SecurityGroup(this, 'SecurityGroup', {
             vpc: props.vpc,
             securityGroupName: `${resourcePrefix}-sg`,
-            description: `Security group for ${props.username} workspace - All inbound blocked`,
+            description: `Security group for ${props.username} workstation - All inbound blocked`,
             allowAllOutbound: false, // アウトバウンドも明示的に制御
         });
 
@@ -87,7 +87,7 @@ export class SecurityConstruct extends Construct {
         this.instanceRole = new iam.Role(this, 'InstanceRole', {
             roleName: `${resourcePrefix}-instance-role`,
             assumedBy: new iam.ServicePrincipal('ec2.amazonaws.com'),
-            description: `IAM role for ${props.username} workspace EC2 instance`,
+            description: `IAM role for ${props.username} workstation EC2 instance`,
         });
 
         // SSM接続に必要な権限を付与

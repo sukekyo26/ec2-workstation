@@ -8,10 +8,10 @@ output "public_subnet_id" {
   value       = module.network.public_subnet_id
 }
 
-output "workspaces" {
-  description = "Per-user workspace information"
+output "workstations" {
+  description = "Per-user workstation information"
   value = {
-    for username, ws in module.workspace : username => {
+    for username, ws in module.workstation : username => {
       instance_id       = ws.instance_id
       session_log_group = ws.session_log_group_name
       connect_command   = "aws ssm start-session --target ${ws.instance_id}"

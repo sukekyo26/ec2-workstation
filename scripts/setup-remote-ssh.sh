@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================
-# EC2 Remote Workspace - Setup Remote SSH Script
+# EC2 Remote Workstation - Setup Remote SSH Script
 # VS Code Remote-SSH接続設定スクリプト (Linux/Mac)
 # ============================================================
 

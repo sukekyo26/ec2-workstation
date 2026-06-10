@@ -1,5 +1,5 @@
 {
-  "$schema": "./workspace-config.schema.json",
+  "$schema": "./workstation-config.schema.json",
   "projectName": "ec2-workstation",
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",

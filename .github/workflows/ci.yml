@@ -8,7 +8,7 @@ on:
 
 jobs:
   validate-config:
-    name: Validate workspace-config
+    name: Validate workstation-config
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -20,7 +20,7 @@ jobs:
           node-version: 24
 
       - name: Validate against JSON Schema
-        run: npx --yes ajv-cli@5 validate -s workspace-config.schema.json -d workspace-config.json
+        run: npx --yes ajv-cli@5 validate -s workstation-config.schema.json -d workstation-config.json
 
   build-and-test:
     name: Build & Test

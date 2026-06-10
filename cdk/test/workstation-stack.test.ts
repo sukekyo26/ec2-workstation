@@ -2,7 +2,7 @@ import * as cdk from 'aws-cdk-lib';
 import * as ec2 from 'aws-cdk-lib/aws-ec2';
 import { Template, Match } from 'aws-cdk-lib/assertions';
 import { NetworkStack } from '../lib/stacks/network-stack';
-import { WorkspaceStack } from '../lib/stacks/workspace-stack';
+import { WorkstationStack } from '../lib/stacks/workstation-stack';
 
 const TEST_INSTANCE_CONFIG = {
     instanceType: 't3.medium',
@@ -17,10 +17,10 @@ const TEST_AUTO_STOP_CONFIG = {
     scheduledStopMinute: 0,
 };
 
-describe('WorkspaceStack', () => {
+describe('WorkstationStack', () => {
     let app: cdk.App;
     let networkStack: NetworkStack;
-    let workspaceStack: WorkspaceStack;
+    let workstationStack: WorkstationStack;
     let template: Template;
 
     beforeEach(() => {
@@ -37,8 +37,8 @@ describe('WorkspaceStack', () => {
             },
         });
 
-        // ワークスペーススタック作成
-        workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStack', {
+        // ワークステーションスタック作成
+        workstationStack = new WorkstationStack(app, 'TestWorkstationStack', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -55,7 +55,7 @@ describe('WorkspaceStack', () => {
             },
         });
 
-        template = Template.fromStack(workspaceStack);
+        template = Template.fromStack(workstationStack);
     });
 
     describe('EC2 Instance', () => {
@@ -191,7 +191,7 @@ describe('WorkspaceStack', () => {
     });
 });
 
-describe('WorkspaceStack - カスタム設定', () => {
+describe('WorkstationStack - カスタム設定', () => {
     test('カスタムインスタンスタイプが設定できる', () => {
         const app = new cdk.App();
 
@@ -205,7 +205,7 @@ describe('WorkspaceStack - カスタム設定', () => {
             },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStack2', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStack2', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -226,7 +226,7 @@ describe('WorkspaceStack - カスタム設定', () => {
             },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
 
         template.hasResourceProperties('AWS::EC2::Instance', {
             InstanceType: 't3.medium',
@@ -256,7 +256,7 @@ describe('WorkspaceStack - カスタム設定', () => {
             },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStack3', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStack3', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -277,7 +277,7 @@ describe('WorkspaceStack - カスタム設定', () => {
             },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
 
         // CloudWatch AlarmがカスタムCPU閾値で作成される
         template.hasResourceProperties('AWS::CloudWatch::Alarm', {
@@ -292,7 +292,7 @@ describe('WorkspaceStack - カスタム設定', () => {
     });
 });
 
-describe('WorkspaceStack - Elastic IP', () => {
+describe('WorkstationStack - Elastic IP', () => {
     test('デフォルトではEIPが作成されない', () => {
         const app = new cdk.App();
 
@@ -303,7 +303,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip1', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip1', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -314,7 +314,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.resourceCountIs('AWS::EC2::EIP', 0);
         template.resourceCountIs('AWS::EC2::EIPAssociation', 0);
     });
@@ -329,7 +329,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip2', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip2', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -340,7 +340,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.resourceCountIs('AWS::EC2::EIP', 1);
         template.resourceCountIs('AWS::EC2::EIPAssociation', 1);
     });
@@ -355,7 +355,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip3', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip3', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -366,7 +366,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.hasResourceProperties('AWS::EC2::EIP', {
             Tags: Match.arrayWith([
                 Match.objectLike({ Key: 'Owner', Value: 'testuser' }),
@@ -389,7 +389,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip4', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip4', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -400,7 +400,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.hasOutput('ElasticIpAddress', {});
         template.hasOutput('ElasticIpAllocationId', {});
     });
@@ -416,7 +416,7 @@ describe('WorkspaceStack - Elastic IP', () => {
         });
 
         // プロジェクトデフォルト true、ユーザーレベル false
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip5', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip5', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -427,7 +427,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.resourceCountIs('AWS::EC2::EIP', 0);
     });
 
@@ -442,7 +442,7 @@ describe('WorkspaceStack - Elastic IP', () => {
         });
 
         // プロジェクトデフォルト false、ユーザーレベル true
-        const workspaceStack = new WorkspaceStack(app, 'TestWorkspaceStackEip6', {
+        const workstationStack = new WorkstationStack(app, 'TestWorkstationStackEip6', {
             vpc: networkStack.vpc,
             projectName: 'test-project',
             environment: 'test',
@@ -453,7 +453,7 @@ describe('WorkspaceStack - Elastic IP', () => {
             env: { account: '123456789012', region: 'ap-northeast-1' },
         });
 
-        const template = Template.fromStack(workspaceStack);
+        const template = Template.fromStack(workstationStack);
         template.resourceCountIs('AWS::EC2::EIP', 1);
     });
 });
