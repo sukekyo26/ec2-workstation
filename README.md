@@ -92,8 +92,8 @@ flowchart LR
 |---------|------|------|
 | IaC | AWS CDK (TypeScript) / OpenTofu | どちらか好みのツールを選択して利用 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
-| インスタンス | t3.medium (デフォルト) | 2vCPU / 4GB RAM |
-| ストレージ | EBS gp3 80GB | 高速I/O、コスト効率 |
+| インスタンス | EC2（タイプは `workspace-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
+| ストレージ | EBS gp3 / gp2（サイズ・タイプは `workspace-config.json` で指定） | 暗号化有効、高速I/O |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
 | パッケージ管理 | pnpm | 高速な依存関係管理 |
 
@@ -170,8 +170,8 @@ flowchart TB
         B2["定時停止<br/>(EventBridge Scheduler)"]
         B3["EC2インスタンス停止"]
 
-        B1 -->|"CPU < 5%<br/>10分間"| B3
-        B2 -->|"毎日23:00 JST"| B3
+        B1 -->|"CPU < 閾値が<br/>指定期間継続"| B3
+        B2 -->|"毎日指定時刻<br/>(JST)"| B3
     end
 ```
 
@@ -263,11 +263,14 @@ cd ec2-remote-workspace
       "instanceConfig": {
         "instanceType": "t3.xlarge",
         "volumeSize": 200
-      }
+      },
+      "enableElasticIp": true
     }
   ]
 }
 ```
+
+> 💡 この例ではプロジェクトレベルの `enableElasticIp` は `false` のため、Elastic IP は `developer2` のみに割り当てられます（ユーザー単位の設定がプロジェクトデフォルトを上書き）。
 
 #### 設定項目
 
