@@ -2,13 +2,13 @@
   "name": "ec2-remote-workspace",
   "version": "0.1.0",
   "scripts": {
-    "build": "tsc -p cdk",
-    "watch": "tsc -p cdk -w",
-    "test": "jest -c cdk/jest.config.js",
-    "cdk": "cd cdk && cdk",
-    "synth": "cd cdk && cdk synth",
-    "deploy:network": "cd cdk && cdk deploy '*-network' --require-approval never",
-    "deploy:workspaces": "cd cdk && cdk deploy --all --require-approval never"
+    "build": "tsc",
+    "watch": "tsc -w",
+    "test": "jest",
+    "cdk": "cdk",
+    "synth": "cdk synth",
+    "deploy:network": "cdk deploy '*-network' --require-approval never",
+    "deploy:workspaces": "cdk deploy --all --require-approval never"
   },
   "engines": {
     "node": ">=24"

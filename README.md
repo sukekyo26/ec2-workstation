@@ -327,6 +327,8 @@ CDK と OpenTofu のどちらでも同じインフラを構築できます。好
 #### CDK でデプロイする場合
 
 ```bash
+cd cdk
+
 # 依存関係のインストール
 pnpm install
 
@@ -482,6 +484,8 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 **CDK の場合**:
 
 ```bash
+cd cdk
+
 # 全スタックを削除
 pnpm cdk destroy --all
 
@@ -576,6 +580,8 @@ ec2-remote-workspace/
 │   │       └── workspace-config.ts   # 設定ファイル読み込み
 │   ├── test/                         # テストコード
 │   ├── cdk.json                      # CDK設定
+│   ├── package.json
+│   ├── pnpm-lock.yaml
 │   └── tsconfig.json
 ├── opentofu/                     # OpenTofu 実装（CDK と同じインフラ）
 │   ├── modules/
@@ -594,9 +600,7 @@ ec2-remote-workspace/
 │   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
 │   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
 ├── workspace-config.json         # ユーザー・プロジェクト設定
-├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
-├── package.json
-└── pnpm-lock.yaml
+└── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
 ```
 
 ---
@@ -605,7 +609,7 @@ ec2-remote-workspace/
 
 ```bash
 # CDK 実装のテスト（Jest）
-pnpm test
+cd cdk && pnpm test
 
 # OpenTofu 実装の静的チェック
 tofu -chdir=opentofu fmt -check -recursive
