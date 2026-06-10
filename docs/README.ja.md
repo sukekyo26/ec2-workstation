@@ -352,7 +352,7 @@ ec2-remote-workspace-dev-developer1.ConnectCommand = aws ssm start-session --tar
 
 ### User Dataスクリプトで自動インストール
 
-EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh](../lib/scripts/user-data.sh)）。
+EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh](../shared/user-data.sh)）。
 
 | カテゴリ | ソフトウェア |
 |---------|-------------|
@@ -510,21 +510,25 @@ pnpm cdk destroy ec2-remote-workspace-dev-network
 
 ```
 ec2-remote-workspace/
-├── bin/
-│   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
-├── lib/
-│   ├── constructs/
-│   │   ├── vpc-construct.ts      # VPC構成
-│   │   ├── security-construct.ts # セキュリティグループ・IAM
-│   │   ├── ec2-construct.ts      # EC2インスタンス
-│   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
-│   ├── stacks/
-│   │   ├── network-stack.ts      # 共有ネットワークスタック
-│   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
-│   ├── config/
-│   │   └── workspace-config.ts   # 設定ファイル読み込み
-│   └── scripts/
-│       └── user-data.sh          # EC2初期化スクリプト
+├── cdk/                          # AWS CDK 実装
+│   ├── bin/
+│   │   └── ec2-remote-workspace.ts   # CDKアプリエントリポイント
+│   ├── lib/
+│   │   ├── constructs/
+│   │   │   ├── vpc-construct.ts      # VPC構成
+│   │   │   ├── security-construct.ts # セキュリティグループ・IAM
+│   │   │   ├── ec2-construct.ts      # EC2インスタンス
+│   │   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
+│   │   ├── stacks/
+│   │   │   ├── network-stack.ts      # 共有ネットワークスタック
+│   │   │   └── workspace-stack.ts    # 個人用ワークスペーススタック
+│   │   └── config/
+│   │       └── workspace-config.ts   # 設定ファイル読み込み
+│   ├── test/                         # テストコード
+│   ├── cdk.json                      # CDK設定
+│   └── tsconfig.json
+├── shared/
+│   └── user-data.sh              # EC2初期化スクリプト（IaCツール間で共有）
 ├── scripts/
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
 │   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
@@ -532,13 +536,10 @@ ec2-remote-workspace/
 │   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
 │   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
 │   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
-├── test/                         # テストコード
 ├── workspace-config.json         # ユーザー・プロジェクト設定
 ├── workspace-config.schema.json  # 設定ファイルのJSONスキーマ
-├── cdk.json                      # CDK設定
 ├── package.json
-├── pnpm-lock.yaml
-└── tsconfig.json
+└── pnpm-lock.yaml
 ```
 
 ---
