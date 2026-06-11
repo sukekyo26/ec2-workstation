@@ -1,0 +1,34 @@
+# PRs target develop (the integration branch); main only receives changes via
+# the develop → main release PR, so dependency bumps must land on develop first.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    groups:
+      github-actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: "ci"
+  - package-ecosystem: "npm"
+    directory: "/cdk"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    groups:
+      npm-dependencies:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore"
+  - package-ecosystem: "terraform"
+    directory: "/opentofu"
+    target-branch: "develop"
+    schedule:
+      interval: "weekly"
+    groups:
+      terraform-providers:
+        patterns: ["*"]
+    commit-message:
+      prefix: "chore"
