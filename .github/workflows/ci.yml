@@ -12,10 +12,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
 
@@ -30,15 +30,15 @@ jobs:
         working-directory: cdk
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v5
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
         with:
           package_json_file: cdk/package.json
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: 24
           cache: pnpm
@@ -53,45 +53,49 @@ jobs:
       - name: Test
         run: pnpm test
 
-  # CDK Synth requires AWS account credentials; disabled until CI has AWS access
-  # cdk-synth:
-  #   name: CDK Synth
-  #   runs-on: ubuntu-latest
-  #   needs: [build-and-test]
-  #   defaults:
-  #     run:
-  #       working-directory: cdk
-  #   steps:
-  #     - name: Checkout
-  #       uses: actions/checkout@v6
-  #
-  #     - name: Setup pnpm
-  #       uses: pnpm/action-setup@v5
-  #       with:
-  #         package_json_file: cdk/package.json
-  #
-  #     - name: Setup Node.js
-  #       uses: actions/setup-node@v6
-  #       with:
-  #         node-version: 24
-  #         cache: pnpm
-  #         cache-dependency-path: cdk/pnpm-lock.yaml
-  #
-  #     - name: Install dependencies
-  #       run: pnpm install --frozen-lockfile
-  #
-  #     - name: CDK Synth
-  #       run: pnpm synth
+  cdk-synth:
+    name: CDK Synth
+    runs-on: ubuntu-latest
+    needs: [build-and-test]
+    defaults:
+      run:
+        working-directory: cdk
+    env:
+      # Must match the cache keys in cdk.context.json so the AMI/AZ lookups
+      # hit the cache and synth runs without AWS credentials
+      AWS_ACCOUNT_ID: "123456789012"
+      AWS_REGION: ap-northeast-1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: cdk/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: cdk/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: CDK Synth
+        run: pnpm synth
 
   opentofu:
     name: OpenTofu Format & Validate
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Setup OpenTofu
-        uses: opentofu/setup-opentofu@v1
+        uses: opentofu/setup-opentofu@847eaa4afeb791b06daa46e8eafa8b1b68d7cfb4 # v2.0.1
 
       - name: Format check
         run: tofu fmt -check -recursive
@@ -110,10 +114,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run ShellCheck
-        uses: ludeeus/action-shellcheck@master
+        uses: ludeeus/action-shellcheck@00cae500b08a931fb5698e11e79bfbd38e612a38 # v2.0.0
         with:
           severity: error
           scandir: "."
