@@ -48,12 +48,12 @@ wait_ssm_agent_ready() {
 
     log "Waiting for SSM Agent to be ready..."
 
-    for ((i=1; i<=max_retries; i++)); do
+    for ((i = 1; i <= max_retries; i++)); do
         ping_status=$(aws ssm describe-instance-information \
             --region "$region" \
             --filters "Key=InstanceIds,Values=$instance_id" \
             --query "InstanceInformationList[0].PingStatus" \
-            --output text 2>/dev/null || echo "None")
+            --output text 2> /dev/null || echo "None")
 
         if [ "$ping_status" = "Online" ]; then
             log "SSM Agent is online"

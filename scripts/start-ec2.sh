@@ -66,7 +66,7 @@ wait_ssm_agent_ready() {
             --region "$region" \
             --filters "Key=InstanceIds,Values=$instance_id" \
             --query "InstanceInformationList[0].PingStatus" \
-            --output text 2>/dev/null || echo "None")
+            --output text 2> /dev/null || echo "None")
 
         if [ "$ping_status" = "Online" ]; then
             log "SSM Agent is online"
