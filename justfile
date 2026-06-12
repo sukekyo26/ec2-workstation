@@ -19,7 +19,7 @@ build:
 test:
     cd cdk && pnpm test
 
-# CDK synth（cdk.context.json のキャッシュキーに合わせた env で AWS 認証なしで実行）
+# CDK synth（cdk.json のダミー lookup キャッシュにヒットさせ AWS 認証なしで実行）
 synth:
     cd cdk && AWS_ACCOUNT_ID=123456789012 AWS_REGION=ap-northeast-1 pnpm synth
 

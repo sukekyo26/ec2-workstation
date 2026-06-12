@@ -61,8 +61,8 @@ jobs:
       run:
         working-directory: cdk
     env:
-      # Must match the cache keys in cdk.context.json so the AMI/AZ lookups
-      # hit the cache and synth runs without AWS credentials
+      # Must match the dummy lookup cache keys in cdk.json so the AMI/AZ
+      # lookups hit the cache and synth runs without AWS credentials
       AWS_ACCOUNT_ID: "123456789012"
       AWS_REGION: ap-northeast-1
     steps:
