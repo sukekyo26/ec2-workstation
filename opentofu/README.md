@@ -102,5 +102,5 @@ apply 後の運用（VS Code Remote-SSH 設定・EC2 起動）は CDK 版と同�
 
 ### 挙動の差異
 
-- **AMI の固定方法**: CDK はローカルの `cdk.context.json`（アカウント固有値のため git 管理外）にキャッシュ、OpenTofu は `lifecycle { ignore_changes = [ami] }` で初回解決後に固定。ただし CDK を GitHub Actions などキャッシュを持たない環境からデプロイすると毎回最新 AMI を再解決するため、新 AMI 公開後の再デプロイでインスタンスが再作成される（ルート EBS が失われる）可能性があります。既存インスタンスを保持したい場合はローカルの `cdk.context.json` を使ってデプロイしてください。
+- **AMI の固定方法**: CDK はローカルの `cdk/cdk.context.json`（アカウント固有値のため git 管理外）にキャッシュ、OpenTofu は `lifecycle { ignore_changes = [ami] }` で初回解決後に固定。ただし CDK を GitHub Actions などキャッシュを持たない環境からデプロイすると毎回最新 AMI を再解決するため、新 AMI 公開後の再デプロイでインスタンスが再作成される（ルート EBS が失われる）可能性があります。既存インスタンスを保持したい場合はローカルの `cdk/cdk.context.json` を使ってデプロイしてください。
 - **秘密鍵の保存場所**: CDK は AWS が生成し SSM のみに保存。OpenTofu は `tls_private_key` で生成するため state にも記録されます（上記「State の保護」参照）。
