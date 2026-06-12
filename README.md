@@ -516,6 +516,8 @@ tofu destroy
 # 該当ユーザーを削除して tofu apply
 ```
 
+GitHub Actions でデプロイした環境は、`Destroy (OpenTofu)` ワークフローを手動実行（`workflow_dispatch`）して削除できます。誤実行防止のため、実行時の確認入力に `destroy` と入力する必要があります。
+
 > ⚠️ EBSボリュームはインスタンス削除時に一緒に削除されます。必要なデータは事前にバックアップしてください。
 
 ---
