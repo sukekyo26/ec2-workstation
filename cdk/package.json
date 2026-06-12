@@ -8,7 +8,8 @@
     "cdk": "cdk",
     "synth": "cdk synth",
     "deploy:network": "cdk deploy '*-network' --require-approval never",
-    "deploy:workstations": "cdk deploy --all --require-approval never"
+    "deploy:workstations": "cdk deploy --all --require-approval never",
+    "destroy:all": "cdk destroy --all --force"
   },
   "engines": {
     "node": ">=24"
