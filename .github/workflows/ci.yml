@@ -61,8 +61,8 @@ jobs:
       run:
         working-directory: cdk
     env:
-      # Must match the cache keys in cdk.context.json so the AMI/AZ lookups
-      # hit the cache and synth runs without AWS credentials
+      # Must match the dummy lookup cache keys in cdk.json so the AMI/AZ
+      # lookups hit the cache and synth runs without AWS credentials
       AWS_ACCOUNT_ID: "123456789012"
       AWS_REGION: ap-northeast-1
     steps:
@@ -112,6 +112,11 @@ jobs:
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
+    # gitleaks-action は pull_request イベントで PR コミット一覧 API を呼ぶため
+    # pull-requests: read が必要（デフォルトの read-only トークンには含まれない）
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
