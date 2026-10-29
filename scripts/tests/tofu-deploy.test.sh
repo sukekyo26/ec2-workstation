@@ -162,7 +162,7 @@ chmod +x "$work/bin/tofu" "$work/bin/aws"
 
 # 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。答えは、スキーマを厳しいメタスキーマで見るときは FAKE_JV_META、
 # 設定を見るときは FAKE_JV で変える (どちらも既定は通す)
-jv=$(bash -c '. "$1/scripts/lib/tofu-common.sh"; jv_path' _ "$repo")
+jv=$(bash -c '. "$1/scripts/lib/tools.sh"; jv_path' _ "$repo")
 mkdir -p "$(dirname "$jv")"
 cat > "$jv" << 'FAKE'
 #!/usr/bin/env bash

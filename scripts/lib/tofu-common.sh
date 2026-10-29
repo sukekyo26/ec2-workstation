@@ -1,54 +1,15 @@
 # shellcheck shell=bash
-# tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh・validate-config.sh・install-jv.sh (と、それを呼ぶ CI・just・テスト) が読む共通の部品。
-# tofu・AWS の認証が無い所 (CI の検証・jv の取得) でも読まれるので、トップレベルで tofu・aws・jq を呼ばない。
-# set -e の下で読まれるので、関数は `[ ... ] && cmd` の形で終わらせない (条件が偽のとき rc=1 で呼び出し元が止まる)。
-# if・&&・|| の条件で呼んだ関数の中では set -e が効かないので、失敗を見落とせない関数は条件で呼ばない
+# tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh・validate-config.sh (と、それを呼ぶ CI・just・テスト) が読む共通の部品。
+# tofu・AWS の認証が無い所 (CI の設定の検証) でも読まれるので、トップレベルで tofu・aws・jq を呼ばない。
+# die・log・REPO_ROOT・inherit_errexit は scripts/lib/base.sh、jv の版と置き場所は scripts/lib/tools.sh にある
 
-# コマンド置換 ($(...)) の中でも set -e を効かせる (既定の bash では効かず、中の失敗が黙って空の出力になる)
-shopt -s inherit_errexit
+# shellcheck source=scripts/lib/tools.sh
+. "$(dirname "${BASH_SOURCE[0]}")/tools.sh"
 
-REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CONFIG_FILE="$REPO_ROOT/workstation-config.json"
 STACKS_DIR="$REPO_ROOT/opentofu/stacks"
 # state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)
 STATE_REGION=ap-northeast-1
-# 版を上げるときは jv_sha256 の 4 つも変える (GitHub のリリースの添付ファイルの sha256)。
-# jv --version は版を返さないので、置き場所に版を入れて見分ける
-JV_VERSION=v6.0.3
-
-die() {
-    echo "ERROR: $*" >&2
-    exit 1
-}
-
-log() {
-    echo "==> $*" >&2
-}
-
-jv_path() {
-    echo "$REPO_ROOT/.tools/jv-$JV_VERSION/jv"
-}
-
-# jv_sha256 <os>-<arch>: JV_VERSION の tarball の sha256
-jv_sha256() {
-    case "$1" in
-        linux-amd64) echo 36e9ab8481cc8e2cb27c8336decc9abdcbd606b05792ca88d6188e01ec28766b ;;
-        linux-arm64) echo a9b06c4d73bf3cbe9b3224aacef5329d96267c27febac1152db1ff1659550122 ;;
-        darwin-amd64) echo f41e3541d0ba2b5f628d1a04701db3acefcf6aa1feb5c28e10f446dfc584952d ;;
-        darwin-arm64) echo d5962c5a7abe0c82be6b69bbed6bd5c9883462f13e0353ddca9878c46ec6ed6f ;;
-        *) die "no jv $JV_VERSION for $1" ;;
-    esac
-}
-
-file_sha256() {
-    if command -v sha256sum > /dev/null; then
-        sha256sum "$1" | cut -d' ' -f1
-    elif command -v shasum > /dev/null; then
-        shasum -a 256 "$1" | cut -d' ' -f1
-    else
-        die "install sha256sum or shasum to check the download"
-    fi
-}
 
 # workstation-config.json をスキーマで検証する。CI・just・tofu-deploy.sh・tofu-init.sh はここを通る。
 # jv は知らないキーワードを黙って無視する (書き間違えた決まりが効かない) ので、先にスキーマそのものを

@@ -3,5 +3,5 @@
 *.tfstate
 *.tfstate.*
 
-# scripts/install-jv.sh が取る道具
+# scripts/install-jv.sh・scripts/install-shfmt.sh が取る道具
 .tools/

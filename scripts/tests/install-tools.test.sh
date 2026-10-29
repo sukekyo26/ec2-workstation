@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# scripts/install-jv.sh の取り方と止まり方を、偽の curl・uname で確かめる (ネットワークに出ない)。
-# - スクリプトは一時ディレクトリのリポジトリの形に写して走らせ、jv は写しの .tools に置かせる
-# - 偽の curl は URL を $FAKE_CURL_LOG に書き、偽の tarball ($FAKE_TARBALL) を返す
-# - 固定の sha256 は本物の tarball のものなので、偽の tarball は合わない。合うときを見るには、写しの sha256 を書き換える
+# scripts/install-jv.sh・scripts/install-shfmt.sh (共通の流れは scripts/lib/tools.sh) の取り方と止まり方を、
+# 偽の curl・uname で確かめる (ネットワークに出ない)。
+# - スクリプトは一時ディレクトリのリポジトリの形に写して走らせ、道具は写しの .tools に置かせる
+# - 偽の curl は URL を $FAKE_CURL_LOG に書き、$FAKE_DOWNLOAD (jv は tarball、shfmt はバイナリ) を返す
+# - 固定の sha256 は本物のものなので、偽のものは合わない。合うときを見るには、写しの中の本物の値を探して書き換える
+#   (表がどのファイルにあるかは決め打ちしない)
 #
-#   scripts/tests/install-jv.test.sh
+#   scripts/tests/install-tools.test.sh
 set -euo pipefail
 
 scripts_src=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,7 +31,7 @@ for i in "${!args[@]}"; do
 done
 echo "${args[-1]}" >> "$FAKE_CURL_LOG"
 echo "$*" >> "$FAKE_CURL_LOG.args"
-cp "$FAKE_TARBALL" "$out"
+cp "$FAKE_DOWNLOAD" "$out"
 FAKE
 cat > "$work/bin/uname" << 'FAKE'
 #!/usr/bin/env bash
@@ -43,11 +45,17 @@ export PATH="$work/bin:$PATH"
 
 printf '#!/bin/sh\necho fake jv\n' > "$work/tarball/jv"
 chmod +x "$work/tarball/jv"
-export FAKE_TARBALL="$work/jv.tar.gz"
-tar -czf "$FAKE_TARBALL" -C "$work/tarball" jv
-lib="$scripts_src/lib/tofu-common.sh"
-fake_sha=$(bash -c '. "$1"; file_sha256 "$2"' _ "$lib" "$FAKE_TARBALL")
+jv_tarball="$work/jv.tar.gz"
+tar -czf "$jv_tarball" -C "$work/tarball" jv
+printf '#!/bin/sh\necho fake shfmt\n' > "$work/shfmt.bin"
+lib="$scripts_src/lib/tools.sh"
+tool() {
+    bash -c '. "$1"; shift; "$@"' _ "$lib" "$@"
+}
+fake_sha=$(tool file_sha256 "$jv_tarball")
+fake_shfmt_sha=$(tool file_sha256 "$work/shfmt.bin")
 version=$(bash -c '. "$1"; echo "$JV_VERSION"' _ "$lib")
+shfmt_version=$(bash -c '. "$1"; echo "$SHFMT_VERSION"' _ "$lib")
 
 # sed -i は GNU と macOS で書き方が違うので、一時ファイルに書いて置き換える
 edit() {
@@ -55,14 +63,25 @@ edit() {
     mv "$2.new" "$2"
 }
 
-# 写しを作る。"ok" なら linux-amd64 の sha256 を偽の tarball のものに書き換える
+# replace_in_copy <repo> <old> <new>: 写しの scripts/ の下で <old> をちょうど 1 つのファイルに見つけて、<new> に替える
+replace_in_copy() {
+    local files
+    files=$(grep -rlF -- "$2" "$1/scripts")
+    if [ "$(wc -l <<< "$files")" -ne 1 ] || [ -z "$files" ]; then
+        echo "expected '$2' in exactly one file under $1/scripts, found: $files" >&2
+        exit 1
+    fi
+    edit "s/$2/$3/" "$files"
+}
+
+# 写しを作る。"ok" なら、jv と shfmt の linux-amd64 の本物の sha256 を偽のものに書き換える
 new_repo() {
     local repo="$work/$1"
     mkdir -p "$repo"
     cp -R "$scripts_src" "$repo/scripts"
     if [ "${2:-}" = ok ]; then
-        edit "s/^( *linux-amd64\) echo )[0-9a-f]+/\1$fake_sha/" "$repo/scripts/lib/tofu-common.sh"
-        grep -qF "$fake_sha" "$repo/scripts/lib/tofu-common.sh"
+        replace_in_copy "$repo" "$(tool jv_sha256 linux-amd64)" "$fake_sha"
+        replace_in_copy "$repo" "$(tool shfmt_sha256 linux-amd64)" "$fake_shfmt_sha"
     fi
 }
 
@@ -72,7 +91,7 @@ fail() {
     failures=$((failures + 1))
 }
 
-# run <name> <repo> <uname -s> <uname -m> [args...]: rc・標準エラー・curl が取りにいった URL を残す。
+# run <name> <repo> <uname -s> <uname -m> [args...]: install-jv.sh (SCRIPT で替えられる) の rc・標準エラー・curl が取りにいった URL を残す。
 # 場合の名前を "case: <name>" で出す (作り替えの前と後で、同じ場合を見ていることを比べるため)
 run() {
     local name=$1 repo=$2 rc=0
@@ -81,7 +100,7 @@ run() {
     shift 4
     : > "$FAKE_CURL_LOG"
     : > "$FAKE_CURL_LOG.args"
-    "$work/$repo/scripts/install-jv.sh" "$@" > /dev/null 2> "$work/out/$name.err" || rc=$?
+    "$work/$repo/scripts/${SCRIPT:-install-jv.sh}" "$@" > /dev/null 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
 
@@ -109,6 +128,8 @@ expect_curl() {
 }
 
 url=https://github.com/santhosh-tekuri/jsonschema/releases/download/$version
+shfmt_url=https://github.com/mvdan/sh/releases/download/$shfmt_version
+export FAKE_DOWNLOAD=$jv_tarball
 
 # sha256 が合わなければ止まり、jv も一時ディレクトリも残さない
 new_repo bad
@@ -162,7 +183,7 @@ expect_rc usage 1
 expect_err usage "usage:"
 
 # 版を上げると、古い版の jv があっても validate-config.sh は「無い」で止まり、install-jv.sh は新しい版の場所に置く
-edit 's/^JV_VERSION=.*/JV_VERSION=v9.9.9/' "$work/ok/scripts/lib/tofu-common.sh"
+replace_in_copy "$work/ok" "JV_VERSION=$version" "JV_VERSION=v9.9.9"
 echo "case: bump-validate"
 rc=0
 "$work/ok/scripts/validate-config.sh" 2> "$work/out/bump-validate.err" || rc=$?
@@ -174,6 +195,42 @@ expect_rc bump 0
 expect_curl bump "https://github.com/santhosh-tekuri/jsonschema/releases/download/v9.9.9/jv-v9.9.9-linux-amd64.tar.gz"
 if [ ! -x "$work/ok/.tools/jv-v9.9.9/jv" ]; then
     fail "bump: jv v9.9.9 is not installed"
+fi
+
+# shfmt: バイナリそのもの (tar でない) を、_ で区切った名前の URL から取って置く
+export FAKE_DOWNLOAD="$work/shfmt.bin"
+SCRIPT=install-shfmt.sh run shfmt-bad bad Linux x86_64
+expect_rc shfmt-bad 1
+expect_err shfmt-bad "sha256 mismatch for shfmt_${shfmt_version}_linux_amd64: got $fake_shfmt_sha"
+expect_curl shfmt-bad "$shfmt_url/shfmt_${shfmt_version}_linux_amd64"
+SCRIPT=install-shfmt.sh run shfmt-arch-Darwin-arm64 bad Darwin arm64
+expect_curl shfmt-arch-Darwin-arm64 "$shfmt_url/shfmt_${shfmt_version}_darwin_arm64"
+SCRIPT=install-shfmt.sh run shfmt-riscv64 bad Linux riscv64
+expect_rc shfmt-riscv64 1
+expect_err shfmt-riscv64 "unsupported CPU riscv64: shfmt $shfmt_version is released for amd64 and arm64"
+SCRIPT=install-shfmt.sh run shfmt-ok ok Linux x86_64
+expect_rc shfmt-ok 0
+if [ "$("$work/ok/.tools/shfmt-$shfmt_version/shfmt" 2>&1)" != "fake shfmt" ]; then
+    fail "shfmt-ok: the installed shfmt does not run"
+fi
+
+# install_pinned_tool を 1 つのシェルで 2 回 (合わない sha → 合う sha) 呼んでも、一時ディレクトリが残らず、
+# 呼び出し元の EXIT の trap は上書きされない
+echo "case: twice"
+new_repo twice
+out=$(FAKE_UNAME_S=Linux FAKE_UNAME_M=x86_64 FAKE_CURL_LOG="$work/out/twice.curl" bash -c '
+    set -euo pipefail
+    . "$1/scripts/lib/tools.sh"
+    trap "echo caller-trap" EXIT
+    install_pinned_tool shfmt v1 https://example.invalid/shfmt-v1 0000 "" 2> /dev/null || echo first-failed
+    install_pinned_tool shfmt v2 https://example.invalid/shfmt-v2 "$2" "" 2> /dev/null
+    echo second-done
+' _ "$work/twice" "$fake_shfmt_sha")
+if [ "$out" != "$(printf '%s\n' first-failed second-done caller-trap)" ]; then
+    fail "twice: got '$out'"
+fi
+if [ -n "$(find "$work/twice/.tools" -maxdepth 1 -name 'tmp.*')" ] || [ ! -x "$work/twice/.tools/shfmt-v2/shfmt" ]; then
+    fail "twice: a temporary directory is left, or shfmt v2 is not installed: $(ls -A "$work/twice/.tools")"
 fi
 
 if [ "$failures" -ne 0 ]; then
