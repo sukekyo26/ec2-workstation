@@ -1,0 +1,22 @@
+{
+  "al2023": {
+    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+    "login_user": "ec2-user"
+  },
+  "al2027": {
+    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2027-preview-ami-kernel-default-x86_64",
+    "login_user": "ec2-user"
+  },
+  "ubuntu-24.04": {
+    "ami_parameter": "/aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id",
+    "login_user": "ubuntu"
+  },
+  "ubuntu-26.04": {
+    "ami_parameter": "/aws/service/canonical/ubuntu/server/26.04/stable/current/amd64/hvm/ebs-gp3/ami-id",
+    "login_user": "ubuntu"
+  },
+  "debian-13": {
+    "ami_parameter": "/aws/service/debian/release/13/latest/amd64",
+    "login_user": "admin"
+  }
+}

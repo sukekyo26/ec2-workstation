@@ -3,6 +3,19 @@
   "title": "Workstation Configuration",
   "description": "EC2 Workstation の設定スキーマ。全項目必須（users[].instanceConfig / users[].enableElasticIp / users[].displayName を除く）。このスキーマが設定の唯一の仕様であり、CI（ajv-cli）で強制される。",
   "type": "object",
+  "definitions": {
+    "os": {
+      "type": "string",
+      "description": "OS。デプロイのたびに選んだ OS の最新 AMI に追従する。al2027 はプレビュー版で、本番利用は非推奨",
+      "enum": [
+        "al2023",
+        "al2027",
+        "ubuntu-24.04",
+        "ubuntu-26.04",
+        "debian-13"
+      ]
+    }
+  },
   "required": [
     "projectName",
     "environment",
@@ -41,6 +54,7 @@
       "type": "object",
       "description": "デフォルトのEC2インスタンス設定",
       "required": [
+        "os",
         "instanceType",
         "rootVolumeSize",
         "rootVolumeType",
@@ -49,9 +63,12 @@
       ],
       "additionalProperties": false,
       "properties": {
+        "os": {
+          "$ref": "#/definitions/os"
+        },
         "instanceType": {
           "type": "string",
-          "description": "インスタンスタイプ (例: t3.medium)"
+          "description": "インスタンスタイプ (例: t3.medium)。x86_64 のみ対応"
         },
         "rootVolumeSize": {
           "type": "number",
@@ -149,6 +166,9 @@
             "description": "ユーザー固有のインスタンス設定（オプション、defaultInstanceConfig を項目単位で上書き）",
             "additionalProperties": false,
             "properties": {
+              "os": {
+                "$ref": "#/definitions/os"
+              },
               "instanceType": {
                 "type": "string"
               },

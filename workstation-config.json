@@ -4,6 +4,7 @@
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
+    "os": "ubuntu-24.04",
     "instanceType": "t3.medium",
     "rootVolumeSize": 30,
     "rootVolumeType": "gp3",

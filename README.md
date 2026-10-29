@@ -93,7 +93,7 @@ flowchart LR
 | カテゴリ | 技術 | 説明 |
 |---------|------|------|
 | IaC | OpenTofu | 宣言的なインフラ構築 |
-| OS | Ubuntu 24.04 LTS | 2029年までサポート |
+| OS | Amazon Linux 2023 / 2027（プレビュー）/ Ubuntu 24.04・26.04 LTS / Debian 13 | `workstation-config.json` の `os` で選択（ユーザー単位で上書き可、x86_64 のみ） |
 | インスタンス | EC2（タイプは `workstation-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
 | ストレージ | EBS gp3 / gp2（ルート + データの 2 本。サイズ・タイプは `workstation-config.json` で指定） | 暗号化有効、データボリュームは AMI 更新後も残る |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
@@ -193,7 +193,7 @@ flowchart TB
 | 場所 | 置き場所 | AMI 更新後 |
 |------|---------|-----------|
 | `~/work` | データボリューム（`/data/work` を bind mount） | 残る |
-| Docker のイメージ・コンテナ・ボリューム | データボリューム（`/var/lib/docker`・`/var/lib/containerd` を bind mount） | 残る |
+| Docker のイメージ・コンテナ・ボリューム | データボリューム（`/var/lib/docker`・`/var/lib/containerd` を bind mount） | 残る。`os` を変えたときは、名前付きボリュームは引き継ぐ見込みで、イメージは見えなくなることがある（Docker の版と置き場所の形が OS で違うため。devcontainer を開き直して build し直す）※実機で確認中 |
 | `~/.gitconfig` | データボリューム（`/data/gitconfig` へのシンボリックリンク） | 残る |
 | 上記以外（dotfiles、apt で入れたパッケージなど） | ルートボリューム | **消える** |
 
@@ -215,7 +215,8 @@ ssh ec2 'docker run --rm -v <volume>:/v -v ~/work:/b alpine tar czf /b/<volume>.
 # 2. ~/work をローカルへ退避する
 rsync -a ec2:~/work/ ./work-backup/
 
-# 3. 新しい構成をデプロイし、setup-remote-ssh をやり直す（HostName が Name タグに変わるため）
+# 3. 新しい構成をデプロイし、setup-remote-ssh をやり直す
+#    （HostName が Name タグに変わり、接続ユーザー名を apply で付く LoginUser タグから取るため）
 cd opentofu && tofu apply
 ./scripts/setup-remote-ssh.sh
 
@@ -250,6 +251,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
 - state 保存用 S3 バケット（作成手順は [opentofu/README.md](opentofu/README.md)）
+- デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 
 ---
 
@@ -273,6 +275,7 @@ cd ec2-workstation
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
+    "os": "ubuntu-24.04",
     "instanceType": "t3.medium",
     "rootVolumeSize": 30,
     "rootVolumeType": "gp3",
@@ -295,6 +298,7 @@ cd ec2-workstation
       "username": "developer2",
       "displayName": "Developer Two",
       "instanceConfig": {
+        "os": "al2023",
         "instanceType": "t3.xlarge",
         "dataVolumeSize": 200
       },
@@ -317,7 +321,8 @@ cd ec2-workstation
 | `projectName` | ✅ | プロジェクト名（リソース命名に使用） |
 | `environment` | ✅ | 環境名（dev, staging, prod） |
 | `vpcCidr` | ✅ | VPCのCIDRブロック |
-| `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ |
+| `defaultInstanceConfig.os` | ✅ | OS（下表）。デプロイのたびにその OS の最新 AMI に追従する |
+| `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ（x86_64 のみ） |
 | `defaultInstanceConfig.rootVolumeSize` | ✅ | ルートEBSボリュームサイズ（GB、20〜1000）。OS とパッケージ用で、AMI 更新のたびに作り直される |
 | `defaultInstanceConfig.rootVolumeType` | ✅ | ルートEBSボリュームタイプ（gp3 / gp2） |
 | `defaultInstanceConfig.dataVolumeSize` | ✅ | データEBSボリュームサイズ（GB、20〜1000）。`~/work`・Docker・`~/.gitconfig` を保存し、AMI 更新後も残る |
@@ -390,11 +395,19 @@ tofu output workstations
 
 ## 📦 プリインストールソフトウェア
 
-### Ubuntu 24.04 LTS 標準搭載
+### 選択できる OS
 
-| カテゴリ | ソフトウェア |
-|---------|-------------|
-| **AWS** | SSM Agent（Systems Manager接続用） |
+| `os` | OS | ログインユーザー | 備考 |
+|------|----|-----------------|------|
+| `al2023` | Amazon Linux 2023 | `ec2-user` | |
+| `al2027` | Amazon Linux 2027 | `ec2-user` | **プレビュー版**（本番利用非推奨）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える |
+| `ubuntu-24.04` | Ubuntu 24.04 LTS | `ubuntu` | |
+| `ubuntu-26.04` | Ubuntu 26.04 LTS | `ubuntu` | |
+| `debian-13` | Debian 13 | `admin` | 公式 AMI に SSM Agent が無いため user-data で導入 |
+
+> ⚠️ `os` を変えると次の `tofu apply` でインスタンスが作り直されます。データボリュームはそのまま引き継がれ、`~/work` の持ち主は新しいログインユーザーに合わせ直されます。ログインユーザーが変わる場合は、apply の後に `setup-remote-ssh` をやり直してください。
+>
+> 💡 接続ユーザー名は、インスタンスの `LoginUser` タグから取ります。このタグが無い（この版より前に作った）インスタンスでは、`setup-remote-ssh` がタグの誤りで止まります。`tofu apply` でタグを付けてからやり直してください。
 
 ### User Dataスクリプトで自動インストール
 
@@ -402,10 +415,10 @@ EC2起動時に以下のソフトウェアが自動でインストールされ�
 
 | カテゴリ | ソフトウェア |
 |---------|-------------|
-| **コンテナ** | Docker, Docker Compose |
+| **コンテナ** | Docker, Docker Compose, buildx（Ubuntu / Debian は公式スクリプト、Amazon Linux は OS 同梱の docker + GitHub のプラグイン） |
 | **AWS** | AWS CLI v2 |
-| **開発ツール** | Git, vim, nano, curl, wget, jq, tree, htop, uuidgen |
-| **ビルドツール** | build-essential |
+| **開発ツール** | Git, vim, nano, curl, wget（Amazon Linux を除く）, jq, tree, htop, uuidgen |
+| **ビルドツール** | build-essential（Amazon Linux は gcc / gcc-c++ / make） |
 | **システム設定** | 4GB スワップ領域、タイムゾーン（Asia/Tokyo） |
 
 ---
@@ -451,6 +464,7 @@ tofu output workstations   # 各ユーザーの instance_name
 - SSHホスト名の設定（デフォルト: `ec2`）
 - AWSリージョンの設定（デフォルト: `ap-northeast-1`）
 - AWS SSM Parameter Storeから秘密鍵を取得
+- インスタンスの `LoginUser` タグから接続ユーザー名を取得
 - 自動起動スクリプト（`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`）を `~/.ssh/` にコピー
 - `~/.ssh/config` にSSM経由の接続設定を追加（ProxyCommandで自動起動を有効化）
 
