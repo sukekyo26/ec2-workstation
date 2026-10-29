@@ -31,6 +31,13 @@ case "$ID" in
         ;;
 esac
 
+# Amazon Linux の minimal AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
+# 更新やパッケージの導入が失敗して止まっても SSM で入ってログを見られるよう、それらより先に入れる
+if [ "$ID" = amzn ] && ! command -v amazon-ssm-agent &> /dev/null; then
+    dnf install -y amazon-ssm-agent
+    systemctl enable --now amazon-ssm-agent
+fi
+
 # Debian 公式 AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
 # 更新やパッケージの導入が失敗して止まっても SSM で入ってログを見られるよう、それらより先に入れる
 # (curl・dpkg・ca-certificates は Debian の AMI に入っている)。

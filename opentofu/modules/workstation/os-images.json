@@ -1,10 +1,10 @@
 {
   "al2023": {
-    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
+    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2023-ami-minimal-kernel-default-x86_64",
     "login_user": "ec2-user"
   },
   "al2027-preview": {
-    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2027-preview-ami-kernel-default-x86_64",
+    "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2027-preview-ami-minimal-kernel-default-x86_64",
     "login_user": "ec2-user"
   },
   "ubuntu-24.04": {

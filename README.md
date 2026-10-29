@@ -206,6 +206,7 @@ flowchart TB
 - `dataVolumeSize` を増やして `apply` すると、EBS ボリュームは作り直さずに大きくなります（in-place 更新）。ただし、ファイルシステムを広げる `resize2fs` は user-data の中にしか無いため、インスタンスを作り直すまではファイルシステムは広がりません。すぐ使う場合は、インスタンスに入って `sudo resize2fs "$(findmnt -n -o SOURCE /data)"` を実行してください（`findmnt -n -o SOURCE /data` がデータボリュームのデバイス名で、例: `/dev/nvme1n1`）
 - EBS ボリュームは後から小さくできません。`dataVolumeSize` を減らすと、`tofu plan` は in-place 更新として通りますが、`apply` で AWS が断って失敗します。初めは小さめにして、必要に応じて増やしてください
 - データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`tofu apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
+- SSM で接続できないとき（Amazon Linux と Debian では、SSM Agent を user-data で入れるため、その導入に失敗すると入れません）は、`aws ec2 get-console-output --instance-id <instance-id> --latest --output text` で user-data のログ（シリアルコンソールにも出しています）を読んで原因を確かめ、直してから作り直してください
 
 #### データボリュームを持たない環境から移る場合
 
@@ -402,8 +403,8 @@ tofu output workstations
 
 | `os` | OS | ログインユーザー | 備考 |
 |------|----|-----------------|------|
-| `al2023` | Amazon Linux 2023 | `ec2-user` | |
-| `al2027-preview` | Amazon Linux 2027（プレビュー版） | `ec2-user` | **プレビュー版**（本番利用非推奨）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027-preview` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える。GA になったら `al2027` を別の値として足す |
+| `al2023` | Amazon Linux 2023 | `ec2-user` | minimal の AMI。SSM Agent が入っていないため user-data で導入 |
+| `al2027-preview` | Amazon Linux 2027（プレビュー版） | `ec2-user` | **プレビュー版**（本番利用非推奨）。minimal の AMI（SSM Agent は user-data で導入）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027-preview` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える。GA になったら `al2027` を別の値として足す |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS | `ubuntu` | |
 | `ubuntu-26.04` | Ubuntu 26.04 LTS | `ubuntu` | |
 | `debian-13` | Debian 13 | `admin` | 公式 AMI に SSM Agent が無いため user-data で導入 |
