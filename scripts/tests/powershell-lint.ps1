@@ -1,10 +1,10 @@
-<#
+﻿<#
 .SYNOPSIS
     Checks scripts/**/*.ps1 with the PowerShell parser and PSScriptAnalyzer.
 .DESCRIPTION
     CI runs this on Windows PowerShell 5.1, the version the SSH ProxyCommand uses.
     A run on a local pwsh 7 is only a hint: its parser accepts syntax that 5.1 rejects.
-    Keep this file ASCII only: Windows PowerShell 5.1 reads a file without a BOM in the system code page.
+    Saved with a BOM like the other scripts; also kept ASCII only so that 5.1 still reads it if the BOM is lost.
 #>
 $ErrorActionPreference = 'Stop'
 
@@ -33,7 +33,12 @@ foreach ($file in $files) {
 }
 
 foreach ($result in @(Invoke-ScriptAnalyzer -Path $scriptsDir -Recurse -Settings $settings)) {
-    $relative = $result.ScriptPath.Substring($root.Length + 1)
+    # A diagnostic that is not tied to a file has no ScriptPath; still report and count it
+    if ($result.ScriptPath) {
+        $relative = $result.ScriptPath.Substring($root.Length + 1)
+    } else {
+        $relative = '<no file>'
+    }
     Write-Output ("{0}:{1} {2} {3} {4}" -f $relative, $result.Line, $result.Severity, $result.RuleName, $result.Message)
     $problems++
 }
