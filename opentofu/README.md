@@ -11,7 +11,7 @@
 
 ### State バケットの作成（初回のみ）
 
-[cloudformation/state-bucket.yaml](../cloudformation/state-bucket.yaml) で作ります（手元・GitHub Actions・CodePipeline のどれで deploy するときも同じ）。バージョニング、既定の暗号化、公開のブロック、TLS だけのバケットポリシーを付けます。state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`。ほかのリージョンではスタックの作成の前に止まります）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
+[cloudformation/state-bucket.yaml](../cloudformation/state-bucket.yaml) で作ります（手元・GitHub Actions・CodePipeline のどれで deploy するときも同じ）。バージョニング、既定の暗号化、公開のブロック、TLS だけのバケットポリシーを付けます。state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`。ほかのリージョンでは、何も作らずに止まります。そのとき空のスタックが `ROLLBACK_COMPLETE` で残るので、`aws cloudformation delete-stack` で消してください）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
 
 ```bash
 aws cloudformation deploy --region ap-northeast-1 \
