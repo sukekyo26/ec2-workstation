@@ -199,8 +199,31 @@ flowchart TB
 
 - 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
 - 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは `tofu plan` で `aws_instance` が `-/+` になるかで確認できます
+- 新しい AMI が出ていれば、ユーザーの追加など**どの目的の `apply` でも全員のインスタンスが作り直されます**。作業中のメンバーがいるときは `tofu plan` で確認してから実行してください
 - インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
 - ルートに入れたツールを残したい場合は [user-data.sh](shared/user-data.sh) に追加してください
+- データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`tofu apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
+
+#### データボリュームを持たない環境から移る場合
+
+データボリュームが無い構成（`ignore_changes = [ami]` で AMI を固定していた版）で作ったインスタンスは、この版での最初の `apply` で作り直され、**ルートボリューム上の `~/work` と Docker のデータは新しいデータボリュームに移りません**（初回のデータボリュームは空です）。最初の `apply` の前に退避してください。
+
+```bash
+# 1. 残したい Docker ボリュームを ~/work に tar で書き出す（旧インスタンスに接続できる SSH 設定のまま）
+ssh ec2 'docker run --rm -v <volume>:/v -v ~/work:/b alpine tar czf /b/<volume>.tgz -C /v .'
+
+# 2. ~/work をローカルへ退避する
+rsync -a ec2:~/work/ ./work-backup/
+
+# 3. 新しい構成をデプロイし、setup-remote-ssh をやり直す（HostName が Name タグに変わるため）
+cd opentofu && tofu apply
+./scripts/setup-remote-ssh.sh
+
+# 4. 新しいインスタンスへ戻す
+rsync -a ./work-backup/ ec2:~/work/
+```
+
+Docker イメージは移さず、必要なものを pull し直してください。
 
 ---
 
