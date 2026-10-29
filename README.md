@@ -259,7 +259,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
   - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + デプロイ権限 + EC2起動権限
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
-- state 保存用 S3 バケット（作成手順は [opentofu/README.md](opentofu/README.md)）
+- state 保存用 S3 バケット（[cloudformation/state-bucket.yaml](cloudformation/state-bucket.yaml) で作る。手順は [opentofu/README.md](opentofu/README.md)）。暗号化に `SSE-KMS-CMK` を選んだときは、デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に、その鍵（出力 `StateKmsKeyArn`）の `kms:Decrypt`・`kms:GenerateDataKey`
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
@@ -431,6 +431,8 @@ GitHub を使わず、AWS の中だけで deploy したいときは、このリ�
 作り方:
 
 ```bash
+# 0. state のバケットを作る（cloudformation/state-bucket.yaml。手順は opentofu/README.md）
+
 # 1. スタックを作る（CodeCommit のリポジトリも一緒にできる。スタックを消してもリポジトリは残る）
 aws cloudformation deploy \
   --template-file cloudformation/codepipeline.yaml \
@@ -447,7 +449,8 @@ git push codecommit develop
 
 | パラメータ | 中身 |
 |-----------|------|
-| `StateBucketName` | state のバケット（`TF_STATE_BUCKET` と同じ。作り方は [opentofu/README.md](opentofu/README.md)） |
+| `StateBucketName` | state のバケット（`TF_STATE_BUCKET` と同じ。state のスタックの出力 `BucketName`） |
+| `StateKmsKeyArn` | state のバケットが `SSE-KMS-CMK` のときだけ、state のスタックの出力 `StateKmsKeyArn`（Plan・Apply のロールに、S3 を通してその鍵を使う権限を足す）。このスタックが作るアーティファクト用の鍵とは別です。空のままバケットが `SSE-KMS-CMK` だと、plan の段の最初の `tofu init` で AccessDenied で止まります |
 | `ProjectName`・`Environment` | `workstation-config.json` の `projectName`・`environment`。IAM・ロググループ・アラーム・スケジュールの名前の絞り込みに使うので、設定と違うと権限が足りずに止まります |
 | `DeployRegion` | `workstation-config.json` の `awsRegion` |
 | `RepositoryName` | CodeCommit のリポジトリ名（既定 `ec2-workstation`） |
@@ -678,7 +681,7 @@ ec2-workstation/
 │   │   ├── network/              # network の state のルート
 │   │   └── workstations/         # ユーザーごとの state のルート（workspace = ユーザー。VPC は Name タグで引く）
 │   └── README.md                 # OpenTofu 利用ガイド
-├── cloudformation/               # CodePipeline で deploy するテンプレートと buildspec（AWS だけで deploy する場合）
+├── cloudformation/               # state のバケット（state-bucket.yaml）と、CodePipeline で deploy するテンプレートと buildspec（AWS だけで deploy する場合）
 ├── scripts/
 │   ├── tofu-init.sh              # stacks/<stack> の init（state の bucket・key を決める）
 │   ├── tofu-deploy.sh            # デプロイ（network → workstations）

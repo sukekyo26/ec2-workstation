@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ec2-workstation: the S3 bucket that keeps the OpenTofu state (TF_STATE_BUCKET).
+  Deleting the stack keeps the bucket (and the KMS key, with SSE-KMS-CMK). See opentofu/README.md.
+
+Parameters:
+  BucketName:
+    Type: String
+    # No dots: the S3 backend uses virtual-hosted URLs, and a dot in the name breaks the TLS certificate match
+    AllowedPattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+    ConstraintDescription: 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit
+    Description: Name of the state bucket (unique across all of S3). Put it in TF_STATE_BUCKET
+  Encryption:
+    Type: String
+    Default: SSE-S3
+    AllowedValues: [SSE-S3, SSE-KMS-AWS-MANAGED, SSE-KMS-CMK]
+    Description: >-
+      Default encryption of the state. SSE-S3 needs no KMS permissions. SSE-KMS-CMK creates a customer managed key:
+      everything that reads or writes the state needs kms:Decrypt and kms:GenerateDataKey on it (output StateKmsKeyArn).
+      Do not change it after choosing SSE-KMS-CMK (the existing objects stay encrypted with that key)
+
+Conditions:
+  UseCmk: !Equals [!Ref Encryption, SSE-KMS-CMK]
+  UseAwsManagedKey: !Equals [!Ref Encryption, SSE-KMS-AWS-MANAGED]
+  UseKms: !Or [!Condition UseCmk, !Condition UseAwsManagedKey]
+
+# scripts/lib/tofu-common.sh looks for the state in ap-northeast-1 (STATE_REGION)
+Rules:
+  StateRegion:
+    Assertions:
+      - Assert: !Equals [!Ref AWS::Region, ap-northeast-1]
+        AssertDescription: Create this stack in ap-northeast-1, where the scripts look for the state bucket (STATE_REGION)
+
+Resources:
+  # The state's key (SSE-KMS-CMK only). Not the CodePipeline artifact key of cloudformation/codepipeline.yaml.
+  # The key policy leaves its use to IAM policies in the account. Kept when the stack is deleted: without it the state
+  # cannot be read
+  StateKey:
+    Type: AWS::KMS::Key
+    Condition: UseCmk
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: !Sub OpenTofu state in s3://${BucketName}
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountIamPolicies
+            Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" }
+            Action: kms:*
+            Resource: "*"
+
+  # The state holds the SSH private keys in plain text. Kept when the stack is deleted
+  StateBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      VersioningConfiguration:
+        Status: Enabled
+      # The backend sends no encryption headers, so S3 applies this default
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: !If [UseKms, aws:kms, AES256]
+              # Without a key ID, aws:kms uses the AWS managed key aws/s3
+              KMSMasterKeyID: !If [UseCmk, !GetAtt StateKey.Arn, !Ref AWS::NoValue]
+            BucketKeyEnabled: !If [UseKms, true, false]
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+
+  StateBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref StateBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt StateBucket.Arn
+              - !Sub ${StateBucket.Arn}/*
+            Condition:
+              Bool: { aws:SecureTransport: "false" }
+
+Outputs:
+  BucketName:
+    Description: Put this in TF_STATE_BUCKET (and StateBucketName of cloudformation/codepipeline.yaml)
+    Value: !Ref StateBucket
+  StateKmsKeyArn:
+    Condition: UseCmk
+    Description: >-
+      Give kms:Decrypt and kms:GenerateDataKey on this key to everything that deploys, and pass it to StateKmsKeyArn of
+      cloudformation/codepipeline.yaml
+    Value: !GetAtt StateKey.Arn

@@ -15,7 +15,17 @@ Parameters:
     Description: A push to this branch starts the pipeline
   StateBucketName:
     Type: String
-    Description: S3 bucket that keeps the OpenTofu state (the same as TF_STATE_BUCKET)
+    Description: S3 bucket that keeps the OpenTofu state (the same as TF_STATE_BUCKET, output BucketName of cloudformation/state-bucket.yaml)
+  StateKmsKeyArn:
+    Type: String
+    Default: ""
+    # A key ARN only: an alias ARN does not work as the Resource of an IAM policy
+    AllowedPattern: ^$|^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-zA-Z-]+$
+    ConstraintDescription: empty, or the ARN of a KMS key (not an alias)
+    Description: >-
+      The state's KMS key: output StateKmsKeyArn of cloudformation/state-bucket.yaml when it uses SSE-KMS-CMK (not the
+      artifact key this stack creates). Leave it empty for SSE-S3 and SSE-KMS-AWS-MANAGED. Empty with a SSE-KMS-CMK
+      bucket stops the plan stage at its first tofu init with AccessDenied
   ProjectName:
     Type: String
     Description: projectName in workstation-config.json (scopes the IAM, log, alarm and schedule names)
@@ -32,6 +42,7 @@ Parameters:
 
 Conditions:
   HasApprovalTopic: !Not [!Equals [!Ref ApprovalTopicArn, ""]]
+  HasStateKey: !Not [!Equals [!Ref StateKmsKeyArn, ""]]
 
 Resources:
   # The repository keeps the code: deleting the stack must not delete it
@@ -115,7 +126,8 @@ Resources:
   # ---------------------------------------------------------------- artifacts
 
   # The plan files carry the private keys (tls_private_key), so only the pipeline's roles can decrypt them.
-  # The account root keeps the administration (rotation, tags, deletion) but not the use of the key
+  # The account root keeps the administration (rotation, tags, deletion) but not the use of the key.
+  # Not the state's key (StateKmsKeyArn, from cloudformation/state-bucket.yaml)
   ArtifactKey:
     Type: AWS::KMS::Key
     Properties:
@@ -378,6 +390,18 @@ Resources:
           - Effect: Allow
             Action: sts:GetCallerIdentity
             Resource: "*"
+          # A SSE-KMS-CMK state bucket: S3 calls KMS with the caller's permissions. Only through S3 in the state's region
+          # (ap-northeast-1, STATE_REGION of scripts/lib/tofu-common.sh), so the roles cannot call KMS directly
+          - !If
+            - HasStateKey
+            - Effect: Allow
+              Action:
+                - kms:Decrypt
+                - kms:GenerateDataKey
+              Resource: !Ref StateKmsKeyArn
+              Condition:
+                StringEquals: { kms:ViaService: s3.ap-northeast-1.amazonaws.com }
+            - !Ref AWS::NoValue
 
   # Reads that OpenTofu makes while planning (data sources and the refresh of every resource the stacks manage).
   # LIMIT: the refresh of the key pair's SSM parameter (/ec2/keypair/*) reads the private key, so the plan role can read it
