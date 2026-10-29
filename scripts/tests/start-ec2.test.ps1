@@ -281,11 +281,14 @@ function Invoke-Setup {
     return $result
 }
 
-# The Host block of a host in ~/.ssh/config (the Host line and the indented lines after it)
+# The Host block of a host in ~/.ssh/config (the Host line and the indented lines after it), with LF line endings.
+# The setup writes the new block with the line endings of its own file (CRLF in a Windows checkout) and turns the rest
+# of the config into LF, so the blocks are compared without CR
 function Get-HostBlock {
     param([string]$SshHost)
-    $config = [IO.File]::ReadAllText((Join-Path $sshDir 'config'))
-    return @([regex]::Matches($config, "(?m)^Host $SshHost\n(?:   .+\n)*") | ForEach-Object { $_.Value })
+    $config = [IO.File]::ReadAllText((Join-Path $sshDir 'config')) -replace "`r`n", "`n"
+    # The comma keeps a one-block result an array (a bare return unrolls it to a string, and [0] would be its first character)
+    return ,@([regex]::Matches($config, "(?m)^Host $SshHost\n(?:   .+\n)*") | ForEach-Object { $_.Value })
 }
 
 function Get-ProxyScript {
