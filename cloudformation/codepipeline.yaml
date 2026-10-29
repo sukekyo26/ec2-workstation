@@ -309,6 +309,8 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
+          # LIMIT: CreateLogGroup stays because CodeBuild's use of it with an existing group is undocumented. A group deleted by
+          # hand comes back without retention on the next build; drop it after checking a build runs without it
           - Effect: Allow
             Action:
               - logs:CreateLogGroup
@@ -606,6 +608,25 @@ Resources:
 
   # ---------------------------------------------------------------- builds
   # The image is fixed: the tools are checked against it (glibc 2.34 for jv, bash 5.2, jq and AWS CLI v2 from the image)
+  # The log groups are the stack's (deleted with it); the names are CodeBuild's defaults, which CodeBuildBasePolicy matches
+
+  CheckLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${AWS::StackName}-check
+      RetentionInDays: 30
+
+  PlanLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${AWS::StackName}-plan
+      RetentionInDays: 30
+
+  ApplyLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${AWS::StackName}-apply
+      RetentionInDays: 30
 
   CheckProject:
     Type: AWS::CodeBuild::Project
@@ -615,6 +636,8 @@ Resources:
       EncryptionKey: !GetAtt ArtifactKey.Arn
       Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-check.yml }
       Artifacts: { Type: CODEPIPELINE }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref CheckLogGroup }
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
@@ -629,6 +652,8 @@ Resources:
       EncryptionKey: !GetAtt ArtifactKey.Arn
       Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-plan.yml }
       Artifacts: { Type: CODEPIPELINE }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref PlanLogGroup }
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
@@ -645,6 +670,8 @@ Resources:
       EncryptionKey: !GetAtt ArtifactKey.Arn
       Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-apply.yml }
       Artifacts: { Type: CODEPIPELINE }
+      LogsConfig:
+        CloudWatchLogs: { Status: ENABLED, GroupName: !Ref ApplyLogGroup }
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
