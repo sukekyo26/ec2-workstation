@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # scripts/start-ec2-and-wait.sh・scripts/start-ec2.sh を、偽の aws で確かめる。
 # - start-ec2-and-wait.sh は SSH の ProxyCommand として動くので、stdout にはセッション (偽の aws の SSH-2.0-fake) だけが出る
-# - aws の呼び出しが失敗したら、理由を出してすぐ止まる (どの実行も 20 秒で打ち切る。SSM の問い合わせは失敗を 5 秒おきに 2 回まで問い合わせ直す)
+# - aws の呼び出しが失敗したら、理由を出してすぐ止まる (どの実行も 10 秒で打ち切る。SSM の問い合わせの間隔は EC2WS_SSM_POLL_INTERVAL=1 で縮める)
 # - 偽の aws は PATH の先頭に置き、FAKE_STATE で状態を、FAKE_FAIL で失敗させる呼び出しを、FAKE_WARN=1 で成功のときの
-#   stderr の警告を選ぶ。FAKE_FAIL_TIMES を付けると、失敗はその回数だけ (数は FAKE_COUNTER のファイル)。stdout に出す呼び出し (describe・start-instances の JSON・start-session) は全部まねる
+#   stderr の警告を選ぶ。FAKE_SSM_SEQUENCE (例: fail,fail,None,Online) は、SSM の問い合わせの答えを呼ばれた順に返す
+#   (fail は失敗。並びが尽きたら Online。何回目かは FAKE_COUNTER のファイルに数える)。stdout に出す呼び出し (describe・start-instances の JSON・start-session) は全部まねる
 #
 #   scripts/tests/start-ec2.test.sh
 set -euo pipefail
@@ -28,16 +29,24 @@ case "$what" in
         exit 2
         ;;
 esac
+if [ "$what" = describe-instance-information ] && [ -n "${FAKE_SSM_SEQUENCE:-}" ]; then
+    n=$(($(cat "$FAKE_COUNTER" 2> /dev/null || echo 0) + 1))
+    echo "$n" > "$FAKE_COUNTER"
+    answer=$(cut -d, -f"$n" <<< "$FAKE_SSM_SEQUENCE,")
+    case "${answer:-Online}" in
+        fail)
+            echo "fake aws: $what failed" >&2
+            exit 1
+            ;;
+        *)
+            echo "${answer:-Online}"
+            exit 0
+            ;;
+    esac
+fi
 if [ "${FAKE_FAIL:-}" = "$what" ]; then
-    n=0
-    if [ -n "${FAKE_FAIL_TIMES:-}" ]; then
-        n=$(cat "$FAKE_COUNTER" 2> /dev/null || echo 0)
-        echo $((n + 1)) > "$FAKE_COUNTER"
-    fi
-    if [ -z "${FAKE_FAIL_TIMES:-}" ] || [ "$n" -lt "$FAKE_FAIL_TIMES" ]; then
-        echo "fake aws: $what failed" >&2
-        exit 1
-    fi
+    echo "fake aws: $what failed" >&2
+    exit 1
 fi
 if [ "${FAKE_WARN:-}" = 1 ]; then
     echo "fake aws: warning from $what" >&2
@@ -59,7 +68,7 @@ fail() {
     failures=$((failures + 1))
 }
 
-# run <name> <script> [VAR=value ...]: 20 秒で打ち切って走らせ、rc・stdout・stderr を残す (打ち切ったら rc=124)
+# run <name> <script> [VAR=value ...]: SSM の問い合わせの間隔を 1 秒にし、10 秒で打ち切って走らせ、rc・stdout・stderr を残す (打ち切ったら rc=124)
 run() {
     local name=$1 script=$2 rc=0 args=()
     shift 2
@@ -67,7 +76,7 @@ run() {
         start-ec2-and-wait.sh) args=(ws ap-northeast-1 22) ;;
         start-ec2.sh) args=(ws ap-northeast-1) ;;
     esac
-    env -u FAKE_STATE -u FAKE_FAIL -u FAKE_FAIL_TIMES -u FAKE_COUNTER -u FAKE_WARN "$@" timeout 20 "$scripts_dir/$script" "${args[@]}" \
+    env -u FAKE_STATE -u FAKE_FAIL -u FAKE_SSM_SEQUENCE -u FAKE_COUNTER -u FAKE_WARN EC2WS_SSM_POLL_INTERVAL=1 "$@" timeout 10 "$scripts_dir/$script" "${args[@]}" \
         < /dev/null > "$work/out/$name.out" 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
@@ -100,7 +109,7 @@ for c in running:lookup running:state stopped:start-instances stopped:wait-insta
     name="wait-$state-$failing"
     run "$name" start-ec2-and-wait.sh "FAKE_STATE=$state" "FAKE_FAIL=$failing"
     if [ "$(rc_of "$name")" != 1 ] || [ -s "$work/out/$name.out" ] || ! grep -qF "$reason" "$work/out/$name.err"; then
-        fail "$name: want rc=1 within 20s, empty stdout, and '$reason' on stderr, got rc=$(rc_of "$name") stdout: $(cat "$work/out/$name.out")"
+        fail "$name: want rc=1 within 10s, empty stdout, and '$reason' on stderr, got rc=$(rc_of "$name") stdout: $(cat "$work/out/$name.out")"
     fi
     # lookup・state・SSM の問い合わせ (続けて 3 回) の失敗は、認証の切れでも起きるので案内を出す
     case "$failing" in
@@ -114,21 +123,25 @@ for c in running:lookup running:state stopped:start-instances stopped:wait-insta
     name="start-$state-$failing"
     run "$name" start-ec2.sh "FAKE_STATE=$state" "FAKE_FAIL=$failing"
     if [ "$(rc_of "$name")" != 1 ] || ! cat "$work/out/$name.out" "$work/out/$name.err" | grep -qF "$reason"; then
-        fail "$name: want rc=1 within 20s and '$reason', got rc=$(rc_of "$name")"
+        fail "$name: want rc=1 within 10s and '$reason', got rc=$(rc_of "$name")"
     fi
 done
 
-# SSM の問い合わせは失敗を問い合わせ直す: 2 回失敗してから Online を返せば、つながる
-for script in start-ec2-and-wait.sh start-ec2.sh; do
-    rm -f "$work/ssm-failures"
-    run "$script-ssm-fails-twice" "$script" FAKE_STATE=running FAKE_FAIL=describe-instance-information FAKE_FAIL_TIMES=2 "FAKE_COUNTER=$work/ssm-failures"
-    if [ "$(rc_of "$script-ssm-fails-twice")" != 0 ]; then
-        fail "$script-ssm-fails-twice: want rc=0, got rc=$(rc_of "$script-ssm-fails-twice")"
-    fi
+# SSM の問い合わせの失敗は、続けて 3 回になるまで問い合わせ直す。成功を 1 回挟めば数え直すので、
+# 失敗・失敗・成功 (まだ Online でない)・失敗・失敗・Online でつながる
+for seq in fail,fail,Online fail,fail,None,fail,fail,Online; do
+    for script in start-ec2-and-wait.sh start-ec2.sh; do
+        name="$script-ssm-$seq"
+        rm -f "$work/ssm-count"
+        run "$name" "$script" FAKE_STATE=running "FAKE_SSM_SEQUENCE=$seq" "FAKE_COUNTER=$work/ssm-count"
+        if [ "$(rc_of "$name")" != 0 ]; then
+            fail "$name: want rc=0, got rc=$(rc_of "$name")"
+        fi
+        if [ "$script" = start-ec2-and-wait.sh ] && [ "$(cat "$work/out/$name.out")" != SSH-2.0-fake ]; then
+            fail "$name: want stdout 'SSH-2.0-fake' alone"
+        fi
+    done
 done
-if [ "$(cat "$work/out/start-ec2-and-wait.sh-ssm-fails-twice.out")" != SSH-2.0-fake ]; then
-    fail "start-ec2-and-wait.sh-ssm-fails-twice: want stdout 'SSH-2.0-fake' alone"
-fi
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2
