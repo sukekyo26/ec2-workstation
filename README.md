@@ -474,6 +474,7 @@ HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の�
 - 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
 - PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます
 - パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks・PowerShell 7・PSScriptAnalyzer）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
+- CodeBuild のログは、スタックが作るロググループ（`/aws/codebuild/<スタック名>-check`・`-plan`・`-apply`、保持期間 30 日）に出ます。スタックを消すと、ロググループも一緒に消えます
 - スタックを消すときは、先にアーティファクトのバケットを空にしてください（中身が残っていると、スタックの削除が `DELETE_FAILED` で止まります）。バケットのポリシーが拒むのは読み取り（`GetObject`）だけなので、管理者の権限で一覧と削除ができます:
 
   ```bash
