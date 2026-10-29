@@ -11,14 +11,31 @@
 
 ### State バケットの作成（初回のみ）
 
-state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
+[cloudformation/state-bucket.yaml](../cloudformation/state-bucket.yaml) で作ります（手元・GitHub Actions・CodePipeline のどれで deploy するときも同じ）。バージョニング、既定の暗号化、公開のブロック、TLS だけのバケットポリシーを付けます。state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`。ほかのリージョンでは、何も作らずに止まります。そのとき空のスタックが `ROLLBACK_COMPLETE` で残るので、`aws cloudformation delete-stack --region <作ろうとしたリージョン> --stack-name <スタック名>` で消してください）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
 
 ```bash
-aws s3 mb s3://<your-state-bucket> --region ap-northeast-1
-aws s3api put-bucket-versioning \
-  --bucket <your-state-bucket> \
-  --versioning-configuration Status=Enabled
+aws cloudformation deploy --region ap-northeast-1 \
+  --template-file cloudformation/state-bucket.yaml --stack-name ec2-workstation-tofu-state
+# 名前を変えたいときだけ --parameter-overrides BucketName=<名前>。KMS の鍵で守るなら Encryption=SSE-KMS-CMK も並べる
+
+aws cloudformation describe-stacks --region ap-northeast-1 --stack-name ec2-workstation-tofu-state \
+  --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text
 ```
+
+バケットの名前は、既定で `ec2-workstation-tfstate-<account-id>` です（S3 の全体で 1 つなので、アカウント ID で分けます）。出力 `BucketName` を `TF_STATE_BUCKET` に入れます。スタックを消しても、バケット（と SSE-KMS-CMK の鍵）は残ります。
+
+暗号化（パラメータ `Encryption`）:
+
+| 値 | 鍵 | state を読み書きする主体に足す権限 |
+|---|---|---|
+| `SSE-S3`（既定） | S3 の鍵 | なし |
+| `SSE-KMS-AWS-MANAGED` | AWS が管理する `aws/s3` | なし |
+| `SSE-KMS-CMK` | このテンプレートが作る鍵（ローテーションあり。出力 `StateKmsKeyArn`） | その鍵の `kms:Decrypt`・`kms:GenerateDataKey`（state を読み書きする全部: deploy・destroy する手元の利用者と GitHub Actions のロール、`tofu output` を見る利用者。CodePipeline には、スタックのパラメータ `StateKmsKeyArn` に出力をそのまま渡す） |
+
+- state には SSH の秘密鍵が平文で入ります。`SSE-S3` では、バケットを読める人は中身を読めます。守りを強めたいなら `SSE-KMS-CMK` を選んでください
+- backend の設定（`kms_key_id`・`encrypt`）は要りません。S3 がバケットの既定の暗号化をかけます
+- 方式を後から変えても、既にある state のオブジェクト（古い版も）は暗号化し直されません（次に書き込んだ版から新しい方式）。**`SSE-KMS-CMK` を選んだら、後から方式を変えないでください**。CMK のまま残るオブジェクトを読むのに鍵の権限が要り続け、出力 `StateKmsKeyArn` は消え、CMK に戻すと別の鍵ができます。変えるなら、先に鍵の ARN を控え、鍵の権限はそのまま残してください
+- 手で作った既にあるバケットは、そのまま使えます。同じ保護（TLS だけ・公開のブロックなど）を付けるには、このテンプレートで新しいバケットを作って state を移すか、手で付けてください
 
 ## 🔐 State の保護（重要）
 
@@ -26,7 +43,7 @@ aws s3api put-bucket-versioning \
 （`tls_private_key` リソースの仕様）。最低限、以下を必ず実施してください:
 
 1. state バケットへのアクセスを必要最小限の IAM プリンシパルに制限する
-2. バケットのデフォルト暗号化（SSE-S3 / SSE-KMS）を有効にする
+2. バケットのデフォルト暗号化（SSE-S3 / SSE-KMS）を有効にする（`cloudformation/state-bucket.yaml` が行う）
 3. 可能なら OpenTofu の [state encryption](https://opentofu.org/docs/language/state/encryption/) を有効にする:
 
 ```hcl
