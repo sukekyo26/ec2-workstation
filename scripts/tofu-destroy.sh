@@ -18,6 +18,7 @@ trap 'rm -rf "$plan_dir"' EXIT
 # 前の形の環境が残っていれば、新しい state を消しても「成功」するだけで、残りは動き続ける
 init_stack network
 refuse_leftover_vpc
+refuse_leftover_shared_workstations_state
 init_stack workstations
 
 # 設定でなく、state を持つ全員を消す (設定から消えたユーザーも残さない)

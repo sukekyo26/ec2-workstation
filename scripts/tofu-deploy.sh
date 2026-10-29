@@ -32,16 +32,11 @@ refuse_network_replacement() {
     esac
 }
 
-log "network: plan"
 init_stack network
 refuse_leftover_vpc
-tofu -chdir="$network_dir" plan -input=false -out="$plan_dir/network.tfplan"
-plan_json=$(tofu -chdir="$network_dir" show -json "$plan_dir/network.tfplan")
-refuse_network_replacement "$plan_json"
-confirm_plan network "$plan_json"
-log "network: apply"
-tofu -chdir="$network_dir" apply -input=false "$plan_dir/network.tfplan"
+refuse_leftover_shared_workstations_state
 
+# 消える人は、何かを apply する前に決める (一覧を取れなければ、ここで止まる)
 init_stack workstations
 users=()
 removed=()
@@ -56,4 +51,13 @@ if [ -n "$names" ]; then
     done <<< "$names"
 fi
 log "users to destroy (removed from workstation-config.json): ${removed[*]:-none}"
+
+log "network: plan"
+tofu -chdir="$network_dir" plan -input=false -out="$plan_dir/network.tfplan"
+plan_json=$(tofu -chdir="$network_dir" show -json "$plan_dir/network.tfplan")
+refuse_network_replacement "$plan_json"
+confirm_plan network "$plan_json"
+log "network: apply"
+tofu -chdir="$network_dir" apply -input=false "$plan_dir/network.tfplan"
+
 apply_user_plans "$plan_dir" "${users[@]}" -- "${removed[@]}"

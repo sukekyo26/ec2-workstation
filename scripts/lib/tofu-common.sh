@@ -1,6 +1,10 @@
 # shellcheck shell=bash
 # tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh が読む共通の部品。
-# set -e の下で読まれるので、関数は `[ ... ] && cmd` の形で終わらせない (条件が偽のとき rc=1 で呼び出し元が止まる)
+# set -e の下で読まれるので、関数は `[ ... ] && cmd` の形で終わらせない (条件が偽のとき rc=1 で呼び出し元が止まる)。
+# if・&&・|| の条件で呼んだ関数の中では set -e が効かないので、失敗を見落とせない関数は条件で呼ばない
+
+# コマンド置換 ($(...)) の中でも set -e を効かせる (既定の bash では効かず、中の失敗が黙って空の出力になる)
+shopt -s inherit_errexit
 
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CONFIG_FILE="$REPO_ROOT/workstation-config.json"
@@ -61,11 +65,32 @@ config_usernames() {
 }
 
 # state を持つユーザーの workspace の一覧 (default を除く)。tofu workspace list の出力を読むのはここだけ:
-# 選んでいる workspace には "* "、ほかは空白 2 つの字下げ、最後に空行が付く。単語では分けない (* がファイル名に展開される)
+# 選んでいる workspace には "* "、ほかは空白 2 つの字下げ、最後に空行が付く。単語では分けない (* がファイル名に展開される)。
+# 一覧を取れなければ (s3:ListBucket が無いなど) 止まる。空の一覧と取り違えると、消すべき人を黙って残すため
 user_workspaces() {
     local out
-    out=$(tofu -chdir="$(stack_dir workstations)" workspace list)
+    if ! out=$(tofu -chdir="$(stack_dir workstations)" workspace list); then
+        die "could not list the users' workspaces (tofu workspace list failed). Check s3:ListBucket on the state bucket"
+    fi
     sed -E 's/^[* ] *//; /^$/d; /^default$/d' <<< "$out"
+}
+
+# ユーザーごとの workspace に分ける前の版は、全員の workstations を 1 つの state (この key) に置いていた。
+# その state にリソースが残ったまま進むと、全員分をもう 1 組作ろうとして名前が衝突し、データボリュームが二重にできうる。
+# init_stack の後に呼ぶ
+refuse_leftover_shared_workstations_state() {
+    local key count state
+    key="$(jq -er '"\(.projectName)/\(.environment)"' "$CONFIG_FILE")/workstations.tfstate"
+    count=$(aws s3api list-objects-v2 --region "$STATE_REGION" --bucket "$TF_STATE_BUCKET" --prefix "$key" \
+        --query "length(Contents[?Key=='$key'] || \`[]\`)" --output text)
+    if [ "$count" -eq 0 ]; then
+        return 0
+    fi
+    state=$(aws s3 cp --region "$STATE_REGION" "s3://$TF_STATE_BUCKET/$key" -)
+    count=$(jq -e '[(.resources // [])[] | select(.mode == "managed")] | length' <<< "$state")
+    if [ "$count" -ne 0 ]; then
+        die "the state s3://$TF_STATE_BUCKET/$key, used before each user got their own state, still has $count resources. Destroy them with scripts/tofu-destroy.sh of that version, then run this again"
+    fi
 }
 
 # network の state が空なのに同じ Name の VPC があれば、前の形 (state の key が違う) の環境が残っている。
@@ -98,24 +123,27 @@ is_terminal() {
     [ -t 0 ] && [ -t 1 ]
 }
 
-# plan の JSON の要約 (作る・変える・作り直す・消すの数と、作り直すアドレス) を出す。変更が無ければ rc=1
-summarize_plan() {
+# plan に変更があれば rc=0、無ければ rc=1。読めなければ止まる (条件で呼んでも、exit で止まる)
+plan_has_changes() {
     local label=$1 plan_json=$2 rc=0
     jq -e '[(.resource_changes // [])[] | select(.change.actions != ["no-op"] and .change.actions != ["read"])] | length > 0' \
         <<< "$plan_json" > /dev/null || rc=$?
     case $rc in
-        0) ;;
-        1)
-            log "$label: no changes"
-            return 1
-            ;;
+        0 | 1) return "$rc" ;;
         *) die "could not read the $label plan (jq exit $rc)" ;;
     esac
-    jq -r --arg label "$label" '
+}
+
+# plan の JSON の要約 (作る・変える・作り直す・消すの数と、作り直すアドレス) を出す。読めなければ止まる
+print_plan_summary() {
+    local label=$1 plan_json=$2
+    if ! jq -r --arg label "$label" '
         [(.resource_changes // [])[] | {address, a: (.change.actions | join(","))}] as $c
         | ($c | map(select(.a == "delete,create" or .a == "create,delete"))) as $replace
         | "\($label): create \($c | map(select(.a == "create")) | length), update \($c | map(select(.a == "update")) | length), replace \($replace | length), delete \($c | map(select(.a == "delete")) | length)",
-          ($replace[] | "  replace: \(.address)")' <<< "$plan_json" >&2
+          ($replace[] | "  replace: \(.address)")' <<< "$plan_json" >&2; then
+        die "could not summarize the $label plan"
+    fi
 }
 
 # 端末なら "yes" を待つ。yes 以外なら何も apply せずに止まる。端末でなければ確かめない
@@ -131,9 +159,21 @@ confirm_apply() {
     fi
 }
 
-# 1 つの plan を要約し、変更があれば確かめる (変更の無い plan は apply しても何も起きないので確かめない)
+# 1 つの plan を要約し、変更があれば確かめる (変更の無い plan は apply しても何も起きないので確かめない)。
+# 変更があれば rc=0、無ければ rc=1 を返す代わりに、変数 PLAN_CHANGED に 1 か 0 を入れる
+summarize_plan() {
+    if plan_has_changes "$1" "$2"; then
+        print_plan_summary "$1" "$2"
+        PLAN_CHANGED=1
+    else
+        log "$1: no changes"
+        PLAN_CHANGED=0
+    fi
+}
+
 confirm_plan() {
-    if summarize_plan "$1" "$2"; then
+    summarize_plan "$1" "$2"
+    if [ "$PLAN_CHANGED" -eq 1 ]; then
         confirm_apply "$1"
     fi
 }
@@ -154,8 +194,8 @@ in_list() {
 # destroy したユーザーの workspace は、apply の後に消す。init_stack workstations の後に呼ぶ
 #   apply_user_plans <plan の置き場所> <apply するユーザー...> -- <destroy するユーザー...>
 apply_user_plans() {
-    local plan_dir=$1 dir u plan_json changes=1
-    local apply_users=() destroy_users=()
+    local plan_dir=$1 dir u plan_json changes=0 i
+    local apply_users=() destroy_users=() all=()
     shift
     while [ $# -gt 0 ] && [ "$1" != -- ]; do
         apply_users+=("$1")
@@ -167,14 +207,14 @@ apply_user_plans() {
     destroy_users=("$@")
     dir=$(stack_dir workstations)
 
+    # LIMIT: ユーザーを 1 人ずつ順に plan・apply するので、人数に比例して時間がかかる。CI の時間が問題になったら並列にする (state もロックも人ごと)
     for u in "${apply_users[@]}"; do
         log "workstations/$u: plan"
         tofu -chdir="$dir" workspace select -or-create "$u"
         tofu -chdir="$dir" plan -input=false -out="$plan_dir/user-$u.tfplan"
         plan_json=$(tofu -chdir="$dir" show -json "$plan_dir/user-$u.tfplan")
-        if summarize_plan "workstations/$u" "$plan_json"; then
-            changes=0
-        fi
+        summarize_plan "workstations/$u" "$plan_json"
+        changes=$((changes + PLAN_CHANGED))
     done
     # data source (AMI の SSM パラメータ・VPC の検索) を読まずに、state にあるものを消す
     for u in "${destroy_users[@]}"; do
@@ -182,18 +222,22 @@ apply_user_plans() {
         tofu -chdir="$dir" workspace select "$u"
         tofu -chdir="$dir" plan -destroy -refresh=false -input=false -out="$plan_dir/user-$u.tfplan"
         plan_json=$(tofu -chdir="$dir" show -json "$plan_dir/user-$u.tfplan")
-        if summarize_plan "workstations/$u" "$plan_json"; then
-            changes=0
-        fi
+        summarize_plan "workstations/$u" "$plan_json"
+        changes=$((changes + PLAN_CHANGED))
     done
-    if [ "$changes" -eq 0 ]; then
+    if [ "$changes" -gt 0 ]; then
         confirm_apply workstations
     fi
 
-    for u in "${apply_users[@]}" "${destroy_users[@]}"; do
+    all=("${apply_users[@]}" "${destroy_users[@]}")
+    for i in "${!all[@]}"; do
+        u=${all[$i]}
         log "workstations/$u: apply"
         tofu -chdir="$dir" workspace select "$u"
-        tofu -chdir="$dir" apply -input=false "$plan_dir/user-$u.tfplan"
+        if ! tofu -chdir="$dir" apply -input=false "$plan_dir/user-$u.tfplan"; then
+            # 途中で止まったとき、どこまで済んだかを出す (後の人は apply していない。消える人の workspace も残っている)
+            die "workstations/$u: apply failed. Applied: ${all[*]:0:i}. Not applied: ${all[*]:i+1}. Workspaces of removed users are kept: ${destroy_users[*]}. Fix the cause and run this again"
+        fi
     done
     if [ ${#destroy_users[@]} -gt 0 ]; then
         # 選んでいる workspace は消せない

@@ -11,7 +11,7 @@ data "aws_vpc" "this" {
   lifecycle {
     precondition {
       condition     = terraform.workspace != "default" && contains(keys(module.config.users), terraform.workspace)
-      error_message = "Workspace \"${terraform.workspace}\" is not a username in workstation-config.json. Select a user's workspace with scripts/tofu-init.sh workstations <username>. To remove a user deleted from the config, run scripts/tofu-deploy.sh."
+      error_message = "Workspace \"${terraform.workspace}\" is the default workspace or a name that is not a username in workstation-config.json. Select a user's workspace with scripts/tofu-init.sh workstations <username>. To remove a user deleted from the config, run scripts/tofu-deploy.sh."
     }
   }
 }
