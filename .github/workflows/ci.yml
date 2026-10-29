@@ -30,7 +30,8 @@ jobs:
       - name: Check the real jv rejects a broken config and schema typos
         run: |
           shopt -s inherit_errexit
-          jv=$(bash -c '. scripts/lib/tofu-common.sh; jv_path')
+          # The path under the repository, so that a copy gets it at the same place
+          jv=$(bash -c '. scripts/lib/tools.sh; p=$(jv_path); echo "${p#"$REPO_ROOT/"}"')
           # copy <jq filter for the config> <jq filter for the schema>: a repository copy with the jv
           copy() {
             local dir
@@ -38,7 +39,7 @@ jobs:
             cp -R scripts schemas "$dir/"
             jq "$1" workstation-config.json > "$dir/workstation-config.json"
             jq "$2" workstation-config.schema.json > "$dir/workstation-config.schema.json"
-            install -D "$jv" "$dir/${jv#"$PWD/"}"
+            install -D "$jv" "$dir/$jv"
             echo "$dir"
           }
           # expect <dir> <line>...: validate-config.sh fails with rc=1 and prints every line
@@ -138,11 +139,11 @@ jobs:
           git -C "$copy" add -A
           sed -i 's/^indent_size = 4$/indent_size = 2/' "$copy/.editorconfig"
           grep -qx 'indent_size = 2' "$copy/.editorconfig"
-          shfmt=$(bash -c '. scripts/lib/tools.sh; shfmt_path')
-          install -D "$shfmt" "$copy/${shfmt#"$PWD/"}"
+          shfmt=$(bash -c '. scripts/lib/tools.sh; p=$(shfmt_path); echo "${p#"$REPO_ROOT/"}"')
+          install -D "$shfmt" "$copy/$shfmt"
           rc=0
           out=$("$copy/scripts/format-shell.sh" --check 2>&1) || rc=$?
-          echo "$out" | head -40
+          head -40 <<< "$out"
           [ "$rc" != 0 ]
           grep -qF -- "$copy/opentofu/modules/workstation/templates/user-data.sh.tftpl" <<< "$out"
           grep -qF -- "$copy/scripts/lib/tools.sh" <<< "$out"

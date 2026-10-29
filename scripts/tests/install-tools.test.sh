@@ -66,7 +66,8 @@ edit() {
 # replace_in_copy <repo> <old> <new>: 写しの scripts/ の下で <old> をちょうど 1 つのファイルに見つけて、<new> に替える
 replace_in_copy() {
     local files
-    files=$(grep -rlF -- "$2" "$1/scripts")
+    # 見つからなければ grep は rc=1 なので、|| true で下の誤りの文に任せる
+    files=$(grep -rlF -- "$2" "$1/scripts" || true)
     if [ "$(wc -l <<< "$files")" -ne 1 ] || [ -z "$files" ]; then
         echo "expected '$2' in exactly one file under $1/scripts, found: $files" >&2
         exit 1
@@ -214,23 +215,39 @@ if [ "$("$work/ok/.tools/shfmt-$shfmt_version/shfmt" 2>&1)" != "fake shfmt" ]; t
     fail "shfmt-ok: the installed shfmt does not run"
 fi
 
-# install_pinned_tool を 1 つのシェルで 2 回 (合わない sha → 合う sha) 呼んでも、一時ディレクトリが残らず、
-# 呼び出し元の EXIT の trap は上書きされない
+# install_pinned_tool を 1 つのシェルで 2 回呼んでも、一時ディレクトリが残らず、呼び出し元の EXIT の trap は上書きされない。
+# 失敗を見落とさないよう、条件 (if・&&・||) では呼ばない (失敗の後片付けは bad・no-member の場合で見る)
 echo "case: twice"
 new_repo twice
 out=$(FAKE_UNAME_S=Linux FAKE_UNAME_M=x86_64 FAKE_CURL_LOG="$work/out/twice.curl" bash -c '
     set -euo pipefail
     . "$1/scripts/lib/tools.sh"
     trap "echo caller-trap" EXIT
-    install_pinned_tool shfmt v1 https://example.invalid/shfmt-v1 0000 "" 2> /dev/null || echo first-failed
+    install_pinned_tool shfmt v1 https://example.invalid/shfmt-v1 "$2" "" 2> /dev/null
     install_pinned_tool shfmt v2 https://example.invalid/shfmt-v2 "$2" "" 2> /dev/null
     echo second-done
 ' _ "$work/twice" "$fake_shfmt_sha")
-if [ "$out" != "$(printf '%s\n' first-failed second-done caller-trap)" ]; then
+if [ "$out" != "$(printf '%s\n' second-done caller-trap)" ]; then
     fail "twice: got '$out'"
 fi
-if [ -n "$(find "$work/twice/.tools" -maxdepth 1 -name 'tmp.*')" ] || [ ! -x "$work/twice/.tools/shfmt-v2/shfmt" ]; then
-    fail "twice: a temporary directory is left, or shfmt v2 is not installed: $(ls -A "$work/twice/.tools")"
+if [ -n "$(find "$work/twice/.tools" -maxdepth 1 -name 'tmp.*')" ] || [ ! -x "$work/twice/.tools/shfmt-v1/shfmt" ] || [ ! -x "$work/twice/.tools/shfmt-v2/shfmt" ]; then
+    fail "twice: a temporary directory is left, or shfmt is not installed: $(ls -A "$work/twice/.tools")"
+fi
+
+# tar の中に名前が無い tarball なら、rc≠0 で、何も置かず、一時ディレクトリも残さない
+echo "case: no-member"
+mkdir -p "$work/no-member-src"
+echo other > "$work/no-member-src/other"
+tar -czf "$work/no-member.tar.gz" -C "$work/no-member-src" other
+new_repo no-member
+rc=0
+FAKE_DOWNLOAD="$work/no-member.tar.gz" FAKE_UNAME_S=Linux FAKE_UNAME_M=x86_64 FAKE_CURL_LOG="$work/out/no-member.curl" bash -c '
+    set -euo pipefail
+    . "$1/scripts/lib/tools.sh"
+    install_pinned_tool jv v0 https://example.invalid/jv-v0.tar.gz "$(file_sha256 "$2")" jv
+' _ "$work/no-member" "$work/no-member.tar.gz" 2> "$work/out/no-member.err" || rc=$?
+if [ "$rc" = 0 ] || [ -e "$work/no-member/.tools/jv-v0" ] || [ -n "$(find "$work/no-member/.tools" -maxdepth 1 -name 'tmp.*')" ]; then
+    fail "no-member: rc=$rc, want rc!=0 and nothing installed: $(ls -A "$work/no-member/.tools")"
 fi
 
 if [ "$failures" -ne 0 ]; then

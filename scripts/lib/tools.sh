@@ -82,8 +82,9 @@ install_pinned_tool() (
         exit 0
     fi
 
-    mkdir -p "$REPO_ROOT/.tools"
-    tmp=$(mktemp -d "$REPO_ROOT/.tools/tmp.XXXXXX")
+    # if・&&・|| の条件で呼ばれると set -e が効かないので、失敗を見落とせない所は || die で止める
+    mkdir -p "$REPO_ROOT/.tools" || die "could not create $REPO_ROOT/.tools"
+    tmp=$(mktemp -d "$REPO_ROOT/.tools/tmp.XXXXXX") || die "could not create a temporary directory in $REPO_ROOT/.tools"
     trap 'rm -rf "$tmp"' EXIT
 
     asset=${url##*/}
@@ -94,19 +95,19 @@ install_pinned_tool() (
     if curl --help all 2> /dev/null | grep -- --retry-all-errors > /dev/null; then
         retry+=(--retry-all-errors)
     fi
-    curl -fsSL "${retry[@]}" --connect-timeout 10 --max-time 120 -o "$tmp/$asset" "$url"
-    got=$(file_sha256 "$tmp/$asset")
+    curl -fsSL "${retry[@]}" --connect-timeout 10 --max-time 120 -o "$tmp/$asset" "$url" || die "could not download $url"
+    got=$(file_sha256 "$tmp/$asset") || die "could not compute the sha256 of $asset"
     if [ "$got" != "$want" ]; then
         die "sha256 mismatch for $asset: got $got, want $want"
     fi
     if [ -n "$member" ]; then
-        tar -xzf "$tmp/$asset" -C "$tmp" "$member"
-        mv "$tmp/$member" "$tmp/$name.bin"
+        tar -xzf "$tmp/$asset" -C "$tmp" "$member" || die "could not extract $member from $asset"
+        mv "$tmp/$member" "$tmp/$name.bin" || die "could not find $member in $asset"
     else
-        mv "$tmp/$asset" "$tmp/$name.bin"
+        mv "$tmp/$asset" "$tmp/$name.bin" || die "could not move $asset"
     fi
-    chmod +x "$tmp/$name.bin"
-    mkdir -p "$(dirname "$dest")"
-    mv "$tmp/$name.bin" "$dest"
+    chmod +x "$tmp/$name.bin" || die "could not make $name executable"
+    mkdir -p "${dest%/*}" || die "could not create ${dest%/*}"
+    mv "$tmp/$name.bin" "$dest" || die "could not install $name at $dest"
     log "installed $name $version at $dest"
 )

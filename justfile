@@ -41,6 +41,8 @@ scripts-test:
 
 # シェルスクリプトの静的解析（対象は scripts/format-shell.sh の一覧）
 shellcheck:
+    #!/usr/bin/env bash
+    set -euo pipefail
     scripts/format-shell.sh --list | xargs -0r shellcheck --severity=error
 
 # PowerShell スクリプトの構文と PSScriptAnalyzer。手元の pwsh 7 での目安で、Windows PowerShell 5.1 での検査は CI で見る（pwsh が無ければ飛ばす）

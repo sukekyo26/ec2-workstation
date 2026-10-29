@@ -80,10 +80,6 @@ for f in "$repo/opentofu/modules/workstation/templates/user-data.sh.tftpl" "$rep
         fail "check: $f is not passed to shfmt"
     fi
 done
-# 書式の引数を渡すと、shfmt は .editorconfig を読まない
-if grep -qxE -- '-(i|ci|sr|bn|fn|kp|s|ln|p)' "$work/out/check.args"; then
-    fail "check: a formatting flag is passed to shfmt: $(tr '\n' ' ' < "$work/out/check.args")"
-fi
 
 FAKE_SHFMT_RC=1 run check-diff --check
 expect_rc check-diff 1
@@ -93,6 +89,14 @@ expect_rc write 0
 if [ "$(head -1 "$work/out/write.args")" != -w ]; then
     fail "write: shfmt got $(head -1 "$work/out/write.args"), want -w"
 fi
+
+# 書式の引数 (-i 4・--indent=4・--case-indent など) を渡すと、shfmt は .editorconfig を読まない。
+# 許すのは -d・-l・-w だけで、ほかの - で始まる引数は全部断る
+for name in check write; do
+    if grep -E -- '^-' "$work/out/$name.args" | grep -qvxE -- '-(d|l|w)'; then
+        fail "$name: an option other than -d, -l, -w is passed to shfmt: $(grep -E -- '^-' "$work/out/$name.args" | tr '\n' ' ')"
+    fi
+done
 
 # --list は NUL 区切りで対象を出し、shfmt を呼ばない
 run list --list

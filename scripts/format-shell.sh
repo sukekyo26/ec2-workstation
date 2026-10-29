@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # シェルスクリプト (*.sh と user-data の *.sh.tftpl) の書式を、版を固定した shfmt (scripts/install-shfmt.sh で入れる) で
 # 確かめる・直す。書式の決まりは .editorconfig にあり、shfmt には書式の引数を渡さない (渡すと .editorconfig を読まない)。
-# 対象の一覧はここだけが持つ (just の shellcheck も --list を使う)
+# 対象の一覧はここが正 (just の shellcheck も --list を使う)。.editorconfig の節と ci.yml の shellcheck の additional_files も合わせて直す
 #
 #   scripts/format-shell.sh [--check]  差分を出し、あれば rc≠0
 #   scripts/format-shell.sh --write    直す
