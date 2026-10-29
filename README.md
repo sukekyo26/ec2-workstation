@@ -553,8 +553,12 @@ tofu -chdir=opentofu/stacks/workstations output workstations   # そのユーザ
 **Windows:**
 
 ```powershell
-.\scripts\client\setup-remote-ssh.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\client\setup-remote-ssh.ps1
 ```
+
+実行ポリシーの設定は変えず、このプロセスだけでスクリプトの実行を許します（ProxyCommand と同じ起動のしかたです）。`.\scripts\client\setup-remote-ssh.ps1` を直に実行して「スクリプトの実行が無効」「デジタル署名されていません」で止まる場合（zip で取ったときのダウンロードの印も含む）も、この形なら止まりません。
+
+グループポリシー（MachinePolicy / UserPolicy）で実行ポリシーが決められている PC では `-ExecutionPolicy` が効かないので、管理者に相談してください（`Get-ExecutionPolicy -List` で確かめられます）。
 
 **Linux/Mac:**
 
@@ -588,8 +592,10 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 **Windows:**
 
 ```powershell
-.\scripts\client\start-ec2.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\client\start-ec2.ps1
 ```
+
+（2. と同じく、実行ポリシーを変えずにこのプロセスだけで許す形です）
 
 **Linux/Mac:**
 
