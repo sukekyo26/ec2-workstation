@@ -6,6 +6,7 @@
 
 - OpenTofu 1.10 以降（S3 ネイティブロック `use_lockfile` を使用）
 - AWS CLI（認証設定済み）
+- jv（`scripts/install-jv.sh` で入れる。curl・tar と sha256sum か shasum が要る）。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が tofu を呼ぶ前に `workstation-config.json` を検証する
 - state 保存用 S3 バケット
 
 ### State バケットの作成（初回のみ）
