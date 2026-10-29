@@ -250,7 +250,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
 | OpenTofu | 1.10+ | [インストールガイド](https://opentofu.org/docs/intro/install/) |
-| jv（設定の検証） | v6.0.3（`scripts/lib/tofu-common.sh` の `JV_VERSION`） | `./scripts/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
+| jv（設定の検証） | v6.0.3（`scripts/lib/tools.sh` の `JV_VERSION`） | `./scripts/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
 
 ### AWS環境
 
@@ -617,8 +617,10 @@ ec2-workstation/
 │   ├── tofu-destroy.sh           # 削除（workstations → network）
 │   ├── validate-config.sh        # workstation-config.json をスキーマで検証（jv）
 │   ├── install-jv.sh             # jv を .tools/ に取る
-│   ├── lib/                      # 上のスクリプトが読む共通の部品
-│   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl で順番と止まり方を見る）
+│   ├── install-shfmt.sh          # shfmt を .tools/ に取る（開発用）
+│   ├── format-shell.sh           # シェルスクリプトの書式を shfmt で確かめる・直す（対象の一覧もここ）
+│   ├── lib/                      # 共通の部品（base.sh: die・log など、tools.sh: 版を固定した道具、tofu-common.sh: deploy の部品）
+│   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl・shfmt で順番と止まり方を見る）
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
 │   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
 │   ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
@@ -640,6 +642,7 @@ just ci
 ```
 
 - PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします）、5.1 で通らない書き方は CI で見ます
+- シェルスクリプト（`*.sh` と user-data の `*.sh.tftpl`）の書式は、CI の `Shell format` のジョブが shfmt で確かめます。書式の決まりは `.editorconfig` にあり、対象のファイルは `scripts/format-shell.sh` が決めます。手元では、`./scripts/install-shfmt.sh` で版を固定した shfmt（v3.14.1、`scripts/lib/tools.sh` の `SHFMT_VERSION`）を `.tools/` に入れてから、`just shfmt-check`（直すときは `just shfmt-fix`）を使います。PATH にある shfmt は使いません（版が違うと書式が変わりうるため）
 
 ---
 

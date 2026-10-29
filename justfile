@@ -1,6 +1,3 @@
-shfmt_flags := "-i 4 -ci -sr"
-shell_files := "'*.sh' '*.sh.tftpl'"
-
 # レシピ一覧を表示
 default:
     @just --list
@@ -36,15 +33,18 @@ tofu-check:
         tofu -chdir="$stack" validate
     done
 
-# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、install-jv.sh を偽の curl で確かめる（CI と同じ）
+# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、道具の取り方を偽の curl で、format-shell.sh を偽の shfmt で、start-ec2 の 2 本を偽の aws で確かめる（CI と同じ）
 scripts-test:
     scripts/tests/tofu-deploy.test.sh
-    scripts/tests/install-jv.test.sh
+    scripts/tests/install-tools.test.sh
+    scripts/tests/format-shell.test.sh
     scripts/tests/start-ec2.test.sh
 
-# シェルスクリプトの静的解析
+# シェルスクリプトの静的解析（対象は scripts/format-shell.sh の一覧）
 shellcheck:
-    git ls-files {{ shell_files }} | xargs shellcheck --severity=error
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scripts/format-shell.sh --list | xargs -0r shellcheck --severity=error
 
 # PowerShell スクリプトの構文と PSScriptAnalyzer。手元の pwsh 7 での目安で、Windows PowerShell 5.1 での検査は CI で見る（pwsh が無ければ飛ばす）
 pwsh-check:
@@ -56,13 +56,13 @@ pwsh-check:
     fi
     pwsh -NoProfile -File scripts/tests/powershell-lint.ps1
 
-# シェルスクリプトのフォーマットチェック
+# シェルスクリプトのフォーマットチェック（CI と同じ。書式は .editorconfig、shfmt は scripts/install-shfmt.sh で入れる）
 shfmt-check:
-    git ls-files {{ shell_files }} | xargs shfmt {{ shfmt_flags }} -d
+    scripts/format-shell.sh --check
 
 # シェルスクリプトを自動フォーマット
 shfmt-fix:
-    git ls-files {{ shell_files }} | xargs shfmt {{ shfmt_flags }} -w
+    scripts/format-shell.sh --write
 
 # シークレットスキャン（git 履歴を含む）
 gitleaks-scan:
