@@ -414,6 +414,63 @@ state の置き場所（key）が変わったため、前の版で作った環�
 
 workstations の state を全員で 1 つにしていた版（ユーザーごとに分ける前）で作った環境も同じです。`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` は、その state（`<projectName>/<environment>/workstations.tfstate`）にリソースが残っていれば止まるので、その版の `scripts/tofu-destroy.sh` で消してから、この版でデプロイしてください。
 
+#### AWS だけで deploy する（CodePipeline）
+
+GitHub を使わず、AWS の中だけで deploy したいときは、このリポジトリを自分の CodeCommit のリポジトリに写し、CodePipeline で deploy できます（[cloudformation/codepipeline.yaml](cloudformation/codepipeline.yaml)）。`.github/workflows/` の workflow は使いません（リポジトリにあっても、CodeCommit では動きません）。
+
+パイプラインの流れ（deploy するブランチ（既定は `develop`）への push で始まります）:
+
+| 段 | 中身 |
+|----|------|
+| Check | `just ci`（GitHub Actions の CI と同じ検査。PowerShell の検査だけは飛ばします）。落ちたら plan に進みません |
+| NetworkPlan | network の plan |
+| NetworkApprove・NetworkApply | network に変更があるときだけ: 承認 → 保存した plan の apply。変更が無ければ飛ばします |
+| UsersPlan | 全員の plan と、設定から消えた人の destroy の plan |
+| Approve・Apply | 変更があるときだけ: 全員分を 1 回で承認 → 保存した plan の apply。変更が無ければ飛ばします |
+
+作り方:
+
+```bash
+# 1. スタックを作る（CodeCommit のリポジトリも一緒にできる。スタックを消してもリポジトリは残る）
+aws cloudformation deploy \
+  --template-file cloudformation/codepipeline.yaml \
+  --stack-name ec2-workstation-pipeline \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    StateBucketName=<state のバケット> ProjectName=<projectName> Environment=<environment> DeployRegion=<awsRegion>
+
+# 2. このリポジトリを CodeCommit に push する（git-remote-codecommit の場合。AWS CLI の認証をそのまま使う）
+pip install git-remote-codecommit
+git remote add codecommit codecommit::<スタックのリージョン>://ec2-workstation
+git push codecommit develop
+```
+
+| パラメータ | 中身 |
+|-----------|------|
+| `StateBucketName` | state のバケット（`TF_STATE_BUCKET` と同じ。作り方は [opentofu/README.md](opentofu/README.md)） |
+| `ProjectName`・`Environment` | `workstation-config.json` の `projectName`・`environment`。IAM・ロググループ・アラーム・スケジュールの名前の絞り込みに使うので、設定と違うと権限が足りずに止まります |
+| `DeployRegion` | `workstation-config.json` の `awsRegion` |
+| `RepositoryName` | CodeCommit のリポジトリ名（既定 `ec2-workstation`） |
+| `BranchName` | deploy するブランチ（既定 `develop`） |
+| `ApprovalTopicArn` | 承認を知らせる SNS のトピック（空なら知らせない） |
+
+HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の認証情報を作り、スタックの出力 `RepositoryCloneUrlHttp` に push します。
+
+承認するとき:
+
+- 承認の画面の文は、`commit <コミット> / build <ビルドの ID> / removed: <消える人> / replace: <作り直す数> (<人>) / delete / create / update` の順です（危ない情報が先。長いときは末尾を切り、`truncated, see the build log` と出ます）。作り直すアドレスまで全部は、その plan の段の CodeBuild のログ（ビルドの ID）で見られます
+- 承認の画面のリンクは、そのコミットの CodeCommit の画面です。**要約だけでなく、コミットの差分（`scripts/`・`cloudformation/` を含む）も見てください**。apply の段もリポジトリのスクリプトを走らせるためです
+- 承認は 7 日で期限が切れます。切れたら、パイプラインを流し直してください（plan のファイルは 8 日で消えます）
+- apply が途中で止まったときは、原因を直してから **Release change** で流し直してください（plan から取り直します）。**Retry** は古い plan を使うので、済んだ人の分で必ず止まります
+
+注意:
+
+- 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます
+- plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプラインのロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
+- 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
+- パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
+- スタックを消すときは、先にアーティファクトのバケットを空にしてください。KMS のキーは消す予約から 7 日以上たってから消えます（その間も月額の料金がかかります）。CodeCommit のリポジトリは残るので、要らなければ手で消してください
+
 ### 5. デプロイ確認
 
 デプロイ完了後、インスタンスの Name タグ（`instance_name`）・インスタンスID・接続コマンドが出力されます。
@@ -611,13 +668,17 @@ ec2-workstation/
 │   │   ├── network/              # network の state のルート
 │   │   └── workstations/         # ユーザーごとの state のルート（workspace = ユーザー。VPC は Name タグで引く）
 │   └── README.md                 # OpenTofu 利用ガイド
+├── cloudformation/               # CodePipeline で deploy するテンプレートと buildspec（AWS だけで deploy する場合）
 ├── scripts/
 │   ├── tofu-init.sh              # stacks/<stack> の init（state の bucket・key を決める）
 │   ├── tofu-deploy.sh            # デプロイ（network → workstations）
+│   ├── tofu-plan.sh              # CodePipeline の plan の段（plan だけを保存する）
+│   ├── tofu-apply.sh             # CodePipeline の apply の段（保存した plan だけを apply する）
 │   ├── tofu-destroy.sh           # 削除（workstations → network）
 │   ├── validate-config.sh        # workstation-config.json をスキーマで検証（jv）
 │   ├── install-jv.sh             # jv を .tools/ に取る
 │   ├── install-shfmt.sh          # shfmt を .tools/ に取る（開発用）
+│   ├── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh  # CodePipeline の CodeBuild が使う道具を .tools/ に取る
 │   ├── format-shell.sh           # シェルスクリプトの書式を shfmt で確かめる・直す（対象の一覧もここ）
 │   ├── lib/                      # 共通の部品（base.sh: die・log など、tools.sh: 版を固定した道具、tofu-common.sh: deploy の部品）
 │   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl・shfmt で順番と止まり方を見る）
