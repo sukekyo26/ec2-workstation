@@ -5,8 +5,8 @@
     VS Code Remote-SSHのProxyCommandから呼び出され、
     EC2インスタンスが起動していない場合は自動的に起動し、
     起動完了まで待機してからSSMセッションを開始します。
-.PARAMETER InstanceId
-    EC2インスタンスID
+.PARAMETER InstanceName
+    EC2インスタンスの Name タグ（AMI 更新でインスタンス ID が変わるため ID ではなく Name タグで指定する）
 .PARAMETER Region
     AWSリージョン
 .PARAMETER PortNumber
@@ -14,7 +14,7 @@
 #>
 param(
     [Parameter(Mandatory=$true)]
-    [string]$InstanceId,
+    [string]$InstanceName,
 
     [Parameter(Mandatory=$true)]
     [string]$Region,
@@ -92,6 +92,28 @@ function Wait-SSMAgentReady {
 }
 
 try {
+    # Name タグからインスタンス ID を引く
+    $instanceIds = & $awsCli ec2 describe-instances `
+        --region $Region `
+        --filters "Name=tag:Name,Values=$InstanceName" "Name=instance-state-name,Values=pending,running,stopping,stopped" `
+        --query "Reservations[].Instances[].InstanceId" `
+        --output text 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        # 認証エラーの可能性があるためメッセージを表示
+        Write-AwsAuthenticationError
+        Write-Stderr "Failed to look up instance: $instanceIds"
+        exit 1
+    }
+
+    $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
+    if ($instanceIdList.Count -ne 1) {
+        Write-Stderr "Expected exactly one instance tagged Name=$InstanceName in $Region, found $($instanceIdList.Count): $instanceIds"
+        Write-Stderr "Check the instance_name in 'tofu output workstations' and re-run setup-remote-ssh if it changed."
+        exit 1
+    }
+    $InstanceId = $instanceIdList[0]
+
     # EC2インスタンスの状態を確認
     $state = & $awsCli ec2 describe-instances `
         --instance-ids $InstanceId `

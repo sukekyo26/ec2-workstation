@@ -9,11 +9,11 @@ set -e
 
 # 引数チェック
 if [ "$#" -ne 3 ]; then
-    echo "Usage: $0 <instance-id> <region> <port-number>" >&2
+    echo "Usage: $0 <instance-name-tag> <region> <port-number>" >&2
     exit 1
 fi
 
-INSTANCE_ID="$1"
+INSTANCE_NAME="$1"
 REGION="$2"
 PORT_NUMBER="$3"
 
@@ -67,6 +67,26 @@ wait_ssm_agent_ready() {
     log "Error: Timeout waiting for SSM Agent to become ready after $((max_retries * retry_interval)) seconds"
     return 1
 }
+
+# Name タグからインスタンス ID を引く
+# AMI 更新のたびにインスタンスが作り直されて ID が変わるため、SSH config には Name タグを書いている
+if ! INSTANCE_IDS=$(aws ec2 describe-instances \
+    --region "$REGION" \
+    --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text 2>&1); then
+    show_aws_authentication_error
+    log "Error: Failed to look up instance: $INSTANCE_IDS"
+    exit 1
+fi
+
+read -ra INSTANCE_ID_LIST <<< "$INSTANCE_IDS"
+if [ "${#INSTANCE_ID_LIST[@]}" -ne 1 ]; then
+    log "Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found ${#INSTANCE_ID_LIST[@]}: $INSTANCE_IDS"
+    log "Check the instance_name in 'tofu output workstations' and re-run setup-remote-ssh if it changed."
+    exit 1
+fi
+INSTANCE_ID="${INSTANCE_ID_LIST[0]}"
 
 # EC2インスタンスの状態を確認
 if ! STATE=$(aws ec2 describe-instances \

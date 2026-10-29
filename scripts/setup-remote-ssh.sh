@@ -56,18 +56,14 @@ fi
 echo ""
 
 # ============================================
-# Prompt for EC2 Instance ID
+# Prompt for EC2 Instance Name tag
 # ============================================
+# AMI 更新のたびにインスタンスが作り直されて ID が変わるため、ID ではなく Name タグで指定する
 while true; do
-    read -p "Enter EC2 Instance ID (e.g., i-0123456789abcdef0): " INSTANCE_ID
+    read -p "Enter EC2 instance Name tag (instance_name in 'tofu output workstations'): " INSTANCE_NAME
 
-    if [ -z "$INSTANCE_ID" ]; then
-        echo -e "${RED}Error: Instance ID is required.${NC}"
-        continue
-    fi
-
-    if ! [[ "$INSTANCE_ID" =~ ^i-[a-f0-9]{17}$ ]]; then
-        echo -e "${RED}Error: Invalid Instance ID format. Must start with 'i-' followed by 17 hexadecimal characters.${NC}"
+    if [ -z "$INSTANCE_NAME" ]; then
+        echo -e "${RED}Error: Instance Name tag is required.${NC}"
         continue
     fi
 
@@ -120,6 +116,22 @@ fi
 # ============================================
 echo ""
 echo -e "${CYAN}Retrieving key pair information from instance...${NC}"
+if ! INSTANCE_IDS=$(aws ec2 describe-instances \
+    --region "$REGION" \
+    --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text 2>&1); then
+    echo -e "${RED}Error: Failed to look up instance: $INSTANCE_IDS${NC}" >&2
+    exit 1
+fi
+
+read -ra INSTANCE_ID_LIST <<< "$INSTANCE_IDS"
+if [ "${#INSTANCE_ID_LIST[@]}" -ne 1 ]; then
+    echo -e "${RED}Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found ${#INSTANCE_ID_LIST[@]}: $INSTANCE_IDS${NC}" >&2
+    echo -e "${YELLOW}Check the instance_name in 'tofu output workstations'.${NC}" >&2
+    exit 1
+fi
+INSTANCE_ID="${INSTANCE_ID_LIST[0]}"
 KEY_NAME=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].KeyName" --output text)
 
 if [ "$KEY_NAME" = "None" ] || [ -z "$KEY_NAME" ]; then
@@ -205,7 +217,7 @@ PROXY_COMMAND="ProxyCommand \"$AUTO_START_SCRIPT_PATH\" %h $REGION %p"
 
 SSH_CONFIG_ENTRY="# Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
-   HostName $INSTANCE_ID
+   HostName $INSTANCE_NAME
    User $USER
    IdentityFile $SECRET_KEY_PATH
    IdentitiesOnly yes
