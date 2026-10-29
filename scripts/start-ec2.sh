@@ -57,6 +57,12 @@ wait_ssm_agent_ready() {
     local failures=0
     local i ping_status
 
+    # EC2WS_SSM_POLL_INTERVAL はテストのための環境変数 (問い合わせの間隔を縮める)。1〜9999 の整数のときだけ使い、
+    # ほかの値は既定のまま (ProxyCommand が誤った値を読んで止まらないように)
+    if [[ "${EC2WS_SSM_POLL_INTERVAL:-}" =~ ^[1-9][0-9]{0,3}$ ]]; then
+        retry_interval=$EC2WS_SSM_POLL_INTERVAL
+    fi
+
     log "Waiting for SSM Agent to be ready..."
 
     for ((i = 1; i <= max_retries; i++)); do

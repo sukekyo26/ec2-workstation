@@ -92,6 +92,12 @@ function Wait-SSMAgentReady {
         [int]$MaxFailures = 3
     )
 
+    # EC2WS_SSM_POLL_INTERVAL はテストのための環境変数 (問い合わせの間隔を縮める)。1〜9999 の整数のときだけ使い、
+    # ほかの値は既定のまま (ProxyCommand が誤った値を読んで止まらないように)
+    if ($env:EC2WS_SSM_POLL_INTERVAL -match '^[1-9][0-9]{0,3}$') {
+        $RetryIntervalSeconds = [int]$env:EC2WS_SSM_POLL_INTERVAL
+    }
+
     Write-ScriptLog "Waiting for SSM Agent to be ready..."
 
     # 問い合わせの一時的な失敗 (スロットリング・ネットワークの断) は待って問い合わせ直し、続けて $MaxFailures 回失敗したら、
