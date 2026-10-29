@@ -18,6 +18,7 @@ repo="$work/repo"
 mkdir -p "$repo/opentofu/stacks/network" "$repo/opentofu/stacks/workstations" "$work/bin" "$work/out"
 cp -R "$scripts_src" "$repo/scripts"
 echo '{"projectName": "testproj", "environment": "staging", "users": [{"username": "developer1"}, {"username": "developer2"}]}' > "$repo/workstation-config.json"
+cp "$scripts_src/../workstation-config.schema.json" "$repo/"
 
 cat > "$work/bin/tofu" << 'FAKE'
 #!/usr/bin/env bash
@@ -157,6 +158,41 @@ case "$1 $2" in
 esac
 FAKE
 chmod +x "$work/bin/tofu" "$work/bin/aws"
+
+# 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。FAKE_JV で答えを変える (既定は通す)
+jv=$(bash -c '. "$1/scripts/lib/tofu-common.sh"; jv_path' _ "$repo")
+mkdir -p "$(dirname "$jv")"
+cat > "$jv" << 'FAKE'
+#!/usr/bin/env bash
+set -euo pipefail
+# どのディレクトリから呼ばれても同じファイルを読むよう、引数は写しの中の実在するファイルの絶対パスでなければならない
+for a in "$@"; do
+    case "$a" in
+        "$FAKE_REPO"/*) ;;
+        *) echo "fake jv: not an absolute path under the repository: $a" && exit 2 ;;
+    esac
+    if [ ! -f "$a" ]; then
+        echo "fake jv: no such file: $a"
+        exit 2
+    fi
+done
+case "${FAKE_JV:-ok}" in
+    ok) echo "instance $2: ok" ;;
+    violation)
+        printf '%s\n' "instance $2: failed" "- at '/autoStopConfig/cpuEvaluationMinutes': maximum: got 180, want 60"
+        exit 1
+        ;;
+    unreadable)
+        printf '%s\n' "instance $2: failed" "unexpected EOF"
+        exit 1
+        ;;
+    crash) exit 3 ;;
+esac
+FAKE
+chmod +x "$jv"
+export FAKE_REPO="$repo"
+# スクリプトは写しの外のディレクトリから呼ぶ (jv に渡すパスが今いるディレクトリに頼らないことを見る)
+cd "$work"
 
 export PATH="$work/bin:$PATH"
 if [ "$(command -v tofu)" != "$work/bin/tofu" ] || [ "$(command -v aws)" != "$work/bin/aws" ]; then
@@ -588,6 +624,44 @@ expect_err destroy-terminal "workstations/developer1: create 0, update 0, replac
 expect_err destroy-terminal "network: create 0, update 0, replace 0, delete 1"
 expect_err destroy-terminal "network: not applied"
 expect_workspaces destroy-terminal ""
+
+# --- 設定の検証 ---
+
+# deploy・init は、設定の違反・読めない設定・jv の誤りで、tofu を 1 度も呼ばずに止まる。違反と読めないものは案内を分ける
+for case in "deploy tofu-deploy.sh" "init-network tofu-init.sh network" "init-user tofu-init.sh workstations developer1"; do
+    read -r name script args <<< "$case"
+    # shellcheck disable=SC2086 # 引数を空白で分けて渡す
+    run "$name-violation" "$script" "" FAKE_JV=violation $args
+    expect_rc "$name-violation" 1
+    expect_log "$name-violation" ""
+    expect_err "$name-violation" "- at '/autoStopConfig/cpuEvaluationMinutes': maximum: got 180, want 60"
+    expect_err "$name-violation" "workstation-config.json breaks the rules above"
+
+    # shellcheck disable=SC2086
+    run "$name-unreadable" "$script" "" FAKE_JV=unreadable $args
+    expect_rc "$name-unreadable" 1
+    expect_log "$name-unreadable" ""
+    expect_err "$name-unreadable" "could not read workstation-config.json or workstation-config.schema.json"
+    expect_no_err "$name-unreadable" "breaks the rules"
+
+    # shellcheck disable=SC2086
+    run "$name-jv-crash" "$script" "" FAKE_JV=crash $args
+    expect_rc "$name-jv-crash" 1
+    expect_log "$name-jv-crash" ""
+    expect_err "$name-jv-crash" "jv failed with exit code 3"
+done
+
+# jv が無ければ、入れ方を出して止まる (黙って検証を飛ばさない)
+mv "$jv" "$jv.off"
+run deploy-no-jv tofu-deploy.sh ""
+mv "$jv.off" "$jv"
+expect_rc deploy-no-jv 1
+expect_log deploy-no-jv ""
+expect_err deploy-no-jv "Install it with scripts/install-jv.sh"
+
+# destroy は設定を検証しない (設定の違反があっても全部を消せる)
+run destroy-violation tofu-destroy.sh "" FAKE_JV=violation
+expect_rc destroy-violation 0
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

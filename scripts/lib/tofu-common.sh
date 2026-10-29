@@ -11,6 +11,8 @@ CONFIG_FILE="$REPO_ROOT/workstation-config.json"
 STACKS_DIR="$REPO_ROOT/opentofu/stacks"
 # state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)
 STATE_REGION=ap-northeast-1
+# 版を上げるときは scripts/install-jv.sh の sha256 も変える。jv --version は版を返さないので、置き場所に版を入れて見分ける
+JV_VERSION=v6.0.3
 
 die() {
     echo "ERROR: $*" >&2
@@ -19,6 +21,35 @@ die() {
 
 log() {
     echo "==> $*" >&2
+}
+
+jv_path() {
+    echo "$REPO_ROOT/.tools/jv-$JV_VERSION/jv"
+}
+
+# workstation-config.json をスキーマで検証する。CI・just・tofu-deploy.sh・tofu-init.sh はここを通る。
+# jv は違反でも読めないファイルでも rc=1 を返すので、違反の行 (- at '...') の有無で案内を分ける
+validate_config() {
+    local jv out rc=0
+    jv=$(jv_path)
+    if [ ! -x "$jv" ]; then
+        die "jv $JV_VERSION is not installed at $jv. Install it with scripts/install-jv.sh"
+    fi
+    out=$("$jv" "$REPO_ROOT/workstation-config.schema.json" "$CONFIG_FILE" 2>&1) || rc=$?
+    case $rc in
+        0) log "workstation-config.json matches workstation-config.schema.json" ;;
+        1)
+            echo "$out" >&2
+            if grep -q "^ *- at '" <<< "$out"; then
+                die "workstation-config.json breaks the rules above. The rules and their reasons are in the descriptions of workstation-config.schema.json"
+            fi
+            die "could not read workstation-config.json or workstation-config.schema.json (a missing file or broken JSON)"
+            ;;
+        *)
+            echo "$out" >&2
+            die "jv failed with exit code $rc"
+            ;;
+    esac
 }
 
 # 入口 (tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh) が最初に 1 回だけ呼ぶ

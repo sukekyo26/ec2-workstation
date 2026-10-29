@@ -19,6 +19,7 @@ case "${1:-}" in
             usage
         fi
         check_environment
+        validate_config
         init_stack network
         ;;
     workstations)
@@ -27,6 +28,7 @@ case "${1:-}" in
         fi
         username=$2
         check_environment
+        validate_config
         init_stack workstations
         known=()
         names=$(config_usernames)
