@@ -13,7 +13,9 @@ updates:
     commit-message:
       prefix: "ci"
   - package-ecosystem: "terraform"
-    directory: "/opentofu"
+    directories:
+      - "/opentofu/stacks/network"
+      - "/opentofu/stacks/workstations"
     target-branch: "develop"
     schedule:
       interval: "weekly"

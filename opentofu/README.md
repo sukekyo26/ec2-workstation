@@ -48,26 +48,32 @@ terraform {
 
 ## 使い方
 
+state は 2 つのルートに分かれています。
+
+| ルート | 持つもの | state の key |
+|---|---|---|
+| `stacks/network/` | VPC・サブネット・IGW・Flow Logs（全員で使う） | `<projectName>/<environment>/network.tfstate` |
+| `stacks/workstations/` | 各ユーザーのインスタンス・データボリューム・SG・IAM など。VPC とサブネットは Name タグで引く | `<projectName>/<environment>/workstations.tfstate` |
+
+`projectName`・`environment` はリポジトリルートの `workstation-config.json` から取ります。init（bucket・key の注入）は `scripts/tofu-init.sh` だけが行います。
+
 ```bash
-cd opentofu
+export TF_STATE_BUCKET=<your-state-bucket>
 
-# 初期化（backend 設定はアカウント固有のため -backend-config で注入）
-tofu init \
-  -backend-config="bucket=<your-state-bucket>" \
-  -backend-config="key=ec2-workstation/dev/terraform.tfstate" \
-  -backend-config="region=ap-northeast-1"
+# デプロイ（network → workstations。各段は plan が通ったときだけ、保存した plan を apply する）
+../scripts/tofu-deploy.sh
 
-# 差分確認
-tofu plan
-
-# 適用
-tofu apply
+# 差分だけ見る
+../scripts/tofu-init.sh workstations && tofu -chdir=stacks/workstations plan
 
 # 出力確認（インスタンス ID・SSM 接続コマンド等）
-tofu output workstations
+tofu -chdir=stacks/workstations output workstations
+
+# 全部を削除（workstations → network）
+../scripts/tofu-destroy.sh
 ```
 
-ユーザーの追加・変更はリポジトリルートの `workstation-config.json` を編集して `tofu apply` します。
+ユーザーの追加・変更・削除はリポジトリルートの `workstation-config.json` を編集して `scripts/tofu-deploy.sh` を実行します。
 ユーザー名がリソースのキーになっているため、ユーザーの追加・削除は他ユーザーのリソースに影響しません。
 
 ## 接続
