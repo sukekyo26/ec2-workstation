@@ -5,7 +5,7 @@
     Each script is copied to a temp directory with its one $awsCli line pointed at a fake aws.cmd, and run in a
     child powershell.exe (the same one that runs this test). start-ec2-and-wait.ps1 runs as the SSH ProxyCommand,
     so its stdout must carry nothing but the session (the fake prints SSH-2.0-fake). A failed aws call must stop the
-    script at once: each run is killed after 10 seconds.
+    script at once: each run is killed after 20 seconds (the SSM check retries a failure twice, 5 seconds apart).
     Windows only (the fake is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
 #>
 $ErrorActionPreference = 'Stop'
@@ -18,6 +18,7 @@ if ($env:OS -ne 'Windows_NT') {
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $work = Join-Path ([IO.Path]::GetTempPath()) ("start-ec2-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
+try {
 $utf8Bom = [Text.UTF8Encoding]::new($true)
 
 # The fake dispatches on the first three arguments only (%1 %2 %3), so the characters in --query and --filters
@@ -37,10 +38,17 @@ $fakeLines = @(
     '    >&2 echo fake aws: unexpected call: %what%',
     '    exit /b 2',
     ')',
-    'if "%FAKE_FAIL%"=="%what%" (',
-    '    >&2 echo fake aws: %what% failed',
-    '    exit /b 1',
-    ')',
+    'if not "%FAKE_FAIL%"=="%what%" goto :succeed',
+    'if not defined FAKE_FAIL_TIMES goto :fail',
+    'set n=0',
+    'if exist "%FAKE_COUNTER%" set /p n=<"%FAKE_COUNTER%"',
+    'if %n% GEQ %FAKE_FAIL_TIMES% goto :succeed',
+    'set /a n+=1',
+    '>"%FAKE_COUNTER%" echo %n%',
+    ':fail',
+    '>&2 echo fake aws: %what% failed',
+    'exit /b 1',
+    ':succeed',
     'if "%FAKE_WARN%"=="1" >&2 echo fake aws: warning from %what%',
     'if "%what%"=="lookup" echo i-0123456789abcdef0',
     'if "%what%"=="state" echo %FAKE_STATE%',
@@ -82,7 +90,7 @@ function Add-Failure {
     $script:failures++
 }
 
-# Run a script in a child powershell.exe with the given environment, killing it (and the fake aws under it) after 10 seconds.
+# Run a script in a child powershell.exe with the given environment, killing it (and the fake aws under it) after 20 seconds.
 # The output is read asynchronously: a synchronous ReadToEnd() before WaitForExit would block the timeout, and after a
 # kill the grandchild cmd.exe may keep the pipes open, so a killed run does not wait for the reads.
 function Invoke-Case {
@@ -94,7 +102,7 @@ function Invoke-Case {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_WARN', 'FAKE_ARGS_LOG')) {
+    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_FAIL_TIMES', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG')) {
         $psi.EnvironmentVariables.Remove($key)
     }
     foreach ($key in $Environment.Keys) {
@@ -105,8 +113,12 @@ function Invoke-Case {
     $process.StandardInput.Close()
     $stdout = $process.StandardOutput.ReadToEndAsync()
     $stderr = $process.StandardError.ReadToEndAsync()
-    if (-not $process.WaitForExit(10000)) {
-        & taskkill /T /F /PID $process.Id 2>&1 | Out-Null
+    if (-not $process.WaitForExit(20000)) {
+        # taskkill may write to stderr (the child already gone); under Stop, 5.1 would throw on that line
+        & {
+            $ErrorActionPreference = 'Continue'
+            & taskkill /T /F /PID $process.Id 2>&1 | Out-Null
+        }
         return @{ TimedOut = $true; Seconds = $watch.Elapsed.TotalSeconds }
     }
     $process.WaitForExit()
@@ -182,6 +194,8 @@ foreach ($case in @(
 
 # A failed aws call stops the script at once with the reason; the ProxyCommand's stdout stays empty
 foreach ($case in @(
+        @{ State = 'running'; Fail = 'lookup' },
+        @{ State = 'running'; Fail = 'state' },
         @{ State = 'stopped'; Fail = 'start-instances' },
         @{ State = 'stopped'; Fail = 'wait-instance-running' },
         @{ State = 'stopping'; Fail = 'wait-instance-stopped' },
@@ -191,23 +205,51 @@ foreach ($case in @(
         @{ State = 'running'; Fail = 'describe-instance-information' })) {
     $environment = @{ FAKE_STATE = $case.State; FAKE_FAIL = $case.Fail }
     $reason = "fake aws: $($case.Fail) failed"
+    # The lookup, the state, and the SSM check (failing 3 times in a row) can fail on expired credentials
+    $wantAuth = $case.Fail -in @('lookup', 'state', 'describe-instance-information')
 
     $label = "start-ec2-and-wait $($case.State), $($case.Fail) fails"
     $result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment $environment
     Write-Case -Name $label -Result $result
     if ($result.TimedOut -or $result.ExitCode -ne 1 -or $result.Stdout.Count -ne 0 -or $result.Stderr -notmatch [regex]::Escape($reason)) {
-        Add-Failure "${label}: want rc=1 within 10s, empty stdout, and '$reason' on stderr"
+        Add-Failure "${label}: want rc=1 within 20s, empty stdout, and '$reason' on stderr"
+    }
+    if ($wantAuth -and -not $result.TimedOut -and $result.Stderr -notmatch 'aws login') {
+        Add-Failure "${label}: want the authentication guidance (aws login) on stderr"
     }
 
     $label = "start-ec2 $($case.State), $($case.Fail) fails"
     $result = Invoke-Case -Script $startScript -Arguments $startArgs -Environment $environment
     Write-Case -Name $label -Result $result
     if ($result.TimedOut -or $result.ExitCode -ne 1 -or (($result.Stdout -join "`n") + $result.Stderr) -notmatch [regex]::Escape($reason)) {
-        Add-Failure "${label}: want rc=1 within 10s and '$reason'"
+        Add-Failure "${label}: want rc=1 within 20s and '$reason'"
     }
 }
 
-Remove-Item -Recurse -Force $work
+# The SSM check retries a failure: failing twice and then answering Online still connects
+$counter = Join-Path $work 'ssm-failures'
+$environment = @{ FAKE_STATE = 'running'; FAKE_FAIL = 'describe-instance-information'; FAKE_FAIL_TIMES = '2'; FAKE_COUNTER = $counter }
+$result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment $environment
+Write-Case -Name 'start-ec2-and-wait running, SSM check fails twice' -Result $result
+if ($result.TimedOut -or $result.ExitCode -ne 0 -or ($result.Stdout -join "`n") -ne 'SSH-2.0-fake') {
+    Add-Failure "start-ec2-and-wait running, SSM check fails twice: want rc=0 and stdout 'SSH-2.0-fake' alone"
+}
+Remove-Item $counter
+$result = Invoke-Case -Script $startScript -Arguments $startArgs -Environment $environment
+Write-Case -Name 'start-ec2 running, SSM check fails twice' -Result $result
+if ($result.TimedOut -or $result.ExitCode -ne 0) {
+    Add-Failure 'start-ec2 running, SSM check fails twice: want rc=0'
+}
+
+# The ProxyCommand that setup-remote-ssh.ps1 writes must not load the user's profile: its output would go into the SSH channel
+$proxyLines = @(Get-Content (Join-Path $root 'scripts\setup-remote-ssh.ps1') | Where-Object { $_ -match '^\s*ProxyCommand ' })
+if ($proxyLines.Count -ne 1 -or $proxyLines[0] -notmatch 'ProxyCommand powershell -NoProfile -NonInteractive ') {
+    Add-Failure "setup-remote-ssh.ps1: want one ProxyCommand line starting with 'powershell -NoProfile -NonInteractive', got: $proxyLines"
+}
+
+} finally {
+    Remove-Item -Recurse -Force $work
+}
 if ($failures -ne 0) {
     Write-Output "$failures check(s) failed"
     exit 1
