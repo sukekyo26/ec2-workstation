@@ -151,6 +151,20 @@ jobs:
           grep -qF -- "$copy/opentofu/modules/workstation/templates/user-data.sh.tftpl" <<< "$out"
           grep -qF -- "$copy/scripts/lib/tools.sh" <<< "$out"
 
+  cloudformation:
+    name: CloudFormation lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      # LIMIT: cfn-lint is pinned by version, not by hash (it pulls many dependencies)
+      - name: Install cfn-lint
+        run: pip install cfn-lint==1.59.0
+
+      - name: Lint cloudformation/*.yaml
+        run: cfn-lint cloudformation/*.yaml
+
   gitleaks:
     name: Gitleaks
     runs-on: ubuntu-latest
