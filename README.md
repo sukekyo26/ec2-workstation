@@ -407,6 +407,8 @@ state の保護（秘密鍵が state に記録されるため重要）を含む�
 
 state の置き場所（key）が変わったため、前の版で作った環境は、この版からは見えません。そのまま `scripts/tofu-deploy.sh` を実行すると、同じ名前の VPC が残っていることを見つけて止まります。前の版のまま `tofu destroy` で消してから（データボリュームはスナップショットが残ります）、この版でデプロイしてください。
 
+workstations の state を全員で 1 つにしていた版（ユーザーごとに分ける前）で作った環境も同じです。`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` は、その state（`<projectName>/<environment>/workstations.tfstate`）にリソースが残っていれば止まるので、その版の `scripts/tofu-destroy.sh` で消してから、この版でデプロイしてください。
+
 ### 5. デプロイ確認
 
 デプロイ完了後、インスタンスの Name タグ（`instance_name`）・インスタンスID・接続コマンドが出力されます。
