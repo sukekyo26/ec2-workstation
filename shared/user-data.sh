@@ -190,11 +190,9 @@ for dir in work docker containerd; do
 done
 
 # 持ち主は UID で決まる。OS を変えて既定ユーザーの UID が変わったときは、新しいユーザーに合わせる
+# (/data/git は git の設定の所で毎回そろえる)
 if [ "$(stat -c %u "$DATA_MOUNT/work")" != "$(id -u "$DEFAULT_USER")" ]; then
     chown -R "$DEFAULT_USER:" "$DATA_MOUNT/work"
-    if [ -e "$DATA_MOUNT/gitconfig" ]; then
-        chown "$DEFAULT_USER:" "$DATA_MOUNT/gitconfig"
-    fi
 fi
 
 # containerd image store (Docker 29 以降の既定) は /var/lib/docker とは別に
@@ -308,7 +306,9 @@ if command -v selinuxenabled &> /dev/null && selinuxenabled; then
     semanage fcontext -a -e "$DEFAULT_HOME/work" "$DATA_MOUNT/work"
     semanage fcontext -a -e /var/lib/docker "$DATA_MOUNT/docker"
     semanage fcontext -a -e /var/lib/containerd "$DATA_MOUNT/containerd"
-    semanage fcontext -a -e "$DEFAULT_HOME/.gitconfig" "$DATA_MOUNT/gitconfig"
+    # git はロックを rename で置き換えるので、書くたびに新しい inode ができ、ラベルは親から受け継がれる。
+    # そのためファイルではなく /data/git のディレクトリを、ホームのディレクトリと等価にする
+    semanage fcontext -a -e "$DEFAULT_HOME" "$DATA_MOUNT/git"
     restorecon -R "$DATA_MOUNT"
 fi
 
