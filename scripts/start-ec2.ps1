@@ -30,7 +30,7 @@ function Write-ScriptLog {
 
 # aws を呼び、成功なら stdout の行だけを返す。失敗 (rc≠0) なら stderr の行を付けて throw する。
 # 成功のときの stderr の警告は、ID や状態に混ぜずに stderr にそのまま流す
-function Invoke-Aws {
+function Invoke-AwsCli {
     param(
         [string]$Description,
         [string[]]$Arguments
@@ -61,8 +61,8 @@ function Wait-SSMAgentReady {
     Write-ScriptLog "Waiting for SSM Agent to be ready..."
 
     for ($i = 1; $i -le $MaxRetries; $i++) {
-        # 問い合わせの失敗 (認証の切れなど) は待っても直らないので、Invoke-Aws の throw ですぐ止まる
-        $pingStatus = Invoke-Aws -Description "Failed to check the SSM Agent of $InstanceId" -Arguments @(
+        # 問い合わせの失敗 (認証の切れなど) は待っても直らないので、Invoke-AwsCli の throw ですぐ止まる
+        $pingStatus = Invoke-AwsCli -Description "Failed to check the SSM Agent of $InstanceId" -Arguments @(
             'ssm', 'describe-instance-information', '--region', $Region,
             '--filters', "Key=InstanceIds,Values=$InstanceId",
             '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
@@ -82,13 +82,13 @@ function Wait-SSMAgentReady {
 function Invoke-StartInstance {
     param([string]$InstanceId, [string]$Region)
     Write-ScriptLog "Starting instance $InstanceId..."
-    $null = Invoke-Aws -Description "Failed to start instance $InstanceId" -Arguments @(
+    $null = Invoke-AwsCli -Description "Failed to start instance $InstanceId" -Arguments @(
         'ec2', 'start-instances', '--instance-ids', $InstanceId, '--region', $Region)
 }
 
 function Wait-InstanceState {
     param([string]$InstanceId, [string]$Region, [string]$State)
-    $null = Invoke-Aws -Description "Failed while waiting for instance $InstanceId to be $State" -Arguments @(
+    $null = Invoke-AwsCli -Description "Failed while waiting for instance $InstanceId to be $State" -Arguments @(
         'ec2', 'wait', "instance-$State", '--instance-ids', $InstanceId, '--region', $Region)
 }
 
@@ -120,7 +120,7 @@ try {
     Write-ScriptLog "Checking EC2 instance state..."
 
     # Name タグからインスタンス ID を引く (AMI 更新のたびにインスタンスが作り直されて ID が変わるため)
-    $instanceIds = Invoke-Aws -Description "Failed to look up instance" -Arguments @(
+    $instanceIds = Invoke-AwsCli -Description "Failed to look up instance" -Arguments @(
         'ec2', 'describe-instances', '--region', $Region,
         '--filters', "Name=tag:Name,Values=$InstanceName", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
         '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
@@ -132,7 +132,7 @@ try {
     $InstanceId = $instanceIdList[0]
 
     # EC2インスタンスの状態を確認
-    $state = Invoke-Aws -Description "Failed to get instance state" -Arguments @(
+    $state = Invoke-AwsCli -Description "Failed to get instance state" -Arguments @(
         'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
         '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
 
