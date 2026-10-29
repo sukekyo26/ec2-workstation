@@ -73,14 +73,14 @@ function Invoke-AwsCli {
     $all = & $awsCli @Arguments 2>&1
     $exitCode = $LASTEXITCODE
     $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
-    $stdout = @($all | ForEach-Object { "$_" })
+    $stdout = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
     if ($exitCode -ne 0) {
         throw "${Description}: $($stderr -join ' ')"
     }
     foreach ($line in $stderr) {
         [Console]::Error.WriteLine($line)
     }
-    return $stdout
+    return $all
 }
 
 function Wait-SSMAgentReady {
