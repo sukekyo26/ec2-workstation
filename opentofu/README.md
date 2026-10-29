@@ -11,7 +11,7 @@
 
 ### State バケットの作成（初回のみ）
 
-[cloudformation/state-bucket.yaml](../cloudformation/state-bucket.yaml) で作ります（手元・GitHub Actions・CodePipeline のどれで deploy するときも同じ）。バージョニング、既定の暗号化、公開のブロック、TLS だけのバケットポリシーを付けます。state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`。ほかのリージョンでは、何も作らずに止まります。そのとき空のスタックが `ROLLBACK_COMPLETE` で残るので、`aws cloudformation delete-stack` で消してください）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
+[cloudformation/state-bucket.yaml](../cloudformation/state-bucket.yaml) で作ります（手元・GitHub Actions・CodePipeline のどれで deploy するときも同じ）。バージョニング、既定の暗号化、公開のブロック、TLS だけのバケットポリシーを付けます。state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`。ほかのリージョンでは、何も作らずに止まります。そのとき空のスタックが `ROLLBACK_COMPLETE` で残るので、`aws cloudformation delete-stack --region <作ろうとしたリージョン> --stack-name <スタック名>` で消してください）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
 
 ```bash
 aws cloudformation deploy --region ap-northeast-1 \
@@ -27,7 +27,7 @@ aws cloudformation deploy --region ap-northeast-1 \
 |---|---|---|
 | `SSE-S3`（既定） | S3 の鍵 | なし |
 | `SSE-KMS-AWS-MANAGED` | AWS が管理する `aws/s3` | なし |
-| `SSE-KMS-CMK` | このテンプレートが作る鍵（ローテーションあり。出力 `StateKmsKeyArn`） | その鍵の `kms:Decrypt`・`kms:GenerateDataKey`（手元の利用者、GitHub Actions の deploy 用のロール。CodePipeline には、スタックのパラメータ `StateKmsKeyArn` に出力をそのまま渡す） |
+| `SSE-KMS-CMK` | このテンプレートが作る鍵（ローテーションあり。出力 `StateKmsKeyArn`） | その鍵の `kms:Decrypt`・`kms:GenerateDataKey`（state を読み書きする全部: deploy・destroy する手元の利用者と GitHub Actions のロール、`tofu output` を見る利用者。CodePipeline には、スタックのパラメータ `StateKmsKeyArn` に出力をそのまま渡す） |
 
 - state には SSH の秘密鍵が平文で入ります。`SSE-S3` では、バケットを読める人は中身を読めます。守りを強めたいなら `SSE-KMS-CMK` を選んでください
 - backend の設定（`kms_key_id`・`encrypt`）は要りません。S3 がバケットの既定の暗号化をかけます

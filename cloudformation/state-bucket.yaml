@@ -24,7 +24,7 @@ Conditions:
   UseAwsManagedKey: !Equals [!Ref Encryption, SSE-KMS-AWS-MANAGED]
   UseKms: !Or [!Condition UseCmk, !Condition UseAwsManagedKey]
 
-# scripts/lib/tofu-common.sh looks for the state in ap-northeast-1 (STATE_REGION)
+# scripts/lib/tofu-common.sh looks for the state in ap-northeast-1 (STATE_REGION): keep the two the same
 Rules:
   StateRegion:
     Assertions:
@@ -59,6 +59,8 @@ Resources:
     UpdateReplacePolicy: Retain
     Properties:
       BucketName: !Ref BucketName
+      # LIMIT: no lifecycle removes the noncurrent versions, so the .tflock versions, the delete markers and the old
+      # state versions (with the private keys) stay. Add NoncurrentVersionExpiration when they pile up or must go
       VersioningConfiguration:
         Status: Enabled
       # The backend sends no encryption headers, so S3 applies this default

@@ -19,13 +19,14 @@ Parameters:
   StateKmsKeyArn:
     Type: String
     Default: ""
-    # A key ARN only: an alias ARN does not work as the Resource of an IAM policy
-    AllowedPattern: ^$|^arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:key/[0-9a-zA-Z-]+$
-    ConstraintDescription: empty, or the ARN of a KMS key (not an alias)
+    # A key ARN only (an alias ARN does not work as the Resource of an IAM policy), in the state's region:
+    # STATE_REGION of scripts/lib/tofu-common.sh, the same as kms:ViaService in StatePolicy
+    AllowedPattern: ^$|^arn:aws[a-z-]*:kms:ap-northeast-1:[0-9]{12}:key/[0-9a-zA-Z-]+$
+    ConstraintDescription: empty, or the ARN of a KMS key in ap-northeast-1 (not an alias)
     Description: >-
       The state's KMS key: output StateKmsKeyArn of cloudformation/state-bucket.yaml when it uses SSE-KMS-CMK (not the
       artifact key this stack creates). Leave it empty for SSE-S3 and SSE-KMS-AWS-MANAGED. Empty with a SSE-KMS-CMK
-      bucket stops the plan stage at its first tofu init with AccessDenied
+      bucket stops the plan stage with AccessDenied at its first tofu init (and the check of the earlier version's state)
   ProjectName:
     Type: String
     Description: projectName in workstation-config.json (scopes the IAM, log, alarm and schedule names)
@@ -391,7 +392,7 @@ Resources:
             Action: sts:GetCallerIdentity
             Resource: "*"
           # A SSE-KMS-CMK state bucket: S3 calls KMS with the caller's permissions. Only through S3 in the state's region
-          # (ap-northeast-1, STATE_REGION of scripts/lib/tofu-common.sh), so the roles cannot call KMS directly
+          # (ap-northeast-1: STATE_REGION of scripts/lib/tofu-common.sh), so the roles cannot call KMS directly
           - !If
             - HasStateKey
             - Effect: Allow

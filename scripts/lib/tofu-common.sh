@@ -8,7 +8,9 @@
 
 CONFIG_FILE="$REPO_ROOT/workstation-config.json"
 STACKS_DIR="$REPO_ROOT/opentofu/stacks"
-# state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)
+# state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)。
+# 変えるときは STATE_REGION と書いた所もそろえる: cloudformation/state-bucket.yaml の Rules、
+# cloudformation/codepipeline.yaml の StateKmsKeyArn の AllowedPattern と kms:ViaService
 STATE_REGION=ap-northeast-1
 
 # workstation-config.json をスキーマで検証する。CI・just・tofu-deploy.sh・tofu-init.sh はここを通る。
