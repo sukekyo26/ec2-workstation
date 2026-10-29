@@ -400,7 +400,7 @@ tofu output workstations
 | `os` | OS | ログインユーザー | 備考 |
 |------|----|-----------------|------|
 | `al2023` | Amazon Linux 2023 | `ec2-user` | |
-| `al2027` | Amazon Linux 2027 | `ec2-user` | **プレビュー版**（本番利用非推奨）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える |
+| `al2027-preview` | Amazon Linux 2027（プレビュー版） | `ec2-user` | **プレビュー版**（本番利用非推奨）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027-preview` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える。GA になったら `al2027` を別の値として足す |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS | `ubuntu` | |
 | `ubuntu-26.04` | Ubuntu 26.04 LTS | `ubuntu` | |
 | `debian-13` | Debian 13 | `admin` | 公式 AMI に SSM Agent が無いため user-data で導入 |

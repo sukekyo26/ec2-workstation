@@ -3,7 +3,7 @@
     "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64",
     "login_user": "ec2-user"
   },
-  "al2027": {
+  "al2027-preview": {
     "ami_parameter": "/aws/service/ami-amazon-linux-latest/al2027-preview-ami-kernel-default-x86_64",
     "login_user": "ec2-user"
   },
