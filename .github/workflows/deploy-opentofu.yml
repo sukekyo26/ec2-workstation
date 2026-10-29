@@ -33,7 +33,7 @@ jobs:
           aws-region: ap-northeast-1
 
       - name: Install jv
-        run: scripts/install-jv.sh
+        run: scripts/install/install-jv.sh
 
       # The order (network, then workstations) and the plan-then-apply rule live in the script,
       # so any CI that runs it behaves the same

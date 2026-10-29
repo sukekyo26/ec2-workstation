@@ -226,7 +226,7 @@ rsync -a ec2:~/work/ ./work-backup/
 #    （state の置き場所が変わったため。下の「state を network と workstations に分ける前の環境から移る場合」を参照。
 #      HostName が Name タグに変わり、接続ユーザー名を apply で付く LoginUser タグから取るため setup もやり直す）
 ./scripts/tofu-deploy.sh
-./scripts/setup-remote-ssh.sh
+./scripts/client/setup-remote-ssh.sh
 
 # 4. 新しいインスタンスへ戻す
 rsync -a ./work-backup/ ec2:~/work/
@@ -250,7 +250,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
 | OpenTofu | 1.10+ | [インストールガイド](https://opentofu.org/docs/intro/install/) |
-| jv（設定の検証） | v6.0.3（`scripts/lib/tools.sh` の `JV_VERSION`） | `./scripts/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
+| jv（設定の検証） | v6.0.3（`scripts/lib/tools.sh` の `JV_VERSION`） | `./scripts/install/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
 
 ### AWS環境
 
@@ -263,7 +263,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
-- デプロイする環境に bash・jq・OpenTofu・AWS CLI（`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` が使う）と jv（`scripts/install-jv.sh` で入れる。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が設定の検証に使う）
+- デプロイする環境に bash・jq・OpenTofu・AWS CLI（`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` が使う）と jv（`scripts/install/install-jv.sh` で入れる。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が設定の検証に使う）
 
 ---
 
@@ -325,7 +325,7 @@ cd ec2-workstation
 
 #### 設定項目
 
-設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、`scripts/validate-config.sh`（jv）で検証されます。CI・`just validate-config` のほか、`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` も tofu を呼ぶ前に検証し、違反があれば何もせずに止まります。jv は `./scripts/install-jv.sh` で入れます。スキーマを書き換えるときの書き間違い（`maximun` など draft-07 に無いキーワード）は jv が黙って無視するので、先にスキーマそのものを `schemas/draft-07-strict.json`（draft-07 のメタスキーマに `additionalProperties: false` を足した写し）で見て止めます。
+設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、`scripts/validate-config.sh`（jv）で検証されます。CI・`just validate-config` のほか、`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` も tofu を呼ぶ前に検証し、違反があれば何もせずに止まります。jv は `./scripts/install/install-jv.sh` で入れます。スキーマを書き換えるときの書き間違い（`maximun` など draft-07 に無いキーワード）は jv が黙って無視するので、先にスキーマそのものを `schemas/draft-07-strict.json`（draft-07 のメタスキーマに `additionalProperties: false` を足した写し）で見て止めます。
 
 > ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のリソースを削除してください。
 
@@ -403,7 +403,7 @@ export TF_STATE_BUCKET=<your-state-bucket>
 - `scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` は、`workstation-config.json` がスキーマに合わなければ止まります。手で直す道（設定から消えた人の workspace を選んで `tofu destroy` する、1 人分を `-replace` で作り直す、など）も同じなので、直したい人と関係の無い違反でも、先に設定の違反を直してください。`scripts/tofu-destroy.sh`（全部を消す）は検証しません
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
-- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
+- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
 - VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
@@ -472,7 +472,7 @@ HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の�
 - 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます。Check は承認の前に、push されたどのコミットでも走るので、アーティファクトのバケットはソース（`Source`）しか読めません
 - plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプライン・plan・apply のロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
 - 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
-- PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます
+- PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます
 - パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks・PowerShell 7・PSScriptAnalyzer）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
 - スタックを消すときは、先にアーティファクトのバケットを空にしてください（中身が残っていると、スタックの削除が `DELETE_FAILED` で止まります）。バケットのポリシーが拒むのは読み取り（`GetObject`）だけなので、管理者の権限で一覧と削除ができます:
 
@@ -553,13 +553,13 @@ tofu -chdir=opentofu/stacks/workstations output workstations   # そのユーザ
 **Windows:**
 
 ```powershell
-.\scripts\setup-remote-ssh.ps1
+.\scripts\client\setup-remote-ssh.ps1
 ```
 
 **Linux/Mac:**
 
 ```bash
-./scripts/setup-remote-ssh.sh
+./scripts/client/setup-remote-ssh.sh
 ```
 
 スクリプトが以下を行います：
@@ -588,13 +588,13 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 **Windows:**
 
 ```powershell
-.\scripts\start-ec2.ps1
+.\scripts\client\start-ec2.ps1
 ```
 
 **Linux/Mac:**
 
 ```bash
-./scripts/start-ec2.sh
+./scripts/client/start-ec2.sh
 ```
 
 スクリプトは対話的にインスタンスの Name タグとリージョンを尋ね、起動とSSM Agent接続完了まで待機します。
@@ -689,18 +689,20 @@ ec2-workstation/
 │   ├── tofu-apply.sh             # CodePipeline の apply の段（保存した plan だけを apply する）
 │   ├── tofu-destroy.sh           # 削除（workstations → network）
 │   ├── validate-config.sh        # workstation-config.json をスキーマで検証（jv）
-│   ├── install-jv.sh             # jv を .tools/ に取る
-│   ├── install-shfmt.sh          # shfmt を .tools/ に取る（開発用）
-│   ├── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh・install-pwsh.sh・install-psscriptanalyzer.sh  # CodePipeline の CodeBuild が使う道具を .tools/ に取る
 │   ├── format-shell.sh           # シェルスクリプトの書式を shfmt で確かめる・直す（対象の一覧もここ）
 │   ├── lib/                      # 共通の部品（base.sh: die・log など、tools.sh: 版を固定した道具、tofu-common.sh: deploy の部品）
-│   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl・shfmt で順番と止まり方を見る）
-│   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
-│   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
-│   ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
-│   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
-│   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
-│   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
+│   ├── tests/                    # scripts の下のスクリプトのテスト（偽の tofu・curl・shfmt で順番と止まり方を見る）
+│   ├── install/                  # 版を固定した道具を .tools/ に取る
+│   │   ├── install-jv.sh         # jv
+│   │   ├── install-shfmt.sh      # shfmt（開発用）
+│   │   └── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh・install-pwsh.sh・install-psscriptanalyzer.sh  # CodePipeline の CodeBuild が使う道具
+│   └── client/                   # 利用者の PC で動かすスクリプト
+│       ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
+│       ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
+│       ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
+│       ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
+│       ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
+│       └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
 ├── schemas/                        # スキーマの書き間違いを断る、draft-07 の厳しいメタスキーマ（とその出典のライセンス）
 ├── workstation-config.json         # ユーザー・プロジェクト設定
 └── workstation-config.schema.json  # 設定ファイルのJSONスキーマ
@@ -715,8 +717,8 @@ ec2-workstation/
 just ci
 ```
 
-- PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします。`scripts/install-psscriptanalyzer.sh` で入れた PSScriptAnalyzer も読みます）、5.1 の Parser でしか分からない誤りは CI で見ます
-- シェルスクリプト（`*.sh` と user-data の `*.sh.tftpl`）の書式は、CI の `Shell format` のジョブが shfmt で確かめます。書式の決まりは `.editorconfig` にあり、対象のファイルは `scripts/format-shell.sh` が決めます。手元では、`./scripts/install-shfmt.sh` で版を固定した shfmt（v3.14.1、`scripts/lib/tools.sh` の `SHFMT_VERSION`）を `.tools/` に入れてから、`just shfmt-check`（直すときは `just shfmt-fix`）を使います。PATH にある shfmt は使いません（版が違うと書式が変わりうるため）
+- PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします。`scripts/install/install-psscriptanalyzer.sh` で入れた PSScriptAnalyzer も読みます）、5.1 の Parser でしか分からない誤りは CI で見ます
+- シェルスクリプト（`*.sh` と user-data の `*.sh.tftpl`）の書式は、CI の `Shell format` のジョブが shfmt で確かめます。書式の決まりは `.editorconfig` にあり、対象のファイルは `scripts/format-shell.sh` が決めます。手元では、`./scripts/install/install-shfmt.sh` で版を固定した shfmt（v3.14.1、`scripts/lib/tools.sh` の `SHFMT_VERSION`）を `.tools/` に入れてから、`just shfmt-check`（直すときは `just shfmt-fix`）を使います。PATH にある shfmt は使いません（版が違うと書式が変わりうるため）
 
 ---
 

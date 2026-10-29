@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# シェルスクリプト (*.sh と user-data の *.sh.tftpl) の書式を、版を固定した shfmt (scripts/install-shfmt.sh で入れる) で
+# シェルスクリプト (*.sh と user-data の *.sh.tftpl) の書式を、版を固定した shfmt (scripts/install/install-shfmt.sh で入れる) で
 # 確かめる・直す。書式の決まりは .editorconfig にあり、shfmt には書式の引数を渡さない (渡すと .editorconfig を読まない)。
 # 対象の一覧はここが正 (just の shellcheck も --list を使う)。.editorconfig の節と ci.yml の shellcheck の additional_files も合わせて直す
 #
@@ -40,6 +40,6 @@ fi
 
 shfmt=$(shfmt_path)
 if [ ! -x "$shfmt" ]; then
-    die "shfmt $SHFMT_VERSION is not installed at $shfmt. Install it with scripts/install-shfmt.sh"
+    die "shfmt $SHFMT_VERSION is not installed at $shfmt. Install it with scripts/install/install-shfmt.sh"
 fi
 "$shfmt" "$mode" "${files[@]}"

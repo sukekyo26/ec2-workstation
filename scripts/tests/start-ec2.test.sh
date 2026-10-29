@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/start-ec2-and-wait.sh・scripts/start-ec2.sh を、偽の aws で確かめる。
+# scripts/client/start-ec2-and-wait.sh・scripts/client/start-ec2.sh を、偽の aws で確かめる。
 # - start-ec2-and-wait.sh は SSH の ProxyCommand として動くので、stdout にはセッション (偽の aws の SSH-2.0-fake) だけが出る
 # - aws の呼び出しが失敗したら、理由を出してすぐ止まる (どの実行も 10 秒で打ち切る。SSM の問い合わせの間隔は EC2WS_SSM_POLL_INTERVAL=1 で縮める)
 # - 偽の aws は PATH の先頭に置き、FAKE_STATE で状態を、FAKE_FAIL で失敗させる呼び出しを、FAKE_WARN=1 で成功のときの
@@ -9,7 +9,7 @@
 #   scripts/tests/start-ec2.test.sh
 set -euo pipefail
 
-scripts_dir=$(cd "$(dirname "$0")/.." && pwd)
+scripts_dir=$(cd "$(dirname "$0")/../client" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/out"

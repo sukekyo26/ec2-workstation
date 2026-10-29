@@ -79,7 +79,7 @@ $awsCliLine = '$awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"'
 # Copy a script with its $awsCli line pointed at the fake, keeping the BOM (5.1 reads a file without one in the ANSI code page)
 function Copy-ScriptWithFakeCli {
     param([string]$Name)
-    $text = [IO.File]::ReadAllText((Join-Path $root "scripts\$Name"))
+    $text = [IO.File]::ReadAllText((Join-Path $root "scripts\client\$Name"))
     $lines = $text -split "`r?`n"
     $found = @($lines | Where-Object { $_ -eq $awsCliLine }).Count
     if ($found -ne 1) {

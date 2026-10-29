@@ -23,7 +23,7 @@ validate_config() {
     local jv out rc=0
     jv=$(jv_path)
     if [ ! -x "$jv" ]; then
-        die "jv $JV_VERSION is not installed at $jv. Install it with scripts/install-jv.sh"
+        die "jv $JV_VERSION is not installed at $jv. Install it with scripts/install/install-jv.sh"
     fi
 
     out=$("$jv" "$REPO_ROOT/schemas/draft-07-strict.json" "$REPO_ROOT/workstation-config.schema.json" 2>&1) || rc=$?
