@@ -10,6 +10,10 @@ jobs:
   validate-config:
     name: Validate workstation-config
     runs-on: ubuntu-latest
+    # An explicit bash runs with -eo pipefail, so a missing file fails the size check instead of measuring 0 bytes
+    defaults:
+      run:
+        shell: bash
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -26,7 +30,7 @@ jobs:
       # the gzip -9 vs base64gzip difference and the template expansion
       - name: Check user-data fits the EC2 limit (16 KB before base64; base64 length < 16384 for headroom)
         run: |
-          size=$(gzip -9 -c shared/user-data.sh | base64 -w0 | wc -c)
+          size=$(gzip -9 -c opentofu/modules/workstation/templates/user-data.sh.tftpl | base64 -w0 | wc -c)
           echo "user-data (gzip+base64): $size bytes"
           [ "$size" -lt 16384 ]
 
@@ -87,3 +91,5 @@ jobs:
         with:
           severity: error
           scandir: "."
+          # The action only picks files by shell extensions, so the user-data template needs this
+          additional_files: ".sh.tftpl"

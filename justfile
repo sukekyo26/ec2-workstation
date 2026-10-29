@@ -1,4 +1,5 @@
 shfmt_flags := "-i 4 -ci -sr"
+shell_files := "'*.sh' '*.sh.tftpl'"
 
 # レシピ一覧を表示
 default:
@@ -20,7 +21,8 @@ check-os-images:
 # gzip -9 と tofu の base64gzip の圧縮の違いと、テンプレートの展開で増える分は、この余裕に収まる
 check-user-data-size:
     #!/usr/bin/env bash
-    size=$(gzip -9 -c shared/user-data.sh | base64 -w0 | wc -c)
+    set -euo pipefail
+    size=$(gzip -9 -c opentofu/modules/workstation/templates/user-data.sh.tftpl | base64 -w0 | wc -c)
     echo "user-data (gzip+base64): $size bytes"
     [ "$size" -lt 16384 ]
 
@@ -32,15 +34,15 @@ tofu-check:
 
 # シェルスクリプトの静的解析
 shellcheck:
-    git ls-files '*.sh' | xargs shellcheck --severity=error
+    git ls-files {{ shell_files }} | xargs shellcheck --severity=error
 
 # シェルスクリプトのフォーマットチェック
 shfmt-check:
-    git ls-files '*.sh' | xargs shfmt {{ shfmt_flags }} -d
+    git ls-files {{ shell_files }} | xargs shfmt {{ shfmt_flags }} -d
 
 # シェルスクリプトを自動フォーマット
 shfmt-fix:
-    git ls-files '*.sh' | xargs shfmt {{ shfmt_flags }} -w
+    git ls-files {{ shell_files }} | xargs shfmt {{ shfmt_flags }} -w
 
 # シークレットスキャン（git 履歴を含む）
 gitleaks-scan:
