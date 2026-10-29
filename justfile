@@ -16,7 +16,8 @@ check-os-images:
     #!/usr/bin/env bash
     diff <(jq -S '.definitions.os.enum | sort' workstation-config.schema.json) <(jq -S 'keys | sort' opentofu/modules/workstation/os-images.json)
 
-# user-data が EC2 の上限 (gzip+base64 で 16,384 バイト) に収まるか（CI と同じ比較）
+# user-data が EC2 の上限 (base64 前で 16KB) に収まるか（CI と同じ比較）。余裕を見て base64 後の長さで 16,384 未満を見る。
+# gzip -9 と tofu の base64gzip の圧縮の違いと、テンプレートの展開で増える分は、この余裕に収まる
 check-user-data-size:
     #!/usr/bin/env bash
     size=$(gzip -9 -c shared/user-data.sh | base64 -w0 | wc -c)

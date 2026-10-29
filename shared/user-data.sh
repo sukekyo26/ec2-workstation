@@ -31,23 +31,24 @@ case "$ID" in
         ;;
 esac
 
-# Amazon Linux の minimal AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
+# Amazon Linux の minimal AMI と Debian 公式 AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
 # 更新やパッケージの導入が失敗して止まっても SSM で入ってログを見られるよう、それらより先に入れる
-if [ "$ID" = amzn ] && ! command -v amazon-ssm-agent &> /dev/null; then
-    dnf install -y amazon-ssm-agent
-    systemctl enable --now amazon-ssm-agent
-fi
-
-# Debian 公式 AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
-# 更新やパッケージの導入が失敗して止まっても SSM で入ってログを見られるよう、それらより先に入れる
-# (curl・dpkg・ca-certificates は Debian の AMI に入っている)。
-# LIMIT: パッケージの署名は検証せず、AWS 公式の S3 から HTTPS で取るだけ。署名の検証が求められたら作り直す
-if [ "$ID" = debian ] && ! command -v amazon-ssm-agent &> /dev/null; then
-    IMDS_TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
-    AWS_REGION=$(curl -fsS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
-    curl -fsSL "https://s3.$AWS_REGION.amazonaws.com/amazon-ssm-$AWS_REGION/latest/debian_amd64/amazon-ssm-agent.deb" -o /tmp/amazon-ssm-agent.deb
-    dpkg -i /tmp/amazon-ssm-agent.deb
-    rm -f /tmp/amazon-ssm-agent.deb
+# (Debian の curl・dpkg・ca-certificates は AMI に入っている)。
+# Ubuntu は snap で入っていて、unit 名も違い、/snap/bin が PATH に無いと command -v で見えないので対象から外す
+if [ "$ID" != ubuntu ] && ! command -v amazon-ssm-agent &> /dev/null; then
+    case "$ID" in
+        amzn)
+            dnf install -y amazon-ssm-agent
+            ;;
+        debian)
+            # LIMIT: パッケージの署名は検証せず、AWS 公式の S3 から HTTPS で取るだけ。署名の検証が求められたら作り直す
+            IMDS_TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            AWS_REGION=$(curl -fsS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+            curl -fsSL "https://s3.$AWS_REGION.amazonaws.com/amazon-ssm-$AWS_REGION/latest/debian_amd64/amazon-ssm-agent.deb" -o /tmp/amazon-ssm-agent.deb
+            dpkg -i /tmp/amazon-ssm-agent.deb
+            rm -f /tmp/amazon-ssm-agent.deb
+            ;;
+    esac
     systemctl enable --now amazon-ssm-agent
 fi
 

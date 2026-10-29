@@ -134,8 +134,8 @@ resource "aws_instance" "this" {
   associate_public_ip_address = true
   # cloud-init は同じインスタンスでは user-data を走らせ直さないため、変わったら作り直して反映する
   user_data_replace_on_change = true
-  # EC2 の user-data は 16,384 バイトまで。cloud-init は gzip を見分けて展開するので、gzip して渡す
-  # LIMIT: gzip+base64 で 16KB まで (今は約 8.7KB)。超えたら S3 から取る形に作り直す
+  # EC2 の user-data は base64 にする前で 16KB まで。cloud-init は gzip を見分けて展開するので、gzip して渡す
+  # LIMIT: 上限は base64 前で 16KB。余裕を見て base64 後の長さで 16KB 未満を CI で見る (今は約 8.8KB)。超えたら S3 から取る形に作り直す
   user_data_base64 = base64gzip(templatefile(var.user_data_template, {
     data_volume_id = aws_ebs_volume.data.id
     username       = var.username

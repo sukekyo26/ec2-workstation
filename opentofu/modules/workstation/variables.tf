@@ -65,7 +65,7 @@ variable "data_volume_type" {
 }
 
 variable "user_data_template" {
-  description = "Path to the user data script template (rendered with data_volume_id)"
+  description = "Path to the user data script template (rendered with data_volume_id, username and login_user)"
   type        = string
 }
 
