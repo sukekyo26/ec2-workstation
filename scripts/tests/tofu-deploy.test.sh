@@ -24,9 +24,11 @@ cp -R "$scripts_src/../schemas" "$repo/schemas"
 cat > "$work/bin/tofu" << 'FAKE'
 #!/usr/bin/env bash
 # 偽の tofu: 呼ばれたコマンドを "<stack>[@<選んでいる workspace>] <args>" で $FAKE_LOG に 1 行ずつ書く。
-# plan のファイルはパスを落として名前だけ書く。workspace の状態は $FAKE_STATE に置く
+# plan のファイルはパスを落として名前だけ書く。workspace の状態は $FAKE_STATE に置く。
+# init していない作業ディレクトリでは、init のほかのコマンドを断る (新しいコンテナで init を忘れると落ちる)
 set -euo pipefail
-stack=$(basename "${1#-chdir=}")
+chdir=${1#-chdir=}
+stack=$(basename "$chdir")
 shift
 selected_file="$FAKE_STATE/$stack.selected"
 workspaces_file="$FAKE_STATE/$stack.workspaces"
@@ -49,8 +51,14 @@ has_workspace() {
     grep -qxF -- "$1" "$workspaces_file" 2> /dev/null
 }
 
+if [ "$1" != init ] && [ ! -e "$chdir/.fake-init" ]; then
+    echo "fake tofu: $stack is not initialized in $chdir" >&2
+    exit 1
+fi
+
 case "$1" in
     init)
+        touch "$chdir/.fake-init"
         # スクリプトは init の前に .terraform/environment を消すので、選択は default に戻る
         echo default > "$selected_file"
         ;;
@@ -158,7 +166,16 @@ case "$1 $2" in
         ;;
 esac
 FAKE
-chmod +x "$work/bin/tofu" "$work/bin/aws"
+# jq は本物を呼ぶ。FAKE_JQ_FAIL があれば、その文字列を含む式だけを失敗させる (plan の数え方の失敗を作る)
+real_jq=$(command -v jq)
+cat > "$work/bin/jq" << FAKE
+#!/usr/bin/env bash
+if [ -n "\${FAKE_JQ_FAIL:-}" ] && [[ "\$*" == *"\$FAKE_JQ_FAIL"* ]]; then
+    exit 5
+fi
+exec "$real_jq" "\$@"
+FAKE
+chmod +x "$work/bin/tofu" "$work/bin/aws" "$work/bin/jq"
 
 # 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。答えは、スキーマを厳しいメタスキーマで見るときは FAKE_JV_META、
 # 設定を見るときは FAKE_JV で変える (どちらも既定は通す)
@@ -220,30 +237,39 @@ fi
 failures=0
 
 # run <name> <script> <stdin> [VAR=value ... | arg ...]: 偽の環境でスクリプトを走らせ、rc・ログ・標準エラーを残す。
+# RUN_REPO=<写し> で別の写しで走らせ、KEEP_STATE=<前の run の名前> でその run の workspace の状態を引き継ぐ
+# (どの run も、新しいコンテナと同じく init していない作業ディレクトリから始める)。
 # = を含むものは環境変数、ほかはスクリプトの引数。端末でない形で走らせ (EC2WS_ASSUME_TERMINAL=no)、端末のふりは引数で上書きする。
 # workstations の workspace は FAKE_WORKSPACES (空白区切り。既定は設定の 2 人) で始める
 run() {
     local name=$1 script=$2 input=$3 a w
     shift 3
-    local vars=() args=() workspaces="developer1 developer2"
+    local vars=() args=() workspaces="developer1 developer2" run_repo=$repo keep=""
     for a in "$@"; do
         case "$a" in
             FAKE_WORKSPACES=*) workspaces=${a#FAKE_WORKSPACES=} ;;
+            RUN_REPO=*) run_repo=${a#RUN_REPO=} ;;
+            KEEP_STATE=*) keep=${a#KEEP_STATE=} ;;
             *=*) vars+=("$a") ;;
             *) args+=("$a") ;;
         esac
     done
+    rm -f "$run_repo"/opentofu/stacks/*/.fake-init
     export FAKE_LOG="$work/out/$name.log" FAKE_STATE="$work/out/$name.state"
     : > "$FAKE_LOG"
-    rm -rf "$FAKE_STATE"
-    mkdir "$FAKE_STATE"
-    : > "$FAKE_STATE/workstations.workspaces"
-    for w in $workspaces; do
-        echo "$w" >> "$FAKE_STATE/workstations.workspaces"
-    done
+    if [ -n "$keep" ]; then
+        FAKE_STATE="$work/out/$keep.state"
+    else
+        rm -rf "$FAKE_STATE"
+        mkdir "$FAKE_STATE"
+        : > "$FAKE_STATE/workstations.workspaces"
+        for w in $workspaces; do
+            echo "$w" >> "$FAKE_STATE/workstations.workspaces"
+        done
+    fi
     local rc=0
     printf '%s' "$input" | env TF_STATE_BUCKET=test-bucket EC2WS_ASSUME_TERMINAL=no "${vars[@]}" \
-        "$repo/scripts/$script" "${args[@]}" > /dev/null 2> "$work/out/$name.err" || rc=$?
+        "$run_repo/scripts/$script" "${args[@]}" > /dev/null 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
 
@@ -693,6 +719,147 @@ expect_err deploy-no-jv "Install it with scripts/install-jv.sh"
 # destroy は設定を検証しない (設定の違反があっても全部を消せる)
 run destroy-violation tofu-destroy.sh "" FAKE_JV=violation
 expect_rc destroy-violation 0
+
+# --- CodePipeline: tofu-plan.sh・tofu-apply.sh ---
+# plan と apply は別のコンテナで走るので、apply は別の写し (init していない) で、plan の置き場所だけを受け取って走らせる
+repo2="$work/repo2"
+cp -R "$repo" "$repo2"
+
+expect_file() {
+    local name=$1 file=$2 want=$3
+    if [ "$(cat "$file" 2> /dev/null)" != "$want" ]; then
+        fail "$name: $(basename "$file") is '$(cat "$file" 2> /dev/null)', want '$want'"
+    fi
+}
+
+# network: 変更が無ければ CHANGED=false。apply は別の写しで init してから、保存した plan だけを apply する
+run plan-network tofu-plan.sh "" --network "$work/out/p-network"
+expect_rc plan-network 0
+expect_log plan-network "$init_network
+network show -json
+$legacy_check
+$network_plan"
+expect_file plan-network "$work/out/p-network/vars/changed" false
+expect_file plan-network "$work/out/p-network/vars/summary" "network / replace: 0 / delete: 0 / create: 0 / update: 0"
+
+run plan-network-changed tofu-plan.sh "" --network "$work/out/p-network-changed" "FAKE_SHOW_PLAN_network=$creates"
+expect_rc plan-network-changed 0
+expect_file plan-network-changed "$work/out/p-network-changed/vars/changed" true
+expect_file plan-network-changed "$work/out/p-network-changed/vars/summary" "network / replace: 0 / delete: 0 / create: 2 / update: 0"
+
+run plan-network-replace tofu-plan.sh "" --network "$work/out/p-network-replace" "FAKE_SHOW_PLAN_network=$destroys"
+expect_rc plan-network-replace 1
+expect_err plan-network-replace "the network plan replaces or deletes the VPC or subnet"
+
+run apply-network tofu-apply.sh "" --network "$work/out/p-network-changed" RUN_REPO="$repo2" KEEP_STATE=plan-network-changed
+expect_rc apply-network 0
+expect_log apply-network "$init_network
+$network_apply"
+
+# 全員: 設定から消えた gone も destroy の plan を取り、manifest に書く。消える人がいれば CHANGED=true
+run plan-users tofu-plan.sh "" --users "$work/out/p-users" "FAKE_WORKSPACES=developer1 gone developer2" FAKE_LIST_SELECTED=developer1
+expect_rc plan-users 0
+expect_log plan-users "$init_network
+$network_plan
+$init_workstations
+workstations@default workspace list
+$users_plan
+workstations@developer2 workspace select gone
+workstations@gone plan -destroy -refresh=false -input=false -out=user-gone.tfplan
+workstations@gone show -json user-gone.tfplan"
+expect_file plan-users "$work/out/p-users/manifest" "apply: developer1 developer2
+destroy: gone"
+expect_file plan-users "$work/out/p-users/vars/changed" true
+expect_file plan-users "$work/out/p-users/vars/summary" "removed: gone / replace: 0 (none) / delete: 0 / create: 0 / update: 0"
+
+run apply-users tofu-apply.sh "" --users "$work/out/p-users" RUN_REPO="$repo2" KEEP_STATE=plan-users
+expect_rc apply-users 0
+# 偽の tofu は init の前に、plan の run が最後に選んだ workspace (gone) を書く。init で default に戻る
+expect_log apply-users "${init_workstations/workstations@default/workstations@gone}
+workstations@default workspace select developer1
+workstations@developer1 apply -input=false user-developer1.tfplan
+workstations@developer1 workspace select developer2
+workstations@developer2 apply -input=false user-developer2.tfplan
+workstations@developer2 workspace select gone
+workstations@gone apply -input=false user-gone.tfplan
+workstations@gone workspace select default
+workstations@default workspace delete gone"
+expect_workspaces plan-users "developer1 developer2"
+
+# 変更が無く、消える人もいなければ CHANGED=false (承認と apply の段は飛ばされる)
+run plan-users-nochange tofu-plan.sh "" --users "$work/out/p-users-nochange"
+expect_rc plan-users-nochange 0
+expect_file plan-users-nochange "$work/out/p-users-nochange/vars/changed" false
+
+# 作り直しは数と人を要約に出す
+run plan-users-replace tofu-plan.sh "" --users "$work/out/p-users-replace" "FAKE_SHOW_PLAN_workstations_developer2=$replaces"
+expect_file plan-users-replace "$work/out/p-users-replace/vars/changed" true
+expect_file plan-users-replace "$work/out/p-users-replace/vars/summary" "removed: none / replace: 2 (developer2) / delete: 0 / create: 0 / update: 1"
+
+# network に apply していない変更が残っていれば、全員の plan を取らずに止まる
+run plan-users-network-changed tofu-plan.sh "" --users "$work/out/p-users-nc" "FAKE_SHOW_PLAN_network=$creates"
+expect_rc plan-users-network-changed 1
+expect_err plan-users-network-changed "the network has changes that are not applied"
+expect_no_log plan-users-network-changed "workstations@developer1 plan"
+
+# 途中で止まったら、Retry ではなく Release change で plan からやり直すよう案内する
+run apply-users-fails tofu-apply.sh "" --users "$work/out/p-users" RUN_REPO="$repo2" KEEP_STATE=plan-users-nochange FAKE_APPLY_FAIL=workstations@developer2
+expect_rc apply-users-fails 1
+expect_err apply-users-fails "start the pipeline again with Release change (Retry reuses the old plans and stops)"
+
+# manifest や plan が無ければ、何も apply しない
+mkdir -p "$work/out/p-empty"
+run apply-users-no-manifest tofu-apply.sh "" --users "$work/out/p-empty" RUN_REPO="$repo2"
+expect_rc apply-users-no-manifest 1
+expect_err apply-users-no-manifest "no valid manifest"
+expect_no_log apply-users-no-manifest "apply"
+run apply-network-no-plan tofu-apply.sh "" --network "$work/out/p-empty" RUN_REPO="$repo2"
+expect_rc apply-network-no-plan 1
+expect_err apply-network-no-plan "no network plan"
+
+# plan の数え方 (plan_counts の jq) が失敗したら、変数を書かずに止まる
+counts_expr='join(" ")'
+run plan-network-counts-fail tofu-plan.sh "" --network "$work/out/p-network-cf" "FAKE_JQ_FAIL=$counts_expr"
+expect_rc plan-network-counts-fail 1
+expect_err plan-network-counts-fail "could not count the changes in the plan"
+[ ! -e "$work/out/p-network-cf/vars" ] || fail "plan-network-counts-fail: vars written"
+run plan-users-counts-fail tofu-plan.sh "" --users "$work/out/p-users-cf" "FAKE_JQ_FAIL=$counts_expr"
+expect_rc plan-users-counts-fail 1
+expect_err plan-users-counts-fail "could not count the changes in the plan"
+[ ! -e "$work/out/p-users-cf/vars" ] || fail "plan-users-counts-fail: vars written"
+
+# 引数の誤りは、init より先に usage で止まる
+for script in tofu-plan.sh tofu-apply.sh; do
+    run "$script-bad-mode" "$script" "" --other "$work/out/x"
+    expect_rc "$script-bad-mode" 1
+    expect_err "$script-bad-mode" "usage:"
+    expect_no_log "$script-bad-mode" "init"
+done
+
+for args in "" "--network" "--other $work/out/x" "--users a b"; do
+    # shellcheck disable=SC2086 # 引数を空白で分けて渡す
+    run plan-usage tofu-plan.sh "" $args
+    expect_rc plan-usage 1
+    expect_err plan-usage "usage:"
+    # shellcheck disable=SC2086
+    run apply-usage tofu-apply.sh "" $args
+    expect_rc apply-usage 1
+    expect_err apply-usage "usage:"
+done
+
+# 承認の文: 先頭に commit・build、要約の危ない情報が残り、全体は CustomData の上限 (500 文字) に収まる
+echo "case: approval-text"
+long="removed: $(printf 'removed-user-%02d ' $(seq 1 40))/ replace: 40 ($(printf 'replaced-user-%02d ' $(seq 1 40)))"
+approval=$(CODEBUILD_RESOLVED_SOURCE_VERSION=0123456789abcdef0123 CODEBUILD_BUILD_ID=ec2ws-plan:11111111-2222-3333-4444-555555555555 \
+    bash -c '. "$1/scripts/lib/tofu-common.sh"; approval_text "$2"' _ "$repo" "$long")
+if [ "${#approval}" -gt 500 ] || [[ "$approval" != "commit 0123456789ab / build 11111111-2222-3333-4444-555555555555 / removed: removed-user-01 "* ]] ||
+    [[ "$approval" != *" ... (truncated, see the build log)" ]]; then
+    fail "approval-text: got ${#approval} characters: $approval"
+fi
+short=$(CODEBUILD_RESOLVED_SOURCE_VERSION=0123456789abcdef CODEBUILD_BUILD_ID=p:b bash -c '. "$1/scripts/lib/tofu-common.sh"; approval_text "removed: none"' _ "$repo")
+if [ "$short" != "commit 0123456789ab / build b / removed: none" ]; then
+    fail "approval-text: got '$short' for a short summary"
+fi
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

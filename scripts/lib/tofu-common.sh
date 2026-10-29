@@ -232,12 +232,63 @@ in_list() {
     return 1
 }
 
-# ユーザーの workspace ごとに plan を保存し (1 つでも失敗したら何も apply しない)、要約を出して確かめ、全部を apply する。
-# destroy したユーザーの workspace は、apply の後に消す。init_stack workstations の後に呼ぶ
-#   apply_user_plans <plan の置き場所> <apply するユーザー...> -- <destroy するユーザー...>
-apply_user_plans() {
-    local plan_dir=$1 dir u plan_json changes=0 i
-    local apply_users=() destroy_users=() all=()
+# plan_counts <plan の JSON>: "<作る> <変える> <作り直す> <消す>" の 4 つの数
+plan_counts() {
+    if ! jq -r '[(.resource_changes // [])[] | .change.actions | join(",")] as $a
+        | [($a | map(select(. == "create")) | length), ($a | map(select(. == "update")) | length),
+           ($a | map(select(. == "delete,create" or . == "create,delete")) | length), ($a | map(select(. == "delete")) | length)]
+        | join(" ")' <<< "$1"; then
+        die "could not count the changes in the plan"
+    fi
+}
+
+# 設定にいる人 (USERS) と、設定から消えたが state が残る人 (REMOVED) を決める。init_stack workstations の後に呼ぶ。
+# 一覧を取れなければ止まる (消すべき人を黙って残さない)
+find_users() {
+    local names name
+    USERS=()
+    REMOVED=()
+    names=$(config_usernames)
+    mapfile -t USERS <<< "$names"
+    names=$(user_workspaces)
+    if [ -n "$names" ]; then
+        while IFS= read -r name; do
+            if ! in_list "$name" "${USERS[@]}"; then
+                REMOVED+=("$name")
+            fi
+        done <<< "$names"
+    fi
+    log "users to destroy (removed from workstation-config.json): ${REMOVED[*]:-none}"
+}
+
+# VPC・サブネットの作り直し・削除は、ユーザーのインスタンス・ENI・データボリューム (AZ に固定) を抱えたまま進められない
+refuse_network_replacement() {
+    local plan_json=$1 rc=0
+    jq -e '[(.resource_changes // [])[] | select(.type == "aws_vpc" or .type == "aws_subnet")
+            | select(.change.actions | index("delete"))] | length > 0' <<< "$plan_json" > /dev/null || rc=$?
+    case $rc in
+        0) die "the network plan replaces or deletes the VPC or subnet that the workstations use. Run scripts/tofu-destroy.sh first, then scripts/tofu-deploy.sh" ;;
+        1) ;;
+        *) die "could not read the network plan (jq exit $rc)" ;;
+    esac
+}
+
+# network の plan を <plan の置き場所>/network.tfplan に保存し、その JSON を NETWORK_PLAN_JSON に入れる。init_stack network の後に呼ぶ
+plan_network() {
+    local dir
+    dir=$(stack_dir network)
+    log "network: plan"
+    tofu -chdir="$dir" plan -input=false -out="$1/network.tfplan"
+    NETWORK_PLAN_JSON=$(tofu -chdir="$dir" show -json "$1/network.tfplan")
+    refuse_network_replacement "$NETWORK_PLAN_JSON"
+}
+
+# ユーザーの workspace ごとに plan を保存し、要約を出す (1 つでも失敗したら止まる)。init_stack workstations の後に呼ぶ。
+# USER_CHANGES に変更のある plan の数、USER_PLAN_JSON[<名前>] にその plan の JSON を入れる
+#   plan_user_stacks <plan の置き場所> <apply するユーザー...> -- <destroy するユーザー...>
+plan_user_stacks() {
+    local plan_dir=$1 dir u plan_json
+    local apply_users=() destroy_users=()
     shift
     while [ $# -gt 0 ] && [ "$1" != -- ]; do
         apply_users+=("$1")
@@ -248,6 +299,8 @@ apply_user_plans() {
     fi
     destroy_users=("$@")
     dir=$(stack_dir workstations)
+    USER_CHANGES=0
+    declare -gA USER_PLAN_JSON=()
 
     # LIMIT: ユーザーを 1 人ずつ順に plan・apply するので、人数に比例して時間がかかる。CI の時間が問題になったら並列にする (state もロックも人ごと)
     for u in "${apply_users[@]}"; do
@@ -256,7 +309,9 @@ apply_user_plans() {
         tofu -chdir="$dir" plan -input=false -out="$plan_dir/user-$u.tfplan"
         plan_json=$(tofu -chdir="$dir" show -json "$plan_dir/user-$u.tfplan")
         summarize_plan "workstations/$u" "$plan_json"
-        changes=$((changes + PLAN_CHANGED))
+        USER_CHANGES=$((USER_CHANGES + PLAN_CHANGED))
+        # shellcheck disable=SC2034 # tofu-plan.sh が読む
+        USER_PLAN_JSON[$u]=$plan_json
     done
     # data source (AMI の SSM パラメータ・VPC の検索) を読まずに、state にあるものを消す
     for u in "${destroy_users[@]}"; do
@@ -265,11 +320,28 @@ apply_user_plans() {
         tofu -chdir="$dir" plan -destroy -refresh=false -input=false -out="$plan_dir/user-$u.tfplan"
         plan_json=$(tofu -chdir="$dir" show -json "$plan_dir/user-$u.tfplan")
         summarize_plan "workstations/$u" "$plan_json"
-        changes=$((changes + PLAN_CHANGED))
+        USER_CHANGES=$((USER_CHANGES + PLAN_CHANGED))
+        # shellcheck disable=SC2034 # tofu-plan.sh が読む
+        USER_PLAN_JSON[$u]=$plan_json
     done
-    if [ "$changes" -gt 0 ]; then
-        confirm_apply workstations
+}
+
+# plan_user_stacks が保存した plan だけを順に apply し、destroy したユーザーの workspace を消す。init_stack workstations の後に呼ぶ。
+# 途中で止まったら、どこまで済んだかと <やり直し方> を出す
+#   apply_user_stacks <plan の置き場所> <やり直し方> <apply するユーザー...> -- <destroy するユーザー...>
+apply_user_stacks() {
+    local plan_dir=$1 retry_hint=$2 dir u i
+    local apply_users=() destroy_users=() all=()
+    shift 2
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+        apply_users+=("$1")
+        shift
+    done
+    if [ $# -gt 0 ]; then
+        shift
     fi
+    destroy_users=("$@")
+    dir=$(stack_dir workstations)
 
     all=("${apply_users[@]}" "${destroy_users[@]}")
     for i in "${!all[@]}"; do
@@ -278,7 +350,7 @@ apply_user_plans() {
         tofu -chdir="$dir" workspace select "$u"
         if ! tofu -chdir="$dir" apply -input=false "$plan_dir/user-$u.tfplan"; then
             # 途中で止まったとき、どこまで済んだかを出す (後の人は apply していない。消える人の workspace も残っている)
-            die "workstations/$u: apply failed. Applied: ${all[*]:0:i}. Not applied: ${all[*]:i+1}. Workspaces of removed users are kept: ${destroy_users[*]}. Fix the cause and run this again"
+            die "workstations/$u: apply failed. Applied: ${all[*]:0:i}. Not applied: ${all[*]:i+1}. Workspaces of removed users are kept: ${destroy_users[*]}. $retry_hint"
         fi
     done
     if [ ${#destroy_users[@]} -gt 0 ]; then
@@ -289,4 +361,41 @@ apply_user_plans() {
             tofu -chdir="$dir" workspace delete "$u"
         done
     fi
+}
+
+# ユーザーの workspace ごとに plan を保存し (1 つでも失敗したら何も apply しない)、要約を出して確かめ、全部を apply する。
+# destroy したユーザーの workspace は、apply の後に消す。init_stack workstations の後に呼ぶ
+#   apply_user_plans <plan の置き場所> <apply するユーザー...> -- <destroy するユーザー...>
+apply_user_plans() {
+    local plan_dir=$1
+    shift
+    plan_user_stacks "$plan_dir" "$@"
+    if [ "$USER_CHANGES" -gt 0 ]; then
+        confirm_apply workstations
+    fi
+    apply_user_stacks "$plan_dir" "Fix the cause and run this again" "$@"
+}
+
+# approval_text <要約>: CodePipeline の承認の画面に出す 1 行 ("commit <12 文字> / build <ビルドの ID> / <要約>")。
+# 承認の CustomData の上限 (500 文字) に収まるよう、要約を切って印を付ける
+approval_text() {
+    local summary=$1 commit build prefix marker=" ... (truncated, see the build log)" max=500 room
+    commit=${CODEBUILD_RESOLVED_SOURCE_VERSION:-$(git -C "$REPO_ROOT" rev-parse HEAD 2> /dev/null || echo unknown)}
+    build=${CODEBUILD_BUILD_ID:-local}
+    prefix="commit ${commit:0:12} / build ${build##*:} / "
+    if [ $((${#prefix} + ${#summary})) -le "$max" ]; then
+        echo "$prefix$summary"
+        return 0
+    fi
+    room=$((max - ${#prefix} - ${#marker}))
+    echo "$prefix${summary:0:room}$marker"
+}
+
+# write_pipeline_vars <置き場所> <true|false> <要約>: CodePipeline の変数 (CHANGED・SUMMARY・APPROVAL) を <置き場所>/vars に書く。
+# CodeBuild の exported-variables は buildspec のシェルの変数しか拾わないので、buildspec がこのファイルを読んで export する
+write_pipeline_vars() {
+    mkdir -p "$1/vars"
+    echo "$2" > "$1/vars/changed"
+    echo "$3" > "$1/vars/summary"
+    approval_text "$3" > "$1/vars/approval"
 }

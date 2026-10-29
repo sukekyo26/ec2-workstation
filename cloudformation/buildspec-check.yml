@@ -1,0 +1,23 @@
+# CodePipeline の Check の段: just ci (GitHub Actions の CI と同じ検査。PowerShell は版を固定した pwsh 7 で見る)。落ちたら plan に進まない。
+# deploy の権限を持たないロールで走る。スクリプトは bash で呼ぶ (zip の源では実行ビットが落ちうるため。ここは full clone)
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - for tool in jv shfmt tofu just shellcheck gitleaks pwsh psscriptanalyzer; do bash "scripts/install-$tool.sh" || exit 1; done
+  build:
+    commands:
+      # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける
+      - tool_dirs=$(bash -c '. scripts/lib/tools.sh; tools_path') && export PATH="$tool_dirs:$PATH"
+      # pwsh-check を飛ばさない (版を固定した pwsh と PSScriptAnalyzer で見る。Windows PowerShell 5.1 の Parser での検査は GitHub Actions だけ)
+      - export EC2WS_REQUIRE_PWSH=yes
+      - command -v pwsh && pwsh --version
+      - jq --version && aws --version && bash --version | head -1
+      # gitleaks は全部の履歴を見る。full clone が浅ければ、残りの履歴を取る
+      - if [ "$(git rev-parse --is-shallow-repository)" = true ]; then git fetch --unshallow; fi
+      - echo "commits in the history - $(git rev-list --count HEAD)"
+      - just ci

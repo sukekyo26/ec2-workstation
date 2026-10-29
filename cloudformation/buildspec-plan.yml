@@ -1,0 +1,34 @@
+# CodePipeline の NetworkPlan・UsersPlan の段: scripts/tofu-plan.sh で plan だけを取り、出力のアーティファクトにする。
+# PLAN_MODE (--network か --users) は段の設定が渡す。読むだけ (と state への書き込み) のロールで走る (承認の前なので)。
+# CHANGED・SUMMARY・APPROVAL は段の名前空間の変数になり、承認と、その後の段を飛ばすかの条件が読む
+version: 0.2
+
+env:
+  shell: bash
+  exported-variables:
+    - CHANGED
+    - SUMMARY
+    - APPROVAL
+
+phases:
+  install:
+    commands:
+      - bash scripts/install-jv.sh
+      - bash scripts/install-tofu.sh
+  build:
+    commands:
+      # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける
+      - tool_dirs=$(bash -c '. scripts/lib/tools.sh; tools_path') && export PATH="$tool_dirs:$PATH"
+      - jq --version && aws --version && tofu version
+      - bash scripts/tofu-plan.sh "$PLAN_MODE" "$CODEBUILD_SRC_DIR/plan-out"
+      # exported-variables は buildspec のシェルの変数しか拾わない (tofu-plan.sh の中の export は届かない)
+      - export CHANGED="$(cat plan-out/vars/changed)" SUMMARY="$(cat plan-out/vars/summary)" APPROVAL="$(cat plan-out/vars/approval)"
+      - echo "CHANGED=$CHANGED SUMMARY=$SUMMARY"
+      # 空のまま渡すと、条件が「変更なし」と読んで段を飛ばす
+      - test "$CHANGED" = true || test "$CHANGED" = false
+      - test -n "$APPROVAL"
+
+artifacts:
+  base-directory: plan-out
+  files:
+    - "**/*"
