@@ -96,6 +96,7 @@ function Wait-SSMAgentReady {
             Start-Sleep -Seconds $RetryIntervalSeconds
             continue
         }
+        $failures = 0
 
         if ($pingStatus -eq "Online") {
             Write-ScriptLog "SSM Agent is online"
