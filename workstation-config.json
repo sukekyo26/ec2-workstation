@@ -7,7 +7,7 @@
     "instanceType": "t3.medium",
     "rootVolumeSize": 30,
     "rootVolumeType": "gp3",
-    "dataVolumeSize": 80,
+    "dataVolumeSize": 40,
     "dataVolumeType": "gp3"
   },
   "autoStopConfig": {
