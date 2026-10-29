@@ -96,7 +96,6 @@ REGION=${REGION_INPUT:-ap-northeast-1}
 # ============================================
 # Set variables
 # ============================================
-USER="ubuntu"
 SSH_CONFIG_DIR="$HOME/.ssh"
 SSH_CONFIG_PATH="$SSH_CONFIG_DIR/config"
 
@@ -133,6 +132,13 @@ if [ "${#INSTANCE_ID_LIST[@]}" -ne 1 ]; then
 fi
 INSTANCE_ID="${INSTANCE_ID_LIST[0]}"
 KEY_NAME=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].KeyName" --output text)
+
+# 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
+USER=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text)
+if [ "$USER" = "None" ] || [ -z "$USER" ]; then
+    echo -e "${RED}Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags.${NC}"
+    exit 1
+fi
 
 if [ "$KEY_NAME" = "None" ] || [ -z "$KEY_NAME" ]; then
     echo -e "${RED}Error: No key pair is associated with instance $INSTANCE_ID${NC}"

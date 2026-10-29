@@ -22,6 +22,17 @@ jobs:
       - name: Validate against JSON Schema
         run: npx --yes ajv-cli@5 validate -s workstation-config.schema.json -d workstation-config.json
 
+      # The EC2 limit is 16 KB before base64; checking the base64 length leaves headroom for
+      # the gzip -9 vs base64gzip difference and the template expansion
+      - name: Check user-data fits the EC2 limit (16 KB before base64; base64 length < 16384 for headroom)
+        run: |
+          size=$(gzip -9 -c shared/user-data.sh | base64 -w0 | wc -c)
+          echo "user-data (gzip+base64): $size bytes"
+          [ "$size" -lt 16384 ]
+
+      - name: Check os enum matches os-images.json
+        run: diff <(jq -S '.definitions.os.enum | sort' workstation-config.schema.json) <(jq -S 'keys | sort' opentofu/modules/workstation/os-images.json)
+
   opentofu:
     name: OpenTofu Format & Validate
     runs-on: ubuntu-latest

@@ -1,11 +1,15 @@
 # 個人用ワークステーション
 # - SG: 全インバウンド拒否、アウトバウンドは HTTPS/HTTP/DNS のみ
 # - SSM SessionManager 接続 (SSH ポート非開放)
-# - Ubuntu 24.04 LTS / EBS 暗号化 / IMDSv2 強制
+# - OS は workstation-config.json の os で選択 / EBS 暗号化 / IMDSv2 強制
 # - AMI はデプロイのたびに最新へ追従し、作業データはデータボリュームに分離して残す
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}-${var.username}"
+
+  # 最新 AMI は各ディストリビューションが公開する SSM パブリックパラメータから引く。
+  # キーと workstation-config.schema.json の definitions.os の enum が一致することは CI が確かめる
+  os_image = jsondecode(file("${path.module}/os-images.json"))[var.os]
 }
 
 # ============================================================
@@ -116,23 +120,12 @@ resource "aws_iam_instance_profile" "this" {
 # EC2 Instance
 # ============================================================
 
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "state"
-    values = ["available"]
-  }
+data "aws_ssm_parameter" "ami" {
+  name = local.os_image.ami_parameter
 }
 
 resource "aws_instance" "this" {
-  ami                         = data.aws_ami.ubuntu.id
+  ami                         = data.aws_ssm_parameter.ami.insecure_value
   instance_type               = var.instance_type
   subnet_id                   = var.subnet_id
   vpc_security_group_ids      = [aws_security_group.this.id]
@@ -141,10 +134,13 @@ resource "aws_instance" "this" {
   associate_public_ip_address = true
   # cloud-init は同じインスタンスでは user-data を走らせ直さないため、変わったら作り直して反映する
   user_data_replace_on_change = true
-  user_data = templatefile(var.user_data_template, {
+  # EC2 の user-data は base64 にする前で 16KB まで。cloud-init は gzip を見分けて展開するので、gzip して渡す
+  # LIMIT: 上限は base64 前で 16KB。余裕を見て base64 後の長さで 16KB 未満を CI で見る (今は約 8.8KB)。超えたら S3 から取る形に作り直す
+  user_data_base64 = base64gzip(templatefile(var.user_data_template, {
     data_volume_id = aws_ebs_volume.data.id
     username       = var.username
-  })
+    login_user     = local.os_image.login_user
+  }))
 
   # IMDSv2 強制 (SSRF 対策)
   metadata_options {
@@ -163,6 +159,8 @@ resource "aws_instance" "this" {
     Name     = "${local.resource_prefix}-instance"
     Owner    = var.username
     Schedule = "office-hours"
+    # scripts/setup-remote-ssh が SSH の接続ユーザー名として読む
+    LoginUser = local.os_image.login_user
   }
 }
 

@@ -99,7 +99,6 @@ if ([string]::IsNullOrEmpty($Region)) {
 $INSTANCE_NAME = $InstanceName
 $SSH_HOST = $SshHost
 $REGION = $Region
-$USER = "ubuntu"
 $SSH_CONFIG = "config"
 $SSH_CONFIG_DIR = "$env:USERPROFILE\.ssh"
 $SSH_CONFIG_PATH = "$SSH_CONFIG_DIR\$SSH_CONFIG"
@@ -130,6 +129,17 @@ if ($instanceIdList.Count -ne 1) {
     exit 1
 }
 $INSTANCE_ID = $instanceIdList[0]
+
+# 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
+$USER = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Error: Failed to read the LoginUser tag (AWS CLI error). Check your AWS credentials (e.g. run 'aws login') and try again: $USER"
+    exit 1
+}
+if ($USER -eq "None" -or [string]::IsNullOrEmpty($USER)) {
+    Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
+    exit 1
+}
 $KEY_NAME = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].KeyName" --output text
 
 if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {

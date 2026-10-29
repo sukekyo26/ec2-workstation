@@ -18,6 +18,7 @@ module "workstation" {
   subnet_id         = module.network.public_subnet_id
   availability_zone = module.network.public_subnet_availability_zone
 
+  os               = each.value.instance_config.os
   instance_type    = each.value.instance_config.instanceType
   root_volume_size = each.value.instance_config.rootVolumeSize
   root_volume_type = each.value.instance_config.rootVolumeType

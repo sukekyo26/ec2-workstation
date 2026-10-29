@@ -3,7 +3,8 @@ set -eux
 
 # ============================================================
 # EC2 Remote Workstation - User Data Script
-# Ubuntu 24.04 LTS用初期化スクリプト
+# Ubuntu / Debian / Amazon Linux 共通の初期化スクリプト
+# (選択できる OS は workstation-config.schema.json の os を参照)
 # ============================================================
 
 # ログ設定
@@ -18,37 +19,101 @@ echo "=========================================="
 export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
 
+# OS 判定 (/etc/os-release の ID でパッケージマネージャを切り替える)
+# shellcheck disable=SC1091
+. /etc/os-release
+case "$ID" in
+    ubuntu | debian) PKG_MANAGER=apt ;;
+    amzn) PKG_MANAGER=dnf ;;
+    *)
+        echo "ERROR: unsupported OS '$ID'. Choose an os listed in workstation-config.schema.json." >&2
+        exit 1
+        ;;
+esac
+
+# Amazon Linux の minimal AMI と Debian 公式 AMI には SSM Agent が入っておらず、Session Manager で接続できないため入れる。
+# 更新やパッケージの導入が失敗して止まっても SSM で入ってログを見られるよう、それらより先に入れる
+# (Debian の curl・dpkg・ca-certificates は AMI に入っている)。
+# Ubuntu は snap で入っていて、unit 名も違い、/snap/bin が PATH に無いと command -v で見えないので対象から外す
+if [ "$ID" != ubuntu ] && ! command -v amazon-ssm-agent &> /dev/null; then
+    case "$ID" in
+        amzn)
+            dnf install -y amazon-ssm-agent
+            ;;
+        debian)
+            # LIMIT: パッケージの署名は検証せず、AWS 公式の S3 から HTTPS で取るだけ。署名の検証が求められたら作り直す
+            IMDS_TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+            AWS_REGION=$(curl -fsS -H "X-aws-ec2-metadata-token: $IMDS_TOKEN" http://169.254.169.254/latest/meta-data/placement/region)
+            curl -fsSL "https://s3.$AWS_REGION.amazonaws.com/amazon-ssm-$AWS_REGION/latest/debian_amd64/amazon-ssm-agent.deb" -o /tmp/amazon-ssm-agent.deb
+            dpkg -i /tmp/amazon-ssm-agent.deb
+            rm -f /tmp/amazon-ssm-agent.deb
+            ;;
+    esac
+    systemctl enable --now amazon-ssm-agent
+fi
+
 # システムアップデート
 echo "[1/7] Updating system packages..."
-apt-get update -y
-apt-get upgrade -y
+if [ "$PKG_MANAGER" = apt ]; then
+    apt-get update -y
+    apt-get upgrade -y
+else
+    dnf upgrade -y
+fi
 
 # 基本ツールインストール
 echo "[2/7] Installing essential tools..."
-apt-get install -y \
-    curl \
-    wget \
-    git \
-    vim \
-    nano \
-    htop \
-    tree \
-    jq \
-    bc \
-    unzip \
-    zip \
-    tar \
-    gzip \
-    ca-certificates \
-    gnupg \
-    lsb-release \
-    software-properties-common \
-    uuid-runtime \
-    build-essential \
-    apt-transport-https \
-    dnsutils \
-    iputils-ping \
-    net-tools
+if [ "$PKG_MANAGER" = apt ]; then
+    apt-get install -y \
+        curl \
+        wget \
+        git \
+        vim \
+        nano \
+        htop \
+        tree \
+        jq \
+        bc \
+        unzip \
+        zip \
+        tar \
+        gzip \
+        ca-certificates \
+        gnupg \
+        lsb-release \
+        uuid-runtime \
+        build-essential \
+        apt-transport-https \
+        bind9-dnsutils \
+        iputils-ping \
+        net-tools \
+        e2fsprogs
+else
+    # curl は AMI 同梱の curl-minimal を使う (curl パッケージは競合する)。
+    # wget は AL2027 のリポジトリに無いため入れない。
+    dnf install -y \
+        git \
+        vim-enhanced \
+        nano \
+        htop \
+        tree \
+        jq \
+        bc \
+        unzip \
+        zip \
+        tar \
+        gzip \
+        ca-certificates \
+        gcc \
+        gcc-c++ \
+        make \
+        bind-utils \
+        iputils \
+        net-tools \
+        util-linux \
+        e2fsprogs \
+        policycoreutils-python-utils
+fi
 
 # データボリュームのマウント
 # AMI 更新でルートボリュームが作り直されても残すデータ (~/work・Docker・~/.gitconfig) を置く。
@@ -58,13 +123,19 @@ echo "[3/7] Mounting data volume..."
 DATA_VOLUME_ID="${data_volume_id}"
 # shellcheck disable=SC2154 # 同上
 WORKSTATION_USER="${username}"
+# shellcheck disable=SC2154 # 同上 (os-images.json の login_user)
+DEFAULT_USER="${login_user}"
 # user-data はインスタンスで 1 回しか走らないため、直した後は作り直して走らせ直すしかない
 print_recreate_hint() {
     echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
 }
 DATA_MOUNT=/data
-DEFAULT_USER=$(id -nu 1000)
-DEFAULT_HOME=$(getent passwd "$DEFAULT_USER" | cut -d: -f6)
+# 既定ユーザーは cloud-init が user-data より前に作る
+if ! DEFAULT_PASSWD=$(getent passwd "$DEFAULT_USER"); then
+    echo "ERROR: login user '$DEFAULT_USER' does not exist. Fix login_user for this OS in opentofu/modules/workstation/os-images.json." >&2
+    exit 1
+fi
+DEFAULT_HOME=$(echo "$DEFAULT_PASSWD" | cut -d: -f6)
 
 # アタッチはインスタンス起動後に行われるため、デバイスが現れるまで待つ。
 # Nitro は NVMe シリアル (ボリューム ID からハイフンを除いたもの)、Xen は /dev/xvdf で見える。
@@ -125,6 +196,12 @@ for dir in work docker containerd; do
         fi
     fi
 done
+
+# 持ち主は UID で決まる。OS を変えて既定ユーザーの UID が変わったときは、新しいユーザーに合わせる
+# (/data/git は git の設定の所で毎回そろえる)
+if [ "$(stat -c %u "$DATA_MOUNT/work")" != "$(id -u "$DEFAULT_USER")" ]; then
+    chown -R "$DEFAULT_USER:" "$DATA_MOUNT/work"
+fi
 
 # containerd image store (Docker 29 以降の既定) は /var/lib/docker とは別に
 # /var/lib/containerd へイメージを置くため、両方をデータボリュームに向ける
@@ -195,16 +272,60 @@ chown -h "$DEFAULT_USER:" "$DEFAULT_HOME/.gitconfig"
 
 # Dockerインストール
 echo "[4/7] Installing Docker..."
-if ! command -v docker &> /dev/null; then
-    # Docker公式インストールスクリプトを使用
-    curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-    sh /tmp/get-docker.sh
-    rm -f /tmp/get-docker.sh
+# GitHub の docker/<repo> の最新リリースから CLI プラグインを入れる。
+# 本体と checksums.txt を同じタグから取り、sha256 が合わなければ (行が無いときも) set -e で止める
+install_cli_plugin() {
+    local repo=$1 asset_pattern=$2 name=$3 tag asset dir
+    tag=$(curl -fsSL "https://api.github.com/repos/docker/$repo/releases/latest" | jq -r .tag_name)
+    if [ -z "$tag" ] || [ "$tag" = null ]; then
+        echo "ERROR: could not read the latest release tag of docker/$repo from the GitHub API (rate limit or network). Recreate the instance to retry." >&2
+        exit 1
+    fi
+    asset=$(echo "$asset_pattern" | sed "s/TAG/$tag/")
+    dir=$(mktemp -d)
+    curl -fsSL "https://github.com/docker/$repo/releases/download/$tag/$asset" -o "$dir/$asset"
+    curl -fsSL "https://github.com/docker/$repo/releases/download/$tag/checksums.txt" -o "$dir/checksums.txt"
+    (cd "$dir" && grep " \*$asset\$" checksums.txt | sha256sum -c -)
+    install -D -m 0755 "$dir/$asset" "/usr/local/lib/docker/cli-plugins/$name"
+    rm -rf "$dir"
+}
 
-    # Dockerサービス有効化（通常は自動で有効化されるが念のため）
-    systemctl enable docker
-    systemctl start docker
+if ! command -v docker &> /dev/null; then
+    if [ "$PKG_MANAGER" = apt ]; then
+        # イメージの置き場所を containerd image store に固定する。OS を変えて /var/lib/docker に
+        # 既存の overlay2 データがあると、既定でも overlay2 に倒れるため明示する。
+        # LIMIT: docker 29.9.2 はこの鍵を「既定なので不要」と warning にする。廃止されて dockerd が起動しなくなったら、置き場所を固定する別の手段に替える
+        mkdir -p /etc/docker
+        echo '{"features": {"containerd-snapshotter": true}}' > /etc/docker/daemon.json
+        # Docker公式インストールスクリプトを使用
+        curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+        sh /tmp/get-docker.sh
+        rm -f /tmp/get-docker.sh
+    else
+        # Amazon Linux は公式スクリプト非対応のため OS 同梱の docker を使う。
+        # Compose / buildx プラグインは同梱されないので GitHub の最新リリースを入れる
+        dnf install -y docker
+        install_cli_plugin compose docker-compose-linux-x86_64 docker-compose
+        install_cli_plugin buildx buildx-TAG.linux-amd64 docker-buildx
+    fi
 fi
+
+# SELinux 有効時 (Amazon Linux。AL2027 は enforcing が既定) は、データボリューム上のファイルに
+# 本来のパスと同じラベルを付ける。付けないと Docker やログインユーザーがアクセスを拒否される。
+# 真似る元の /var/lib/docker・/var/lib/containerd の規則は container-selinux (docker の依存) が
+# 入れるため、Docker を入れた後・起動する前に付ける。
+# LIMIT: インスタンス作成のたびに /data 全体を再ラベルする。ファイル数が増えて起動が遅くなったら対象を絞る
+if command -v selinuxenabled &> /dev/null && selinuxenabled; then
+    semanage fcontext -a -e "$DEFAULT_HOME/work" "$DATA_MOUNT/work"
+    semanage fcontext -a -e /var/lib/docker "$DATA_MOUNT/docker"
+    semanage fcontext -a -e /var/lib/containerd "$DATA_MOUNT/containerd"
+    # git はロックを rename で置き換えるので、書くたびに新しい inode ができ、ラベルは親から受け継がれる。
+    # そのためファイルではなく /data/git のディレクトリを、ホームのディレクトリと等価にする
+    semanage fcontext -a -e "$DEFAULT_HOME" "$DATA_MOUNT/git"
+    restorecon -R "$DATA_MOUNT"
+fi
+
+systemctl enable --now docker
 
 # デフォルトユーザーをdockerグループに追加
 usermod -aG docker "$DEFAULT_USER"
@@ -227,10 +348,12 @@ fi
 echo "AWS CLI version:"
 aws --version
 
-# sudoヘルプメッセージを非表示にする
+# sudoヘルプメッセージを非表示にする (Ubuntu のみ表示される)
 echo "[6/7] Configuring user environment..."
-touch "$DEFAULT_HOME/.sudo_as_admin_successful"
-chown "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/.sudo_as_admin_successful"
+if [ "$ID" = ubuntu ]; then
+    touch "$DEFAULT_HOME/.sudo_as_admin_successful"
+    chown "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/.sudo_as_admin_successful"
+fi
 
 # タイムゾーン設定（日本時間）
 echo "[7/7] Setting timezone and swap space..."

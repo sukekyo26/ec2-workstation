@@ -23,6 +23,17 @@ variable "subnet_id" {
   type        = string
 }
 
+variable "os" {
+  description = "Workstation OS (a key of os-images.json)"
+  type        = string
+
+  # workstation-config.schema.json を通さずに apply したときも、分かる文で止める
+  validation {
+    condition     = contains(keys(jsondecode(file("${path.module}/os-images.json"))), var.os)
+    error_message = "os must be one of: ${join(", ", sort(keys(jsondecode(file("${path.module}/os-images.json")))))}."
+  }
+}
+
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
@@ -54,7 +65,7 @@ variable "data_volume_type" {
 }
 
 variable "user_data_template" {
-  description = "Path to the user data script template (rendered with data_volume_id)"
+  description = "Path to the user data script template (rendered with data_volume_id, username and login_user)"
   type        = string
 }
 
