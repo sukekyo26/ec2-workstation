@@ -18,13 +18,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
-      - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: 24
+      - name: Install jv
+        run: scripts/install-jv.sh
 
       - name: Validate against JSON Schema
-        run: npx --yes ajv-cli@5 validate -s workstation-config.schema.json -d workstation-config.json
+        run: scripts/validate-config.sh
+
+      # The script tests use a fake jv, so check here that the real jv rejects a broken config and
+      # a misspelled schema keyword (which jv alone would ignore). Each copy gets the jv installed above;
+      # it must not download its own
+      - name: Check the real jv rejects a broken config and schema typos
+        run: |
+          shopt -s inherit_errexit
+          jv=$(bash -c '. scripts/lib/tofu-common.sh; jv_path')
+          # copy <jq filter for the config> <jq filter for the schema>: a repository copy with the jv
+          copy() {
+            local dir
+            dir=$(mktemp -d)
+            cp -R scripts schemas "$dir/"
+            jq "$1" workstation-config.json > "$dir/workstation-config.json"
+            jq "$2" workstation-config.schema.json > "$dir/workstation-config.schema.json"
+            install -D "$jv" "$dir/${jv#"$PWD/"}"
+            echo "$dir"
+          }
+          # expect <dir> <line>...: validate-config.sh fails with rc=1 and prints every line
+          expect() {
+            local dir=$1 out rc=0
+            shift
+            out=$("$dir/scripts/validate-config.sh" 2>&1) || rc=$?
+            echo "$out"
+            [ "$rc" = 1 ]
+            for line in "$@"; do
+              grep -qF -- "$line" <<< "$out"
+            done
+          }
+          expect "$(copy '.autoStopConfig.cpuEvaluationMinutes = 180 | .users[0].username = "default"' .)" \
+            "- at '/autoStopConfig/cpuEvaluationMinutes'" "- at '/users/0/username'"
+          typo="has a keyword that JSON Schema draft-07 does not know"
+          expect "$(copy . '.properties.autoStopConfig.properties.cpuEvaluationMinutes |= (.maximun = .maximum | del(.maximum))')" \
+            "- at '/properties/autoStopConfig/properties/cpuEvaluationMinutes': additional properties 'maximun' not allowed" "$typo"
+          expect "$(copy . '.properties.users.items.properties.username |= (.patern = .pattern | del(.pattern))')" \
+            "- at '/properties/users/items/properties/username': additional properties 'patern' not allowed" "$typo"
+          expect "$(copy . '.properties.users |= (.itmes = .items | del(.items))')" \
+            "- at '/properties/users': additional properties 'itmes' not allowed" "$typo"
 
       # The EC2 limit is 16 KB before base64; checking the base64 length leaves headroom for
       # the gzip -9 vs base64gzip difference and the template expansion
@@ -68,6 +104,9 @@ jobs:
 
       - name: Test deploy/destroy scripts with a fake tofu
         run: scripts/tests/tofu-deploy.test.sh
+
+      - name: Test install-jv.sh with a fake curl
+        run: scripts/tests/install-jv.test.sh
 
   gitleaks:
     name: Gitleaks

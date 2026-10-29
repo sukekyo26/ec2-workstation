@@ -2,3 +2,6 @@
 .terraform/
 *.tfstate
 *.tfstate.*
+
+# scripts/install-jv.sh が取る道具
+.tools/

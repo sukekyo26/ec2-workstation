@@ -1,6 +1,6 @@
 # リポジトリルートの workstation-config.json を読み込み、各ルート (stacks/*) に渡す。
 # 設定の仕様（必須項目・型・値域）は workstation-config.schema.json が唯一の定義で、
-# CI (ajv-cli) と `just validate-config` が強制する。ここでは検証・デフォルト適用を行わず、
+# `scripts/validate-config.sh`（CI・just・deploy の前）が強制する。ここでは検証・デフォルト適用を行わず、
 # per-user override のマージと、ルートの間で共有する名前の組み立てのみ行う。
 locals {
   raw_config = jsondecode(file("${path.module}/../../../workstation-config.json"))

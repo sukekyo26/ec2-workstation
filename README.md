@@ -247,6 +247,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
 | OpenTofu | 1.10+ | [インストールガイド](https://opentofu.org/docs/intro/install/) |
+| jv（設定の検証） | v6.0.3（`scripts/lib/tofu-common.sh` の `JV_VERSION`） | `./scripts/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
 
 ### AWS環境
 
@@ -259,7 +260,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
-- デプロイする環境に bash・jq・OpenTofu・AWS CLI（`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` が使う）
+- デプロイする環境に bash・jq・OpenTofu・AWS CLI（`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` が使う）と jv（`scripts/install-jv.sh` で入れる。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が設定の検証に使う）
 
 ---
 
@@ -321,7 +322,7 @@ cd ec2-workstation
 
 #### 設定項目
 
-設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CI でスキーマ検証されます。ローカルから apply する場合は事前に `just validate-config`（`just` と Node.js が必要）で検証してください。
+設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、`scripts/validate-config.sh`（jv）で検証されます。CI・`just validate-config` のほか、`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` も tofu を呼ぶ前に検証し、違反があれば何もせずに止まります。jv は `./scripts/install-jv.sh` で入れます。スキーマを書き換えるときの書き間違い（`maximun` など draft-07 に無いキーワード）は jv が黙って無視するので、先にスキーマそのものを `schemas/draft-07-strict.json`（draft-07 のメタスキーマに `additionalProperties: false` を足した写し）で見て止めます。
 
 > ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のリソースを削除してください。
 
@@ -396,9 +397,10 @@ export TF_STATE_BUCKET=<your-state-bucket>
 ```
 
 - `scripts/tofu-init.sh workstations <username>` は、その人の workspace を選びます（無ければ作る）。`workstation-config.json` にも state にも無い名前（打ち間違い）では止まります。設定にいない名前の workspace（default を含む）では、plan・apply が止まります
+- `scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` は、`workstation-config.json` がスキーマに合わなければ止まります。手で直す道（設定から消えた人の workspace を選んで `tofu destroy` する、1 人分を `-replace` で作り直す、など）も同じなので、直したい人と関係の無い違反でも、先に設定の違反を直してください。`scripts/tofu-destroy.sh`（全部を消す）は検証しません
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
-- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意して `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
+- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
 - VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
@@ -610,14 +612,17 @@ ec2-workstation/
 │   ├── tofu-init.sh              # stacks/<stack> の init（state の bucket・key を決める）
 │   ├── tofu-deploy.sh            # デプロイ（network → workstations）
 │   ├── tofu-destroy.sh           # 削除（workstations → network）
-│   ├── lib/                      # 上の 3 つが読む共通の部品
-│   ├── tests/                    # 上の 3 つのテスト（偽の tofu で順番と止まり方を見る）
+│   ├── validate-config.sh        # workstation-config.json をスキーマで検証（jv）
+│   ├── install-jv.sh             # jv を .tools/ に取る
+│   ├── lib/                      # 上のスクリプトが読む共通の部品
+│   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl で順番と止まり方を見る）
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
 │   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
 │   ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
 │   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
 │   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
 │   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
+├── schemas/                        # スキーマの書き間違いを断る、draft-07 の厳しいメタスキーマ（とその出典のライセンス）
 ├── workstation-config.json         # ユーザー・プロジェクト設定
 └── workstation-config.schema.json  # 設定ファイルのJSONスキーマ
 ```

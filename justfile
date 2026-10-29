@@ -8,9 +8,9 @@ default:
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
 ci: validate-config check-os-images check-user-data-size tofu-check scripts-test shellcheck shfmt-check pwsh-check gitleaks-scan
 
-# workstation-config を JSON Schema で検証
+# workstation-config を JSON Schema で検証（jv は scripts/install-jv.sh で入れる）
 validate-config:
-    npx --yes ajv-cli@5 validate -s workstation-config.schema.json -d workstation-config.json
+    scripts/validate-config.sh
 
 # スキーマの os の enum と os-images.json のキーが一致するか（CI と同じ比較）
 check-os-images:
@@ -36,9 +36,10 @@ tofu-check:
         tofu -chdir="$stack" validate
     done
 
-# デプロイ・削除のスクリプトの順番と止まり方を、偽の tofu で確かめる（CI と同じ）
+# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、install-jv.sh を偽の curl で確かめる（CI と同じ）
 scripts-test:
     scripts/tests/tofu-deploy.test.sh
+    scripts/tests/install-jv.test.sh
 
 # シェルスクリプトの静的解析
 shellcheck:

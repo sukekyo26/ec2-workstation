@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh が読む共通の部品。
+# tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh・validate-config.sh・install-jv.sh (と、それを呼ぶ CI・just・テスト) が読む共通の部品。
+# tofu・AWS の認証が無い所 (CI の検証・jv の取得) でも読まれるので、トップレベルで tofu・aws・jq を呼ばない。
 # set -e の下で読まれるので、関数は `[ ... ] && cmd` の形で終わらせない (条件が偽のとき rc=1 で呼び出し元が止まる)。
 # if・&&・|| の条件で呼んだ関数の中では set -e が効かないので、失敗を見落とせない関数は条件で呼ばない
 
@@ -11,6 +12,9 @@ CONFIG_FILE="$REPO_ROOT/workstation-config.json"
 STACKS_DIR="$REPO_ROOT/opentofu/stacks"
 # state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)
 STATE_REGION=ap-northeast-1
+# 版を上げるときは jv_sha256 の 4 つも変える (GitHub のリリースの添付ファイルの sha256)。
+# jv --version は版を返さないので、置き場所に版を入れて見分ける
+JV_VERSION=v6.0.3
 
 die() {
     echo "ERROR: $*" >&2
@@ -19,6 +23,83 @@ die() {
 
 log() {
     echo "==> $*" >&2
+}
+
+jv_path() {
+    echo "$REPO_ROOT/.tools/jv-$JV_VERSION/jv"
+}
+
+# jv_sha256 <os>-<arch>: JV_VERSION の tarball の sha256
+jv_sha256() {
+    case "$1" in
+        linux-amd64) echo 36e9ab8481cc8e2cb27c8336decc9abdcbd606b05792ca88d6188e01ec28766b ;;
+        linux-arm64) echo a9b06c4d73bf3cbe9b3224aacef5329d96267c27febac1152db1ff1659550122 ;;
+        darwin-amd64) echo f41e3541d0ba2b5f628d1a04701db3acefcf6aa1feb5c28e10f446dfc584952d ;;
+        darwin-arm64) echo d5962c5a7abe0c82be6b69bbed6bd5c9883462f13e0353ddca9878c46ec6ed6f ;;
+        *) die "no jv $JV_VERSION for $1" ;;
+    esac
+}
+
+file_sha256() {
+    if command -v sha256sum > /dev/null; then
+        sha256sum "$1" | cut -d' ' -f1
+    elif command -v shasum > /dev/null; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        die "install sha256sum or shasum to check the download"
+    fi
+}
+
+# workstation-config.json をスキーマで検証する。CI・just・tofu-deploy.sh・tofu-init.sh はここを通る。
+# jv は知らないキーワードを黙って無視する (書き間違えた決まりが効かない) ので、先にスキーマそのものを
+# schemas/draft-07-strict.json (draft-07 のメタスキーマに additionalProperties: false を足したもの) で見る。
+# LIMIT: 見るのは draft-07 に無いキーワードだけ。ajv の strict の残り (strictTypes・strictRequired など、型の書き方の矛盾) は見ない
+# jv はどの失敗でも rc=1 を返すので、出力で案内を分ける: スキーマを読めない・コンパイルできないときは "schema <file>: failed"
+# (スキーマがメタスキーマに違反するときも - at '...' の行が出るので、先に見る)、設定の違反は - at '...' の行、ほかは設定を読めない
+validate_config() {
+    local jv out rc=0
+    jv=$(jv_path)
+    if [ ! -x "$jv" ]; then
+        die "jv $JV_VERSION is not installed at $jv. Install it with scripts/install-jv.sh"
+    fi
+
+    out=$("$jv" "$REPO_ROOT/schemas/draft-07-strict.json" "$REPO_ROOT/workstation-config.schema.json" 2>&1) || rc=$?
+    case $rc in
+        0) ;;
+        1)
+            echo "$out" >&2
+            if grep -q "^schema .*: failed$" <<< "$out"; then
+                die "could not load schemas/draft-07-strict.json"
+            fi
+            if grep -q "additional properties .* not allowed" <<< "$out"; then
+                die "workstation-config.schema.json has a keyword that JSON Schema draft-07 does not know (a typo?). jv ignores such keywords, so the rule would not apply"
+            fi
+            die "could not load workstation-config.schema.json (a missing file, broken JSON, or a schema that breaks the JSON Schema rules)"
+            ;;
+        *)
+            echo "$out" >&2
+            die "jv failed with exit code $rc"
+            ;;
+    esac
+
+    out=$("$jv" "$REPO_ROOT/workstation-config.schema.json" "$CONFIG_FILE" 2>&1) || rc=$?
+    case $rc in
+        0) log "workstation-config.json matches workstation-config.schema.json" ;;
+        1)
+            echo "$out" >&2
+            if grep -q "^schema .*: failed$" <<< "$out"; then
+                die "could not load workstation-config.schema.json (a missing file, broken JSON, or a schema that breaks the JSON Schema rules)"
+            fi
+            if grep -q "^ *- at '" <<< "$out"; then
+                die "workstation-config.json breaks the rules above. The rules and their reasons are in the descriptions of workstation-config.schema.json"
+            fi
+            die "could not read workstation-config.json (a missing file or broken JSON)"
+            ;;
+        *)
+            echo "$out" >&2
+            die "jv failed with exit code $rc"
+            ;;
+    esac
 }
 
 # 入口 (tofu-init.sh・tofu-deploy.sh・tofu-destroy.sh) が最初に 1 回だけ呼ぶ
