@@ -1,15 +1,3 @@
-*.js
-!jest.config.js
-*.d.ts
-node_modules
-
-# CDK asset staging directory
-.cdk.staging
-cdk.out
-
-# CDK context cache (アカウント固有の AMI/AZ キャッシュ)
-cdk.context.json
-
 # OpenTofu
 .terraform/
 *.tfstate

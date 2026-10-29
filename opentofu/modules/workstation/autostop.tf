@@ -1,4 +1,4 @@
-# 自動停止 (CDK: AutoStopConstruct と同等)
+# 自動停止
 # - CPU 低使用率が続いた場合: CloudWatch Alarm + EC2 stop アクション
 # - 毎日定時 (Asia/Tokyo): EventBridge Scheduler
 

@@ -1,6 +1,6 @@
-# workstation-config.json (リポジトリルート、CDK 実装と共有) を読み込む。
+# リポジトリルートの workstation-config.json を読み込む。
 # 設定の仕様（必須項目・型・値域）は workstation-config.schema.json が唯一の定義で、
-# CDK 実行時 (ajv) と CI (ajv-cli) が強制する。ここでは検証・デフォルト適用を行わず、
+# CI (ajv-cli) と `just validate-config` が強制する。ここでは検証・デフォルト適用を行わず、
 # per-user override のマージのみ行う。
 locals {
   raw_config = jsondecode(file("${path.module}/../workstation-config.json"))
@@ -13,7 +13,7 @@ locals {
   auto_stop_config        = local.raw_config.autoStopConfig
 
   # ユーザー名をキーにすることで、ユーザーの追加・削除が他ユーザーの
-  # リソースに影響しない (CDK のスタック分割と同等の独立性)。
+  # リソースに影響しない。
   # try() はオプションキー (instanceConfig / enableElasticIp) の欠落時アクセス用。
   users = {
     for user in local.raw_config.users : user.username => {

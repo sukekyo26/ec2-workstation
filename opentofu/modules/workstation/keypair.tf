@@ -1,7 +1,7 @@
-# SSH キーペア (CDK: ec2.KeyPair と同等)
+# SSH キーペア
 # 秘密鍵を SSM Parameter Store の /ec2/keypair/{key_pair_id} に保存する。
-# このパスは scripts/setup-remote-ssh.sh が秘密鍵取得に使う契約のため、
-# CDK (AWS マネージドキーペア) と同一パスを再現する。
+# このパスは scripts/setup-remote-ssh.sh が秘密鍵取得に使う契約
+# (AWS マネージドキーペアと同じ命名規則)。
 
 resource "tls_private_key" "ssh" {
   algorithm = "ED25519"

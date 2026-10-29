@@ -1,6 +1,6 @@
 # EC2 Workstation
 
-AWS CDK または OpenTofu を使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。両実装は同じインフラを作成するため、好みの IaC ツールを選択できます。
+OpenTofu を使用して、EC2上にセキュアなLinux開発環境を構築するプロジェクトです。
 
 ## 📋 プロジェクト概要
 
@@ -9,7 +9,7 @@ AWS CDK または OpenTofu を使用して、EC2上にセキュアなLinux開発
 - **SessionManager経由のセキュアな接続** - SSH(22)ポートを開放せず、IAM認証でセキュアにアクセス
 - **チーム開発対応** - 設定ファイル（`workstation-config.json`）でユーザーを定義し、各メンバーに独立したEC2環境を提供
 - **DevContainer対応** - Docker環境がプリインストールされており、VS Code DevContainerでの開発が可能
-- **Infrastructure as Code** - AWS CDK または OpenTofu による再現可能なインフラ構築（両実装は同じ設定ファイルを共有）
+- **Infrastructure as Code** - OpenTofu による再現可能なインフラ構築
 
 ### 想定ユースケース
 
@@ -59,21 +59,21 @@ flowchart TB
 
 ```mermaid
 flowchart LR
-    subgraph NetworkStack["📦 Network Stack (共有)"]
+    subgraph NetworkStack["📦 network モジュール (共有)"]
         VPC["VPC"]
         Subnet["Public Subnet"]
         IGW["Internet Gateway"]
         RT["Route Table"]
     end
 
-    subgraph WorkstationA["📦 Workstation Stack (User A)"]
+    subgraph WorkstationA["📦 workstation モジュール (User A)"]
         EC2A["EC2 Instance"]
         SGA["Security Group"]
         IAMA["IAM Role"]
         KPA["SSH Key Pair"]
     end
 
-    subgraph WorkstationB["📦 Workstation Stack (User B)"]
+    subgraph WorkstationB["📦 workstation モジュール (User B)"]
         EC2B["EC2 Instance"]
         SGB["Security Group"]
         IAMB["IAM Role"]
@@ -90,12 +90,11 @@ flowchart LR
 
 | カテゴリ | 技術 | 説明 |
 |---------|------|------|
-| IaC | AWS CDK (TypeScript) / OpenTofu | どちらか好みのツールを選択して利用 |
+| IaC | OpenTofu | 宣言的なインフラ構築 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
 | インスタンス | EC2（タイプは `workstation-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
 | ストレージ | EBS gp3 / gp2（サイズ・タイプは `workstation-config.json` で指定） | 暗号化有効、高速I/O |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
-| パッケージ管理 | pnpm | 高速な依存関係管理 |
 
 ### Public Subnet採用について
 
@@ -196,14 +195,7 @@ flowchart TB
 | AWS CLI v2 | **2.32.0以降推奨** | [インストールガイド](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) |
 | Session Manager Plugin | 最新 | [インストールガイド](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html) |
 
-### 必要なツール（CDK を使う場合）
-
-| ツール | バージョン | インストール |
-|--------|-----------|-------------|
-| Node.js | 24+ | [ダウンロード](https://nodejs.org/) |
-| pnpm | 10+ | `npm install -g pnpm` |
-
-### 必要なツール（OpenTofu を使う場合）
+### 必要なツール（デプロイ）
 
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
@@ -216,8 +208,7 @@ flowchart TB
   - IAMユーザーの場合：`SignInLocalDevelopmentAccess` + デプロイ権限 + EC2起動権限
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
-- CDK を使う場合：CDK Bootstrap済み（`cdk bootstrap`）
-- OpenTofu を使う場合：state 保存用 S3 バケット（作成手順は [opentofu/README.md](opentofu/README.md)）
+- state 保存用 S3 バケット（作成手順は [opentofu/README.md](opentofu/README.md)）
 
 ---
 
@@ -274,9 +265,9 @@ cd ec2-workstation
 
 #### 設定項目
 
-設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CDK 実行時と CI でスキーマ検証されます（違反があるとデプロイ前にエラーになります）。
+設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、CI でスキーマ検証されます。ローカルから apply する場合は事前に `just validate-config`（`just` と Node.js が必要）で検証してください。
 
-> ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のスタック/リソースを削除してください。
+> ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のリソースを削除してください。
 
 | 項目 | 必須 | 説明 |
 |------|:----:|------|
@@ -327,32 +318,6 @@ aws configure
 
 ### 4. デプロイ
 
-CDK と OpenTofu のどちらでも同じインフラを構築できます。好みのツールを選んでください。
-両実装は `workstation-config.json`・user-data スクリプト・運用スクリプトを共有しているため、デプロイ後のワークフロー（Remote-SSH 設定、自動起動・停止）はどちらを選んでも同一です。
-
-> ⚠️ 同一アカウント・同一 `projectName`/`environment` に CDK と OpenTofu の**両方を apply しないでください**（同じ物理リソース名を使用するため衝突します）。
-
-#### CDK でデプロイする場合
-
-```bash
-cd cdk
-
-# 依存関係のインストール
-pnpm install
-
-# CDK Bootstrap（初回のみ）
-pnpm cdk bootstrap
-
-# 全スタックをデプロイ
-pnpm cdk deploy --all
-
-# 特定のスタックのみデプロイ
-pnpm cdk deploy ec2-workstation-dev-network       # ネットワークのみ
-pnpm cdk deploy ec2-workstation-dev-developer1    # 特定ユーザーのみ
-```
-
-#### OpenTofu でデプロイする場合
-
 ```bash
 cd opentofu
 
@@ -371,16 +336,6 @@ state の保護（秘密鍵が state に記録されるため重要）を含む�
 ### 5. デプロイ確認
 
 デプロイ完了後、インスタンスIDと接続コマンドが出力されます。
-
-**CDK の場合**（各スタックの Outputs）:
-
-```
-Outputs:
-ec2-workstation-dev-developer1.InstanceId = i-0123456789abcdef0
-ec2-workstation-dev-developer1.ConnectCommand = aws ssm start-session --target i-0123456789abcdef0
-```
-
-**OpenTofu の場合**:
 
 ```bash
 tofu output workstations
@@ -489,23 +444,6 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 
 ## 🗑️ インフラの削除
 
-**CDK の場合**:
-
-```bash
-cd cdk
-
-# 全スタックを削除
-pnpm cdk destroy --all
-
-# 特定のスタックのみ削除
-pnpm cdk destroy ec2-workstation-dev-developer1
-
-# ネットワークスタックは最後に削除（依存関係のため）
-pnpm cdk destroy ec2-workstation-dev-network
-```
-
-**OpenTofu の場合**:
-
 ```bash
 cd opentofu
 
@@ -572,34 +510,15 @@ tofu destroy
 
 ```
 ec2-workstation/
-├── cdk/                          # AWS CDK 実装
-│   ├── bin/
-│   │   └── ec2-workstation.ts        # CDKアプリエントリポイント
-│   ├── lib/
-│   │   ├── constructs/
-│   │   │   ├── vpc-construct.ts      # VPC構成
-│   │   │   ├── security-construct.ts # セキュリティグループ・IAM
-│   │   │   ├── ec2-construct.ts      # EC2インスタンス
-│   │   │   └── auto-stop-construct.ts # 自動停止（CPU監視・定時停止）
-│   │   ├── stacks/
-│   │   │   ├── network-stack.ts      # 共有ネットワークスタック
-│   │   │   └── workstation-stack.ts    # 個人用ワークステーションスタック
-│   │   └── config/
-│   │       └── workstation-config.ts   # 設定ファイル読み込み
-│   ├── test/                         # テストコード
-│   ├── cdk.json                      # CDK設定
-│   ├── package.json
-│   ├── pnpm-lock.yaml
-│   └── tsconfig.json
-├── opentofu/                     # OpenTofu 実装（CDK と同じインフラ）
+├── opentofu/                     # OpenTofu 実装
 │   ├── modules/
 │   │   ├── network/              # VPC・サブネット・IGW・Flow Logs
 │   │   └── workstation/            # SG・IAM・EC2・キーペア・自動停止
-│   ├── locals.tf                 # workstation-config.json 読み込み（CDK と共有）
+│   ├── locals.tf                 # workstation-config.json 読み込み
 │   ├── main.tf
 │   └── README.md                 # OpenTofu 利用ガイド
 ├── shared/
-│   └── user-data.sh              # EC2初期化スクリプト（IaCツール間で共有）
+│   └── user-data.sh              # EC2初期化スクリプト
 ├── scripts/
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
 │   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
@@ -616,9 +535,6 @@ ec2-workstation/
 ## 🧪 テスト
 
 ```bash
-# CDK 実装のテスト（Jest）
-cd cdk && pnpm test
-
 # OpenTofu 実装の静的チェック
 tofu -chdir=opentofu fmt -check -recursive
 tofu -chdir=opentofu validate
@@ -629,6 +545,5 @@ tofu -chdir=opentofu validate
 ## 📚 参考資料
 
 - [VS Code Remote - SSH](https://code.visualstudio.com/docs/remote/ssh)
-- [AWS CDK Documentation](https://docs.aws.amazon.com/cdk/v2/guide/home.html)
 - [OpenTofu Documentation](https://opentofu.org/docs/)
 - [AWS Systems Manager Session Manager](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager.html)

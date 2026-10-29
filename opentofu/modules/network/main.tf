@@ -1,11 +1,11 @@
-# 共有ネットワーク (CDK: NetworkStack / VpcConstruct と同等)
+# 共有ネットワーク
 # - Public Subnet のみ・単一 AZ・NAT Gateway なし (コスト削減)
 # - VPC Flow Logs (REJECT のみ) でセキュリティ監査対応
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}"
 
-  # VPC CIDR のプレフィックス長に関わらず /24 を切り出す (CDK の cidrMask: 24 と同等)
+  # VPC CIDR のプレフィックス長に関わらず /24 を切り出す
   public_subnet_cidr = cidrsubnet(var.vpc_cidr, 24 - tonumber(split("/", var.vpc_cidr)[1]), 0)
 }
 
