@@ -422,7 +422,7 @@ GitHub を使わず、AWS の中だけで deploy したいときは、このリ�
 
 | 段 | 中身 |
 |----|------|
-| Check | `just ci`（GitHub Actions の CI と同じ検査。PowerShell の検査だけは飛ばします）。落ちたら plan に進みません |
+| Check | `just ci`（GitHub Actions の CI と同じ検査。PowerShell は下の「PowerShell の検査」）。落ちたら plan に進みません |
 | NetworkPlan | network の plan |
 | NetworkApprove・NetworkApply | network に変更があるときだけ: 承認 → 保存した plan の apply。変更が無ければ飛ばします |
 | UsersPlan | 全員の plan と、設定から消えた人の destroy の plan |
@@ -468,7 +468,8 @@ HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の�
 - 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます
 - plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプラインのロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
 - 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
-- パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
+- PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます
+- パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks・PowerShell 7・PSScriptAnalyzer）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
 - スタックを消すときは、先にアーティファクトのバケットを空にしてください。KMS のキーは消す予約から 7 日以上たってから消えます（その間も月額の料金がかかります）。CodeCommit のリポジトリは残るので、要らなければ手で消してください
 
 ### 5. デプロイ確認
@@ -678,7 +679,7 @@ ec2-workstation/
 │   ├── validate-config.sh        # workstation-config.json をスキーマで検証（jv）
 │   ├── install-jv.sh             # jv を .tools/ に取る
 │   ├── install-shfmt.sh          # shfmt を .tools/ に取る（開発用）
-│   ├── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh  # CodePipeline の CodeBuild が使う道具を .tools/ に取る
+│   ├── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh・install-pwsh.sh・install-psscriptanalyzer.sh  # CodePipeline の CodeBuild が使う道具を .tools/ に取る
 │   ├── format-shell.sh           # シェルスクリプトの書式を shfmt で確かめる・直す（対象の一覧もここ）
 │   ├── lib/                      # 共通の部品（base.sh: die・log など、tools.sh: 版を固定した道具、tofu-common.sh: deploy の部品）
 │   ├── tests/                    # 上のスクリプトのテスト（偽の tofu・curl・shfmt で順番と止まり方を見る）
@@ -702,7 +703,7 @@ ec2-workstation/
 just ci
 ```
 
-- PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします）、5.1 で通らない書き方は CI で見ます
+- PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします。`scripts/install-psscriptanalyzer.sh` で入れた PSScriptAnalyzer も読みます）、5.1 の Parser でしか分からない誤りは CI で見ます
 - シェルスクリプト（`*.sh` と user-data の `*.sh.tftpl`）の書式は、CI の `Shell format` のジョブが shfmt で確かめます。書式の決まりは `.editorconfig` にあり、対象のファイルは `scripts/format-shell.sh` が決めます。手元では、`./scripts/install-shfmt.sh` で版を固定した shfmt（v3.14.1、`scripts/lib/tools.sh` の `SHFMT_VERSION`）を `.tools/` に入れてから、`just shfmt-check`（直すときは `just shfmt-fix`）を使います。PATH にある shfmt は使いません（版が違うと書式が変わりうるため）
 
 ---
