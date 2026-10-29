@@ -134,11 +134,13 @@ resource "aws_instance" "this" {
   associate_public_ip_address = true
   # cloud-init は同じインスタンスでは user-data を走らせ直さないため、変わったら作り直して反映する
   user_data_replace_on_change = true
-  user_data = templatefile(var.user_data_template, {
+  # EC2 の user-data は 16,384 バイトまで。cloud-init は gzip を見分けて展開するので、gzip して渡す
+  # LIMIT: gzip+base64 で 16KB まで (今は約 8.7KB)。超えたら S3 から取る形に作り直す
+  user_data_base64 = base64gzip(templatefile(var.user_data_template, {
     data_volume_id = aws_ebs_volume.data.id
     username       = var.username
     login_user     = local.os_image.login_user
-  })
+  }))
 
   # IMDSv2 強制 (SSRF 対策)
   metadata_options {

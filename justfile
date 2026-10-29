@@ -5,7 +5,7 @@ default:
     @just --list
 
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
-ci: validate-config check-os-images tofu-check shellcheck shfmt-check gitleaks-scan
+ci: validate-config check-os-images check-user-data-size tofu-check shellcheck shfmt-check gitleaks-scan
 
 # workstation-config を JSON Schema で検証
 validate-config:
@@ -15,6 +15,13 @@ validate-config:
 check-os-images:
     #!/usr/bin/env bash
     diff <(jq -S '.definitions.os.enum | sort' workstation-config.schema.json) <(jq -S 'keys | sort' opentofu/modules/workstation/os-images.json)
+
+# user-data が EC2 の上限 (gzip+base64 で 16,384 バイト) に収まるか（CI と同じ比較）
+check-user-data-size:
+    #!/usr/bin/env bash
+    size=$(gzip -9 -c shared/user-data.sh | base64 -w0 | wc -c)
+    echo "user-data (gzip+base64): $size bytes"
+    [ "$size" -lt 16384 ]
 
 # OpenTofu のフォーマットチェックと validate
 tofu-check:

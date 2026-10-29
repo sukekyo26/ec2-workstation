@@ -197,7 +197,7 @@ flowchart TB
 | `~/.gitconfig` | データボリューム（`/data/git/config` へのシンボリックリンク） | 残る |
 | 上記以外（dotfiles、apt で入れたパッケージなど） | ルートボリューム | **消える** |
 
-- AMI が同じでも、user-data（[user-data.sh](shared/user-data.sh)）が変わった `apply` ではインスタンスが作り直されます（cloud-init は同じインスタンスでは user-data を走らせ直さないため）
+- AMI が同じでも、user-data（[user-data.sh](shared/user-data.sh)）が変わった `apply` ではインスタンスが作り直されます（cloud-init は同じインスタンスでは user-data を走らせ直さないため）。user-data は gzip して渡すので、`tofu plan` やコンソールでは中身が読めません。何が変わったかは git の差分で確かめてください
 - 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
 - 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは `tofu plan` で `aws_instance` が `-/+` になるかで確認できます
 - 新しい AMI が出ていれば、ユーザーの追加など**どの目的の `apply` でも全員のインスタンスが作り直されます**。作業中のメンバーがいるときは `tofu plan` で確認してから実行してください
