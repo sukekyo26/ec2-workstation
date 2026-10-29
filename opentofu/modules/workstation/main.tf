@@ -1,4 +1,4 @@
-# 個人用ワークステーション (CDK: WorkstationStack の Security/Ec2 construct と同等)
+# 個人用ワークステーション
 # - SG: 全インバウンド拒否、アウトバウンドは HTTPS/HTTP/DNS のみ
 # - SSM SessionManager 接続 (SSH ポート非開放)
 # - Ubuntu 24.04 LTS / EBS 暗号化 / IMDSv2 強制
@@ -160,8 +160,7 @@ resource "aws_instance" "this" {
   }
 
   lifecycle {
-    # AMI は初回 apply 時に解決し以後固定する (CDK の cdk.context.json
-    # キャッシュと同等の挙動。新 AMI 公開でインスタンスを再作成させない)
+    # AMI は初回 apply 時に解決し以後固定する (新 AMI 公開でインスタンスを再作成させない)
     ignore_changes = [ami]
   }
 }

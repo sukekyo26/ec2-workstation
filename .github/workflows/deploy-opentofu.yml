@@ -7,7 +7,7 @@ permissions:
   id-token: write
   contents: read
 
-# Serialize with the CDK deploy so two applies never run concurrently
+# Serialize with the destroy workflow so apply/destroy never run concurrently
 concurrency:
   group: aws-deploy
   cancel-in-progress: false

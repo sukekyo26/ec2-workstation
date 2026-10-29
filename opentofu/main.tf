@@ -25,7 +25,7 @@ module "workstation" {
   enable_elastic_ip = each.value.enable_elastic_ip
 
   cpu_threshold = local.auto_stop_config.cpuThreshold
-  # CloudWatch Alarm は 5 分周期のため、監視期間(分)を期間数に変換 (CDK と同じ)
+  # CloudWatch Alarm は 5 分周期のため、監視期間(分)を期間数に変換
   cpu_evaluation_periods = ceil(local.auto_stop_config.cpuEvaluationMinutes / 5)
   scheduled_stop_hour    = local.auto_stop_config.scheduledStopHour
   scheduled_stop_minute  = local.auto_stop_config.scheduledStopMinute

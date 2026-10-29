@@ -12,21 +12,6 @@ updates:
         patterns: ["*"]
     commit-message:
       prefix: "ci"
-  - package-ecosystem: "npm"
-    directory: "/cdk"
-    target-branch: "develop"
-    schedule:
-      interval: "weekly"
-    groups:
-      npm-dependencies:
-        patterns: ["*"]
-    commit-message:
-      prefix: "chore"
-    ignore:
-      # @types/node must track the Node.js runtime major (currently 24);
-      # bump manually when the runtime is upgraded
-      - dependency-name: "@types/node"
-        update-types: ["version-update:semver-major"]
   - package-ecosystem: "terraform"
     directory: "/opentofu"
     target-branch: "develop"
