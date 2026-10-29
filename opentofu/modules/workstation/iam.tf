@@ -1,6 +1,6 @@
-# ============================================================
-# IAM Role / Instance Profile
-# ============================================================
+# インスタンスの IAM ロール / インスタンスプロファイル
+# - SSM SessionManager で接続するための AmazonSSMManagedInstanceCore
+# - セッションログの書き込み
 
 data "aws_iam_policy_document" "instance_assume" {
   statement {

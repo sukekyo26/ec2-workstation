@@ -1,6 +1,6 @@
-# ============================================================
-# Security Group
-# ============================================================
+# セキュリティグループ
+# - 全インバウンド拒否 (接続は SSM SessionManager で、SSH ポートは開けない)
+# - アウトバウンドは HTTPS/HTTP/DNS のみ
 
 resource "aws_security_group" "this" {
   name        = "${local.resource_prefix}-sg"

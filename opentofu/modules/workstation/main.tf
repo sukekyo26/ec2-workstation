@@ -1,8 +1,7 @@
-# 個人用ワークステーション
-# - SG: 全インバウンド拒否、アウトバウンドは HTTPS/HTTP/DNS のみ
-# - SSM SessionManager 接続 (SSH ポート非開放)
-# - OS は workstation-config.json の os で選択 / EBS 暗号化 / IMDSv2 強制
-# - AMI はデプロイのたびに最新へ追従し、作業データはデータボリュームに分離して残す
+# 個人用ワークステーションの EC2 インスタンス
+# - OS は workstation-config.json の os で選び、AMI はデプロイのたびに最新へ追従する
+# - ルートボリューム暗号化 / IMDSv2 強制
+# - 作業データはデータボリューム (storage.tf) に置き、インスタンスの作り直しでも残す
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}-${var.username}"
