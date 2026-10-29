@@ -6,7 +6,7 @@ default:
     @just --list
 
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
-ci: validate-config check-os-images check-user-data-size tofu-check scripts-test shellcheck shfmt-check gitleaks-scan
+ci: validate-config check-os-images check-user-data-size tofu-check scripts-test shellcheck shfmt-check pwsh-check gitleaks-scan
 
 # workstation-config を JSON Schema で検証
 validate-config:
@@ -43,6 +43,16 @@ scripts-test:
 # シェルスクリプトの静的解析
 shellcheck:
     git ls-files {{ shell_files }} | xargs shellcheck --severity=error
+
+# PowerShell スクリプトの構文と PSScriptAnalyzer。手元の pwsh 7 での目安で、Windows PowerShell 5.1 での検査は CI で見る（pwsh が無ければ飛ばす）
+pwsh-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v pwsh > /dev/null; then
+        echo "skip pwsh-check: pwsh is not installed (CI checks with Windows PowerShell 5.1)"
+        exit 0
+    fi
+    pwsh -NoProfile -File scripts/tests/powershell-lint.ps1
 
 # シェルスクリプトのフォーマットチェック
 shfmt-check:

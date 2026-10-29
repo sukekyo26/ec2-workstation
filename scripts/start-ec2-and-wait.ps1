@@ -39,7 +39,7 @@ function Write-Stderr {
     $stderrWriter.WriteLine($Message)
 }
 
-function Write-Log {
+function Write-ScriptLog {
     param([string]$Message)
     Write-Stderr "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
 }
@@ -69,7 +69,7 @@ function Wait-SSMAgentReady {
         [int]$RetryIntervalSeconds = 5
     )
 
-    Write-Log "Waiting for SSM Agent to be ready..."
+    Write-ScriptLog "Waiting for SSM Agent to be ready..."
 
     for ($i = 1; $i -le $MaxRetries; $i++) {
         $pingStatus = & $awsCli ssm describe-instance-information `
@@ -79,11 +79,11 @@ function Wait-SSMAgentReady {
             --output text 2>&1
 
         if ($pingStatus -eq "Online") {
-            Write-Log "SSM Agent is online"
+            Write-ScriptLog "SSM Agent is online"
             return $true
         }
 
-        Write-Log "SSM Agent not ready yet (attempt $i/$MaxRetries, status: $pingStatus)"
+        Write-ScriptLog "SSM Agent not ready yet (attempt $i/$MaxRetries, status: $pingStatus)"
         Start-Sleep -Seconds $RetryIntervalSeconds
     }
 
@@ -128,11 +128,11 @@ try {
         exit 1
     }
 
-    Write-Log "Instance $InstanceId state: $state"
+    Write-ScriptLog "Instance $InstanceId state: $state"
 
     # インスタンスが停止中の場合は起動
     if ($state -eq "stopped") {
-        Write-Log "Starting instance $InstanceId..."
+        Write-ScriptLog "Starting instance $InstanceId..."
 
         $result = & $awsCli ec2 start-instances `
             --instance-ids $InstanceId `
@@ -143,7 +143,7 @@ try {
             exit 1
         }
 
-        Write-Log "Waiting for instance to be running..."
+        Write-ScriptLog "Waiting for instance to be running..."
 
         & $awsCli ec2 wait instance-running `
             --instance-ids $InstanceId `
@@ -157,22 +157,22 @@ try {
         # SSM Agentが接続されるまで待機
         Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
 
-        Write-Log "Instance is now running"
+        Write-ScriptLog "Instance is now running"
     }
     elseif ($state -eq "stopping") {
-        Write-Log "Instance is stopping, waiting for it to stop..."
+        Write-ScriptLog "Instance is stopping, waiting for it to stop..."
 
         & $awsCli ec2 wait instance-stopped `
             --instance-ids $InstanceId `
             --region $Region 2>&1
 
-        Write-Log "Starting instance $InstanceId..."
+        Write-ScriptLog "Starting instance $InstanceId..."
 
         & $awsCli ec2 start-instances `
             --instance-ids $InstanceId `
             --region $Region 2>&1
 
-        Write-Log "Waiting for instance to be running..."
+        Write-ScriptLog "Waiting for instance to be running..."
 
         & $awsCli ec2 wait instance-running `
             --instance-ids $InstanceId `
@@ -181,10 +181,10 @@ try {
         # SSM Agentが接続されるまで待機
         Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
 
-        Write-Log "Instance is now running"
+        Write-ScriptLog "Instance is now running"
     }
     elseif ($state -eq "pending") {
-        Write-Log "Instance is starting, waiting..."
+        Write-ScriptLog "Instance is starting, waiting..."
 
         & $awsCli ec2 wait instance-running `
             --instance-ids $InstanceId `
@@ -193,10 +193,10 @@ try {
         # SSM Agentが接続されるまで待機
         Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
 
-        Write-Log "Instance is now running"
+        Write-ScriptLog "Instance is now running"
     }
     elseif ($state -eq "running") {
-        Write-Log "Instance is already running, checking SSM Agent..."
+        Write-ScriptLog "Instance is already running, checking SSM Agent..."
         # 既に起動中でもSSM Agentが接続されていない可能性があるため確認
         Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
     }
