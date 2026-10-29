@@ -40,6 +40,7 @@ tofu-check:
 scripts-test:
     scripts/tests/tofu-deploy.test.sh
     scripts/tests/install-jv.test.sh
+    scripts/tests/start-ec2.test.sh
 
 # シェルスクリプトの静的解析
 shellcheck:
