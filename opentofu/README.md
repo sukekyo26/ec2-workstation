@@ -10,6 +10,8 @@
 
 ### State バケットの作成（初回のみ）
 
+state のバケットは `ap-northeast-1` に作ります（`scripts/lib/tofu-common.sh` の `STATE_REGION`）。デプロイ先のリージョン（`workstation-config.json` の `awsRegion`）とは別です。
+
 ```bash
 aws s3 mb s3://<your-state-bucket> --region ap-northeast-1
 aws s3api put-bucket-versioning \

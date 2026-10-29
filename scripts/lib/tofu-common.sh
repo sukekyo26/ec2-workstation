@@ -5,7 +5,7 @@
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CONFIG_FILE="$REPO_ROOT/workstation-config.json"
 STACKS_DIR="$REPO_ROOT/opentofu/stacks"
-# state のバケットのリージョン (デプロイ先のリージョンは opentofu/modules/config の aws_region)
+# state のバケットのリージョン (デプロイ先のリージョンは workstation-config.json の awsRegion)
 STATE_REGION=ap-northeast-1
 
 die() {
