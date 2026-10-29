@@ -280,6 +280,7 @@ cd ec2-workstation
   "$schema": "./workstation-config.schema.json",
   "projectName": "ec2-workstation",
   "environment": "dev",
+  "awsRegion": "ap-northeast-1",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
     "os": "al2023",
@@ -327,6 +328,7 @@ cd ec2-workstation
 |------|:----:|------|
 | `projectName` | ✅ | プロジェクト名（リソース命名に使用） |
 | `environment` | ✅ | 環境名（dev, staging, prod） |
+| `awsRegion` | ✅ | デプロイ先の AWS リージョン（例: `ap-northeast-1`）。state のバケットのリージョンとは別（[4. デプロイ](#4-デプロイ)）。デプロイ後に変えると既存の環境を見失い、新しいリージョンにもう 1 組作るので、変えるときは先に `scripts/tofu-destroy.sh` で消す |
 | `vpcCidr` | ✅ | VPCのCIDRブロック |
 | `defaultInstanceConfig.os` | ✅ | OS（下表）。デプロイのたびにその OS の最新 AMI に追従する |
 | `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ（x86_64 のみ） |
@@ -389,6 +391,7 @@ export TF_STATE_BUCKET=<your-state-bucket>
 ./scripts/tofu-init.sh workstations && tofu -chdir=opentofu/stacks/workstations plan
 ```
 
+- リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
 - GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意して `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
 - VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
 
