@@ -12,7 +12,8 @@ phases:
       - bash scripts/install-tofu.sh
   build:
     commands:
-      - export PATH="$(bash -c '. scripts/lib/tools.sh; tools_path'):$PATH"
+      # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける
+      - tool_dirs=$(bash -c '. scripts/lib/tools.sh; tools_path') && export PATH="$tool_dirs:$PATH"
       - jq --version && aws --version && tofu version
       # 2 つ目の入力のアーティファクトは CODEBUILD_SRC_DIR_<名前> に置かれる
       - plan_var="CODEBUILD_SRC_DIR_$PLAN_ARTIFACT" && bash scripts/tofu-apply.sh "$APPLY_MODE" "${!plan_var}"

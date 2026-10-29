@@ -59,7 +59,8 @@ pwsh-check:
         echo "skip pwsh-check: pwsh is not installed (CI checks with Windows PowerShell 5.1)"
         exit 0
     fi
-    export PSModulePath="$(bash -c '. scripts/lib/tools.sh; psmodules_path')${PSModulePath:+:$PSModulePath}"
+    modules=$(bash -c '. scripts/lib/tools.sh; psmodules_path')
+    export PSModulePath="$modules${PSModulePath:+:$PSModulePath}"
     pwsh -NoProfile -File scripts/tests/powershell-lint.ps1
 
 # シェルスクリプトのフォーマットチェック（CI と同じ。書式は .editorconfig、shfmt は scripts/install-shfmt.sh で入れる）

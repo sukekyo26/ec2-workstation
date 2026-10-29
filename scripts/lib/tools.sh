@@ -150,7 +150,8 @@ install_pinned_tool() (
     if curl --help all 2> /dev/null | grep -- --retry-all-errors > /dev/null; then
         retry+=(--retry-all-errors)
     fi
-    curl -fsSL "${retry[@]}" --connect-timeout 10 --max-time 120 -o "$tmp/$asset" "$url" || die "could not download $url"
+    # 全体の時間では切らない (pwsh は約 70MB)。10KB/s を 60 秒下回り続けたら、止まったとみなす
+    curl -fsSL "${retry[@]}" --connect-timeout 10 --speed-limit 10240 --speed-time 60 -o "$tmp/$asset" "$url" || die "could not download $url"
     got=$(file_sha256 "$tmp/$asset") || die "could not compute the sha256 of $asset"
     if [ "$got" != "$want" ]; then
         die "sha256 mismatch for $asset: got $got, want $want"

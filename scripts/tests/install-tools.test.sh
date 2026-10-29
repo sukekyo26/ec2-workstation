@@ -139,11 +139,15 @@ expect_rc bad 1
 expect_err bad "sha256 mismatch for jv-$version-linux-amd64.tar.gz: got $fake_sha"
 expect_curl bad "$url/jv-$version-linux-amd64.tar.gz"
 # 一時的な失敗は取り直し、待ち続けない
-for flag in "--retry 3" --retry-all-errors --connect-timeout --max-time; do
+# 全体の時間では切らない (大きな pwsh が遅い回線で必ず切れる)。止まったことは速さで見る
+for flag in "--retry 3" --retry-all-errors --connect-timeout --speed-limit --speed-time; do
     if ! grep -qF -- "$flag" "$work/out/bad.curl.args"; then
         fail "bad: curl is called without $flag: $(cat "$work/out/bad.curl.args")"
     fi
 done
+if grep -qF -- --max-time "$work/out/bad.curl.args"; then
+    fail "bad: curl is called with --max-time: $(cat "$work/out/bad.curl.args")"
+fi
 if [ -n "$(ls -A "$work/bad/.tools")" ]; then
     fail "bad: .tools is not empty: $(ls -A "$work/bad/.tools")"
 fi

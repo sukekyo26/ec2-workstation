@@ -8,10 +8,11 @@ env:
 phases:
   install:
     commands:
-      - for tool in jv shfmt tofu just shellcheck gitleaks pwsh psscriptanalyzer; do bash "scripts/install-$tool.sh"; done
+      - for tool in jv shfmt tofu just shellcheck gitleaks pwsh psscriptanalyzer; do bash "scripts/install-$tool.sh" || exit 1; done
   build:
     commands:
-      - export PATH="$(bash -c '. scripts/lib/tools.sh; tools_path'):$PATH"
+      # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける
+      - tool_dirs=$(bash -c '. scripts/lib/tools.sh; tools_path') && export PATH="$tool_dirs:$PATH"
       # pwsh-check を飛ばさない (版を固定した pwsh と PSScriptAnalyzer で見る。Windows PowerShell 5.1 の Parser での検査は GitHub Actions だけ)
       - export EC2WS_REQUIRE_PWSH=yes
       - command -v pwsh && pwsh --version

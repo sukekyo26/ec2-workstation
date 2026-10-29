@@ -17,7 +17,8 @@ phases:
       - bash scripts/install-tofu.sh
   build:
     commands:
-      - export PATH="$(bash -c '. scripts/lib/tools.sh; tools_path'):$PATH"
+      # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける
+      - tool_dirs=$(bash -c '. scripts/lib/tools.sh; tools_path') && export PATH="$tool_dirs:$PATH"
       - jq --version && aws --version && tofu version
       - bash scripts/tofu-plan.sh "$PLAN_MODE" "$CODEBUILD_SRC_DIR/plan-out"
       # exported-variables は buildspec のシェルの変数しか拾わない (tofu-plan.sh の中の export は届かない)
