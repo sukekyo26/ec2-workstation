@@ -462,15 +462,24 @@ HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の�
 - 承認の画面のリンクは、そのコミットの CodeCommit の画面です。**要約だけでなく、コミットの差分（`scripts/`・`cloudformation/` を含む）も見てください**。apply の段もリポジトリのスクリプトを走らせるためです
 - 承認は 7 日で期限が切れます。切れたら、パイプラインを流し直してください（plan のファイルは 8 日で消えます）
 - apply が途中で止まったときは、原因を直してから **Release change** で流し直してください（plan から取り直します）。**Retry** は古い plan を使うので、済んだ人の分で必ず止まります
+- 実行は段ごとに 1 つずつ進みます（`QUEUED`）。前の実行が承認を待っている間も、後から push した実行は Check と plan の段まで進みます。その plan は前の実行の apply より古いので、後の実行は apply の段で「plan が古い」で止まります（plan の段が state のロックで止まることもあります）。前の実行が終わってから、後の実行を **Release change** で流し直してください
 
 注意:
 
-- 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます
-- plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプラインのロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
+- 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます。Check は承認の前に、push されたどのコミットでも走るので、アーティファクトのバケットはソース（`Source`）しか読めません
+- plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプライン・plan・apply のロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
 - 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
 - PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます
 - パイプラインの道具（OpenTofu・jv・just・shellcheck・shfmt・gitleaks・PowerShell 7・PSScriptAnalyzer）は、`scripts/lib/tools.sh` で版と sha256 を固定して入れます。jq と AWS CLI は CodeBuild のイメージ（`aws/codebuild/amazonlinux-x86_64-standard:6.0`）のものを使います（版は固定されません）
-- スタックを消すときは、先にアーティファクトのバケットを空にしてください。KMS のキーは消す予約から 7 日以上たってから消えます（その間も月額の料金がかかります）。CodeCommit のリポジトリは残るので、要らなければ手で消してください
+- スタックを消すときは、先にアーティファクトのバケットを空にしてください（中身が残っていると、スタックの削除が `DELETE_FAILED` で止まります）。バケットのポリシーが拒むのは読み取り（`GetObject`）だけなので、管理者の権限で一覧と削除ができます:
+
+  ```bash
+  bucket=$(aws cloudformation describe-stack-resource --stack-name <スタック名> --logical-resource-id ArtifactBucket --query StackResourceDetail.PhysicalResourceId --output text)
+  aws s3 rm "s3://$bucket" --recursive
+  aws cloudformation delete-stack --stack-name <スタック名>
+  ```
+
+  KMS のキーは消す予約から 7 日以上たってから消えます（その間も月額の料金がかかります）。CodeCommit のリポジトリは残るので、要らなければ手で消してください
 
 ### 5. デプロイ確認
 

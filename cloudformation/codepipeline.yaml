@@ -56,7 +56,8 @@ Resources:
             Principal: { Service: codepipeline.amazonaws.com }
             Action: sts:AssumeRole
 
-  # Runs just ci: no access to the deployed resources or the state
+  # Runs just ci on any pushed commit before an approval: reads only the source artifact (the clone ref).
+  # No access to the plan artifacts (they carry the private keys), the deployed resources or the state
   CheckRole:
     Type: AWS::IAM::Role
     Properties:
@@ -148,7 +149,6 @@ Resources:
             Principal:
               AWS:
                 - !GetAtt PipelineRole.Arn
-                - !GetAtt CheckRole.Arn
                 - !GetAtt PlanRole.Arn
                 - !GetAtt ApplyRole.Arn
             Action:
@@ -157,6 +157,13 @@ Resources:
               - kms:ReEncrypt*
               - kms:GenerateDataKey*
               - kms:DescribeKey
+            Resource: "*"
+          # With the bucket key, the encryption context is the bucket, not the object: the bucket policy keeps
+          # the check role to the source artifact
+          - Sid: CheckRoleDecryptsTheSource
+            Effect: Allow
+            Principal: { AWS: !GetAtt CheckRole.Arn }
+            Action: kms:Decrypt
             Resource: "*"
 
   ArtifactBucket:
@@ -211,6 +218,15 @@ Resources:
                   - !GetAtt CheckRole.Arn
                   - !GetAtt PlanRole.Arn
                   - !GetAtt ApplyRole.Arn
+          # The objects are <pipeline name>/<artifact name>/<id>. The source artifact's name (Source) is short
+          # enough that CodePipeline does not cut it
+          - Sid: CheckReadsOnlyTheSource
+            Effect: Deny
+            Principal: "*"
+            Action: s3:GetObject
+            NotResource: !Sub ${ArtifactBucket.Arn}/*/Source/*
+            Condition:
+              ArnEquals: { aws:PrincipalArn: !GetAtt CheckRole.Arn }
 
   # ---------------------------------------------------------------- role policies
   # Separate from the roles: the key policy names the roles, and these policies name the key
@@ -267,7 +283,7 @@ Resources:
               Resource: !Ref ApprovalTopicArn
             - !Ref AWS::NoValue
 
-  # What every CodeBuild project needs: its logs, the artifacts, and the full clone of the repository
+  # What every CodeBuild project needs: its logs and the full clone of the repository
   CodeBuildBasePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -286,15 +302,48 @@ Resources:
             Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}-*
           - Effect: Allow
             Action:
+              - s3:GetBucketLocation
+              - s3:GetBucketAcl
+            Resource: !GetAtt ArtifactBucket.Arn
+          # The source is a full clone (CODEBUILD_CLONE_REF): CodeBuild pulls the repository itself
+          - Effect: Allow
+            Action: codecommit:GitPull
+            Resource: !GetAtt Repository.Arn
+
+  # The check reads the source artifact only (it has no output)
+  CheckArtifactPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref CheckRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource: !Sub ${ArtifactBucket.Arn}/*/Source/*
+          - Effect: Allow
+            Action: kms:Decrypt
+            Resource: !GetAtt ArtifactKey.Arn
+
+  # The plan writes the plan files, and the apply reads them
+  PlanArtifactPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref PlanRole
+        - !Ref ApplyRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
               - s3:GetObject
               - s3:GetObjectVersion
               - s3:PutObject
             Resource: !Sub ${ArtifactBucket.Arn}/*
-          - Effect: Allow
-            Action:
-              - s3:GetBucketLocation
-              - s3:GetBucketAcl
-            Resource: !GetAtt ArtifactBucket.Arn
           - Effect: Allow
             Action:
               - kms:Encrypt
@@ -303,10 +352,6 @@ Resources:
               - kms:GenerateDataKey*
               - kms:DescribeKey
             Resource: !GetAtt ArtifactKey.Arn
-          # The source is a full clone (CODEBUILD_CLONE_REF): CodeBuild pulls the repository itself
-          - Effect: Allow
-            Action: codecommit:GitPull
-            Resource: !GetAtt Repository.Arn
 
   # The state, read by the plan (locks and new workspaces need writes) and by the apply.
   # The plan also checks the old shared workstations state of an earlier version (list-objects-v2)
@@ -502,6 +547,12 @@ Resources:
             Resource:
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
+          # The alarm's EC2 stop action needs this service-linked role. CloudWatch creates it with the first such alarm
+          - Effect: Allow
+            Action: iam:CreateServiceLinkedRole
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/events.amazonaws.com/AWSServiceRoleForCloudWatchEvents
+            Condition:
+              StringEquals: { iam:AWSServiceName: events.amazonaws.com }
           - Effect: Allow
             Action:
               - cloudwatch:PutMetricAlarm
@@ -582,10 +633,14 @@ Resources:
     DependsOn:
       - PipelinePolicy
       - CodeBuildBasePolicy
+      - CheckArtifactPolicy
+      - PlanArtifactPolicy
     Properties:
       Name: !Ref AWS::StackName
       PipelineType: V2
-      # Two runs never overlap: the second waits until the first ends
+      # QUEUED locks each stage, not the whole run: a later run waits at the entry of a busy stage, so it can
+      # check and plan while an earlier run waits for an approval. Its plan is then stale, and its apply stops
+      # (start it again with Release change)
       ExecutionMode: QUEUED
       RoleArn: !GetAtt PipelineRole.Arn
       ArtifactStore:
@@ -605,14 +660,14 @@ Resources:
                 PollForSourceChanges: false
                 # A full clone: gitleaks reads the history, and git keeps the executable bits
                 OutputArtifactFormat: CODEBUILD_CLONE_REF
-              OutputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: Source }]
 
         - Name: Check
           Actions:
             - Name: JustCi
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
               Configuration: { ProjectName: !Ref CheckProject }
-              InputArtifacts: [{ Name: SourceOutput }]
+              InputArtifacts: [{ Name: Source }]
 
         - Name: NetworkPlan
           Actions:
@@ -622,7 +677,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref PlanProject
                 EnvironmentVariables: '[{"name":"PLAN_MODE","value":"--network","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }]
+              InputArtifacts: [{ Name: Source }]
               OutputArtifacts: [{ Name: NetworkPlanOutput }]
 
         # Only when the network plan has changes (#{NetworkVars.CHANGED} is "true"); skipped otherwise
@@ -661,9 +716,9 @@ Resources:
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
               Configuration:
                 ProjectName: !Ref ApplyProject
-                PrimarySource: SourceOutput
+                PrimarySource: Source
                 EnvironmentVariables: '[{"name":"APPLY_MODE","value":"--network","type":"PLAINTEXT"},{"name":"PLAN_ARTIFACT","value":"NetworkPlanOutput","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }, { Name: NetworkPlanOutput }]
+              InputArtifacts: [{ Name: Source }, { Name: NetworkPlanOutput }]
 
         - Name: UsersPlan
           Actions:
@@ -673,7 +728,7 @@ Resources:
               Configuration:
                 ProjectName: !Ref PlanProject
                 EnvironmentVariables: '[{"name":"PLAN_MODE","value":"--users","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }]
+              InputArtifacts: [{ Name: Source }]
               OutputArtifacts: [{ Name: UsersPlanOutput }]
 
         # Only when a user's plan has changes or a removed user's workspace is left (#{UsersVars.CHANGED} is "true")
@@ -712,9 +767,9 @@ Resources:
               ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
               Configuration:
                 ProjectName: !Ref ApplyProject
-                PrimarySource: SourceOutput
+                PrimarySource: Source
                 EnvironmentVariables: '[{"name":"APPLY_MODE","value":"--users","type":"PLAINTEXT"},{"name":"PLAN_ARTIFACT","value":"UsersPlanOutput","type":"PLAINTEXT"}]'
-              InputArtifacts: [{ Name: SourceOutput }, { Name: UsersPlanOutput }]
+              InputArtifacts: [{ Name: Source }, { Name: UsersPlanOutput }]
 
   # A push to the branch starts the pipeline
   PushRule:
