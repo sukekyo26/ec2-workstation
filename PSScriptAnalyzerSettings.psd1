@@ -7,11 +7,11 @@
         'PSAvoidUsingWriteHost'
     )
     Rules        = @{
-        # README requires PowerShell 5.1 or later. The CI parses with 5.1; this rule also catches
-        # 7-only syntax when the check runs on a local pwsh 7
+        # Users run the scripts on Windows PowerShell 5.1 or PowerShell 7. The GitHub Actions CI parses with 5.1;
+        # this rule also catches syntax that one of them lacks when the check runs on pwsh 7 (locally or in CodePipeline)
         PSUseCompatibleSyntax = @{
             Enable         = $true
-            TargetVersions = @('5.1')
+            TargetVersions = @('5.1', '7.0')
         }
     }
 }

@@ -47,13 +47,19 @@ shellcheck:
     scripts/format-shell.sh --list | xargs -0r shellcheck --severity=error
 
 # PowerShell スクリプトの構文と PSScriptAnalyzer。手元の pwsh 7 での目安で、Windows PowerShell 5.1 での検査は CI で見る（pwsh が無ければ飛ばす）
+# scripts/install-psscriptanalyzer.sh で入れた PSScriptAnalyzer も読む。EC2WS_REQUIRE_PWSH=yes (CodePipeline の Check) なら、pwsh が無いときは飛ばさずに止まる
 pwsh-check:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v pwsh > /dev/null; then
+        if [ "${EC2WS_REQUIRE_PWSH:-}" = yes ]; then
+            echo "pwsh-check: pwsh is not installed (install it with scripts/install-pwsh.sh)" >&2
+            exit 1
+        fi
         echo "skip pwsh-check: pwsh is not installed (CI checks with Windows PowerShell 5.1)"
         exit 0
     fi
+    export PSModulePath="$(bash -c '. scripts/lib/tools.sh; psmodules_path')${PSModulePath:+:$PSModulePath}"
     pwsh -NoProfile -File scripts/tests/powershell-lint.ps1
 
 # シェルスクリプトのフォーマットチェック（CI と同じ。書式は .editorconfig、shfmt は scripts/install-shfmt.sh で入れる）

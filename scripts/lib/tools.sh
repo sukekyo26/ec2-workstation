@@ -15,6 +15,10 @@ TOFU_VERSION=v1.13.2
 JUST_VERSION=1.59.0
 SHELLCHECK_VERSION=v0.11.0
 GITLEAKS_VERSION=v8.30.1
+# PowerShell のモジュール (pwsh の just ci の pwsh-check が使う)。添付ファイルは OS によらない .nupkg (zip)
+PSSCRIPTANALYZER_VERSION=1.25.0
+# windows-latest の runner の PowerShell 7 と同じ版。tar の中は 1 つのバイナリでなく、ディレクトリ全体
+PWSH_VERSION=v7.6.7
 
 # tool_sha256 <名前> <os>-<arch>: その道具の版の、その環境の添付ファイルの sha256
 tool_sha256() {
@@ -43,6 +47,12 @@ tool_sha256() {
         "gitleaks linux-arm64") echo e4a487ee7ccd7d3a7f7ec08657610aa3606637dab924210b3aee62570fb4b080 ;;
         "gitleaks darwin-amd64") echo dfe101a4db2255fc85120ac7f3d25e4342c3c20cf749f2c20a18081af1952709 ;;
         "gitleaks darwin-arm64") echo b40ab0ae55c505963e365f271a8d3846efbc170aa17f2607f13df610a9aeb6a5 ;;
+        "pwsh linux-amd64") echo 6896f9e3a6b0a354bf470835a96da76d2f801cd50dcf047ad7c4563bf93bf431 ;;
+        "pwsh linux-arm64") echo ba465efdfb0984c1c5dc5ed9eb0b79a7e91a1b52c45f99377058c0659b84d3f1 ;;
+        "pwsh darwin-amd64") echo c354ca845cb81f9239bc0c6fbfd14256056400e4b269bd7a6373d113ad94c1e3 ;;
+        "pwsh darwin-arm64") echo 50dde99bb066adacbb9a748182d09eb9beff25119dc3b12e85c84b6b6b1c5da9 ;;
+        # PowerShell Gallery の .nupkg。ギャラリーが公開する SHA512 とも一致することを確かめた
+        "psscriptanalyzer "*) echo 14e634c828eb98efb9f40b2918ba90f139ed5eccdf663a2a747736d996995d60 ;;
         *) die "no sha256 for $1 on $2" ;;
     esac
 }
@@ -56,6 +66,8 @@ tool_version() {
         just) echo "$JUST_VERSION" ;;
         shellcheck) echo "$SHELLCHECK_VERSION" ;;
         gitleaks) echo "$GITLEAKS_VERSION" ;;
+        psscriptanalyzer) echo "$PSSCRIPTANALYZER_VERSION" ;;
+        pwsh) echo "$PWSH_VERSION" ;;
         *) die "unknown tool $1" ;;
     esac
 }
@@ -73,10 +85,15 @@ shfmt_path() {
     tool_path shfmt "$SHFMT_VERSION"
 }
 
+# psmodules_path: scripts/install-psscriptanalyzer.sh がモジュールを置くディレクトリ (PSModulePath に足す)
+psmodules_path() {
+    echo "$REPO_ROOT/.tools/psmodules"
+}
+
 # tools_path: 全部の道具の置き場所のディレクトリを : でつなぐ (CodeBuild の buildspec が PATH の先頭に足す)
 tools_path() {
     local name dirs=()
-    for name in jv shfmt tofu just shellcheck gitleaks; do
+    for name in jv shfmt tofu just shellcheck gitleaks pwsh; do
         dirs+=("$REPO_ROOT/.tools/$name-$(tool_version "$name")")
     done
     local IFS=:
@@ -109,7 +126,7 @@ file_sha256() {
     fi
 }
 
-# install_pinned_tool <名前> <版> <URL> <sha256> <tar の中の名前。tar でなければ ""> [--force]
+# install_pinned_tool <名前> <版> <URL> <sha256> <tar の中の名前。tar でなければ ""、tar の中を全部なら "."> [--force]
 # 一時ディレクトリで取って確かめ、最後に mv で置く。途中で止まっても置き場所に中途半端なものが残らない。
 # 本体はサブシェルで動かす: EXIT の trap は関数の終わり (成功でも die でも) で一時ディレクトリを消し、呼び出し元の trap を上書きしない
 install_pinned_tool() (
@@ -138,7 +155,17 @@ install_pinned_tool() (
     if [ "$got" != "$want" ]; then
         die "sha256 mismatch for $asset: got $got, want $want"
     fi
-    if [ -n "$member" ]; then
+    if [ "$member" = . ]; then
+        # tar の中を全部、置き場所のディレクトリにする (<名前> がその中の実行ファイル)
+        mkdir "$tmp/all" || die "could not create $tmp/all"
+        tar -xzf "$tmp/$asset" -C "$tmp/all" || die "could not extract $asset"
+        chmod +x "$tmp/all/$name" || die "could not find $name in $asset"
+        rm -rf "${dest%/*}" || die "could not remove ${dest%/*}"
+        mkdir -p "$REPO_ROOT/.tools" || die "could not create $REPO_ROOT/.tools"
+        mv "$tmp/all" "${dest%/*}" || die "could not install $name at ${dest%/*}"
+        log "installed $name $version at $dest"
+        exit 0
+    elif [ -n "$member" ]; then
         tar -xzf "$tmp/$asset" -C "$tmp" "$member" || die "could not extract $member from $asset"
         mv "$tmp/$member" "$tmp/$name.bin" || die "could not find $member in $asset"
     else
@@ -188,6 +215,22 @@ install_tool() {
             fi
             url="https://github.com/koalaman/shellcheck/releases/download/$version/shellcheck-$version.$os.$cpu.tar.gz"
             member="shellcheck-$version/shellcheck"
+            ;;
+        pwsh)
+            local pos=linux cpu=x64
+            if [ "$os" = darwin ]; then
+                pos=osx
+            fi
+            if [ "$arch" = arm64 ]; then
+                cpu=arm64
+            fi
+            url="https://github.com/PowerShell/PowerShell/releases/download/$version/powershell-${version#v}-$pos-$cpu.tar.gz"
+            # pwsh は .NET の実行時と一緒に動くので、tar の中を全部置く
+            member=.
+            ;;
+        psscriptanalyzer)
+            url="https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/$version"
+            member=
             ;;
         gitleaks)
             local cpu=x64

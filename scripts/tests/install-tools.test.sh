@@ -254,6 +254,7 @@ fi
 export FAKE_DOWNLOAD=$jv_tarball
 gh=https://github.com
 tv=$(tool tool_version tofu) jt=$(tool tool_version just) sc=$(tool tool_version shellcheck) gl=$(tool tool_version gitleaks)
+pw=$(tool tool_version pwsh) psa=$(tool tool_version psscriptanalyzer)
 for c in "tofu Linux x86_64 opentofu/opentofu/releases/download/$tv/tofu_${tv#v}_linux_amd64.tar.gz" \
     "tofu Darwin arm64 opentofu/opentofu/releases/download/$tv/tofu_${tv#v}_darwin_arm64.tar.gz" \
     "just Linux x86_64 casey/just/releases/download/$jt/just-$jt-x86_64-unknown-linux-musl.tar.gz" \
@@ -261,7 +262,9 @@ for c in "tofu Linux x86_64 opentofu/opentofu/releases/download/$tv/tofu_${tv#v}
     "shellcheck Linux x86_64 koalaman/shellcheck/releases/download/$sc/shellcheck-$sc.linux.x86_64.tar.gz" \
     "shellcheck Darwin arm64 koalaman/shellcheck/releases/download/$sc/shellcheck-$sc.darwin.aarch64.tar.gz" \
     "gitleaks Linux x86_64 gitleaks/gitleaks/releases/download/$gl/gitleaks_${gl#v}_linux_x64.tar.gz" \
-    "gitleaks Darwin arm64 gitleaks/gitleaks/releases/download/$gl/gitleaks_${gl#v}_darwin_arm64.tar.gz"; do
+    "gitleaks Darwin arm64 gitleaks/gitleaks/releases/download/$gl/gitleaks_${gl#v}_darwin_arm64.tar.gz" \
+    "pwsh Linux x86_64 PowerShell/PowerShell/releases/download/$pw/powershell-${pw#v}-linux-x64.tar.gz" \
+    "pwsh Darwin arm64 PowerShell/PowerShell/releases/download/$pw/powershell-${pw#v}-osx-arm64.tar.gz"; do
     read -r t s m path <<< "$c"
     SCRIPT="install-$t.sh" run "url-$t-$s-$m" bad "$s" "$m"
     expect_rc "url-$t-$s-$m" 1
@@ -282,10 +285,45 @@ if [ "$("$work/sc/.tools/shellcheck-$sc/shellcheck" 2>&1)" != "fake shellcheck" 
     fail "shellcheck-ok: the installed shellcheck does not run"
 fi
 
+# pwsh: tar の中を全部、置き場所のディレクトリにする。取り直し (--force) では前の中身を残さない
+mkdir -p "$work/pw"
+printf '#!/bin/sh\necho fake pwsh\n' > "$work/pw/pwsh"
+echo runtime > "$work/pw/libfake.so"
+chmod +x "$work/pw/pwsh"
+tar -czf "$work/pwsh.tar.gz" -C "$work/pw" pwsh libfake.so
+new_repo pw
+replace_in_copy "$work/pw" "$(tool tool_sha256 pwsh linux-amd64)" "$(tool file_sha256 "$work/pwsh.tar.gz")"
+FAKE_DOWNLOAD="$work/pwsh.tar.gz" SCRIPT=install-pwsh.sh run pwsh-ok pw Linux x86_64
+expect_rc pwsh-ok 0
+if [ "$("$work/pw/.tools/pwsh-$pw/pwsh" 2>&1)" != "fake pwsh" ] || [ ! -f "$work/pw/.tools/pwsh-$pw/libfake.so" ]; then
+    fail "pwsh-ok: the whole archive is not installed: $(ls -A "$work/pw/.tools/pwsh-$pw" 2>&1)"
+fi
+touch "$work/pw/.tools/pwsh-$pw/stale"
+FAKE_DOWNLOAD="$work/pwsh.tar.gz" SCRIPT=install-pwsh.sh run pwsh-force pw Linux x86_64 --force
+expect_rc pwsh-force 0
+if [ -e "$work/pw/.tools/pwsh-$pw/stale" ] || [ -n "$(find "$work/pw/.tools" -maxdepth 1 -name 'tmp.*')" ]; then
+    fail "pwsh-force: a stale file or a temporary directory is left"
+fi
+
+# PSScriptAnalyzer: PowerShell Gallery の .nupkg を確かめて、モジュールの形 (.tools/psmodules/PSScriptAnalyzer/<版>) に展開する
+mkdir -p "$work/psa-src"
+echo "@{ ModuleVersion = '$psa' }" > "$work/psa-src/PSScriptAnalyzer.psd1"
+(cd "$work/psa-src" && python3 -I -m zipfile -c "$work/psa.nupkg" PSScriptAnalyzer.psd1)
+SCRIPT=install-psscriptanalyzer.sh run psa-url bad Linux x86_64
+expect_curl psa-url "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/$psa"
+expect_rc psa-url 1
+new_repo psa
+replace_in_copy "$work/psa" "$(tool tool_sha256 psscriptanalyzer linux-amd64)" "$(tool file_sha256 "$work/psa.nupkg")"
+FAKE_DOWNLOAD="$work/psa.nupkg" SCRIPT=install-psscriptanalyzer.sh run psa-ok psa Linux x86_64
+expect_rc psa-ok 0
+if [ ! -f "$work/psa/.tools/psmodules/PSScriptAnalyzer/$psa/PSScriptAnalyzer.psd1" ]; then
+    fail "psa-ok: the module is not extracted"
+fi
+
 # tools_path は全部の道具の置き場所のディレクトリを : でつなぐ
 echo "case: tools-path"
 got=$(tool tools_path)
-for t in jv shfmt tofu just shellcheck gitleaks; do
+for t in jv shfmt tofu just shellcheck gitleaks pwsh; do
     t="$t-$(tool tool_version "$t")"
     if [[ ":$got:" != *"/.tools/$t:"* ]]; then
         fail "tools-path: $t is missing in $got"
