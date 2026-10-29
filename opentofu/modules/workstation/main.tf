@@ -139,6 +139,8 @@ resource "aws_instance" "this" {
   iam_instance_profile        = aws_iam_instance_profile.this.name
   key_name                    = aws_key_pair.this.key_name
   associate_public_ip_address = true
+  # cloud-init は同じインスタンスでは user-data を走らせ直さないため、変わったら作り直して反映する
+  user_data_replace_on_change = true
   user_data = templatefile(var.user_data_template, {
     data_volume_id = aws_ebs_volume.data.id
     username       = var.username
