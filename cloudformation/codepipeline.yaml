@@ -1,0 +1,744 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ec2-workstation: deploy workstation-config.json from a CodeCommit repository with CodePipeline
+  (just ci -> network plan -> [approve -> apply, only when the network changes] -> users plan -> approve -> apply).
+  See the README section "AWS だけで deploy する (CodePipeline)".
+
+Parameters:
+  RepositoryName:
+    Type: String
+    Default: ec2-workstation
+    Description: Name of the CodeCommit repository this stack creates (kept when the stack is deleted)
+  BranchName:
+    Type: String
+    Default: develop
+    Description: A push to this branch starts the pipeline
+  StateBucketName:
+    Type: String
+    Description: S3 bucket that keeps the OpenTofu state (the same as TF_STATE_BUCKET)
+  ProjectName:
+    Type: String
+    Description: projectName in workstation-config.json (scopes the IAM, log, alarm and schedule names)
+  Environment:
+    Type: String
+    Description: environment in workstation-config.json
+  DeployRegion:
+    Type: String
+    Description: awsRegion in workstation-config.json (where the VPC and the instances are)
+  ApprovalTopicArn:
+    Type: String
+    Default: ""
+    Description: SNS topic for the approval requests (empty for no notification)
+
+Conditions:
+  HasApprovalTopic: !Not [!Equals [!Ref ApprovalTopicArn, ""]]
+
+Resources:
+  # The repository keeps the code: deleting the stack must not delete it
+  Repository:
+    Type: AWS::CodeCommit::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref RepositoryName
+      RepositoryDescription: ec2-workstation (deployed by CodePipeline)
+
+  # ---------------------------------------------------------------- roles
+
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-pipeline
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codepipeline.amazonaws.com }
+            Action: sts:AssumeRole
+
+  # Runs just ci: no access to the deployed resources or the state
+  CheckRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-check
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+
+  # Runs before the approval: reads only, plus the state bucket (locks and new workspaces)
+  PlanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-plan
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+
+  # Runs after the approval: creates, changes and deletes the resources
+  ApplyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-apply
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: codebuild.amazonaws.com }
+            Action: sts:AssumeRole
+
+  EventsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${AWS::StackName}-events
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: events.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: start-pipeline
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+
+  # ---------------------------------------------------------------- artifacts
+
+  # The plan files carry the private keys (tls_private_key), so only the pipeline's roles can decrypt them.
+  # The account root keeps the administration (rotation, tags, deletion) but not the use of the key
+  ArtifactKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub ${AWS::StackName} pipeline artifacts (OpenTofu plan files)
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: KeyAdministrators
+            Effect: Allow
+            Principal: { AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root" }
+            Action:
+              - kms:Create*
+              - kms:Describe*
+              - kms:Enable*
+              - kms:List*
+              - kms:Put*
+              - kms:Update*
+              - kms:Revoke*
+              - kms:Disable*
+              - kms:Get*
+              - kms:Delete*
+              - kms:TagResource
+              - kms:UntagResource
+              - kms:ScheduleKeyDeletion
+              - kms:CancelKeyDeletion
+              - kms:RotateKeyOnDemand
+            Resource: "*"
+          - Sid: PipelineRolesUseTheKey
+            Effect: Allow
+            Principal:
+              AWS:
+                - !GetAtt PipelineRole.Arn
+                - !GetAtt CheckRole.Arn
+                - !GetAtt PlanRole.Arn
+                - !GetAtt ApplyRole.Arn
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: "*"
+
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt ArtifactKey.Arn
+            BucketKeyEnabled: true
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      # A manual approval waits up to 7 days, and S3 rounds the expiry up to the next midnight UTC
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-plans
+            Status: Enabled
+            ExpirationInDays: 8
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: s3:*
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              Bool: { aws:SecureTransport: "false" }
+          - Sid: OnlyThePipelineReadsThePlans
+            Effect: Deny
+            Principal: "*"
+            Action: s3:GetObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+            Condition:
+              ArnNotEquals:
+                aws:PrincipalArn:
+                  - !GetAtt PipelineRole.Arn
+                  - !GetAtt CheckRole.Arn
+                  - !GetAtt PlanRole.Arn
+                  - !GetAtt ApplyRole.Arn
+
+  # ---------------------------------------------------------------- role policies
+  # Separate from the roles: the key policy names the roles, and these policies name the key
+
+  PipelinePolicy:
+    Type: AWS::IAM::RolePolicy
+    Properties:
+      RoleName: !Ref PipelineRole
+      PolicyName: pipeline
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - codecommit:GetRepository
+              - codecommit:GetBranch
+              - codecommit:GetCommit
+              - codecommit:UploadArchive
+              - codecommit:GetUploadArchiveStatus
+              - codecommit:CancelUploadArchive
+            Resource: !GetAtt Repository.Arn
+          - Effect: Allow
+            Action:
+              - codebuild:StartBuild
+              - codebuild:BatchGetBuilds
+            Resource:
+              - !GetAtt CheckProject.Arn
+              - !GetAtt PlanProject.Arn
+              - !GetAtt ApplyProject.Arn
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - s3:GetBucketVersioning
+              - s3:GetBucketLocation
+              - s3:ListBucket
+            Resource: !GetAtt ArtifactBucket.Arn
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !GetAtt ArtifactKey.Arn
+          - !If
+            - HasApprovalTopic
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref ApprovalTopicArn
+            - !Ref AWS::NoValue
+
+  # What every CodeBuild project needs: its logs, the artifacts, and the full clone of the repository
+  CodeBuildBasePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref CheckRole
+        - !Ref PlanRole
+        - !Ref ApplyRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: !Sub arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${AWS::StackName}-*
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:PutObject
+            Resource: !Sub ${ArtifactBucket.Arn}/*
+          - Effect: Allow
+            Action:
+              - s3:GetBucketLocation
+              - s3:GetBucketAcl
+            Resource: !GetAtt ArtifactBucket.Arn
+          - Effect: Allow
+            Action:
+              - kms:Encrypt
+              - kms:Decrypt
+              - kms:ReEncrypt*
+              - kms:GenerateDataKey*
+              - kms:DescribeKey
+            Resource: !GetAtt ArtifactKey.Arn
+          # The source is a full clone (CODEBUILD_CLONE_REF): CodeBuild pulls the repository itself
+          - Effect: Allow
+            Action: codecommit:GitPull
+            Resource: !GetAtt Repository.Arn
+
+  # The state, read by the plan (locks and new workspaces need writes) and by the apply.
+  # The plan also checks the old shared workstations state of an earlier version (list-objects-v2)
+  StatePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref PlanRole
+        - !Ref ApplyRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: s3:ListBucket
+            Resource: !Sub arn:${AWS::Partition}:s3:::${StateBucketName}
+          - Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:PutObject
+              - s3:DeleteObject
+            Resource: !Sub arn:${AWS::Partition}:s3:::${StateBucketName}/${ProjectName}/${Environment}/*
+          - Effect: Allow
+            Action: sts:GetCallerIdentity
+            Resource: "*"
+
+  # Reads that OpenTofu makes while planning (data sources and the refresh of every resource the stacks manage).
+  # LIMIT: the refresh of the key pair's SSM parameter (/ec2/keypair/*) reads the private key, so the plan role can read it
+  # (the plan files hold it too). The plan role is weaker than the apply role, not unable to read the secrets
+  ReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref PlanRole
+        - !Ref ApplyRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # Describe and list calls cannot be scoped to a resource
+          - Effect: Allow
+            Action:
+              - ec2:Describe*
+              - logs:DescribeLogGroups
+              - cloudwatch:DescribeAlarms
+              - ssm:DescribeParameters
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetRolePolicy
+              - iam:ListRolePolicies
+              - iam:ListAttachedRolePolicies
+              - iam:ListInstanceProfilesForRole
+              - iam:GetInstanceProfile
+            Resource:
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action:
+              - logs:ListTagsForResource
+              - logs:ListTagsLogGroup
+            Resource:
+              - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action: cloudwatch:ListTagsForResource
+            Resource: !Sub arn:${AWS::Partition}:cloudwatch:${DeployRegion}:${AWS::AccountId}:alarm:${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action:
+              - scheduler:GetSchedule
+              - scheduler:ListTagsForResource
+            Resource: !Sub arn:${AWS::Partition}:scheduler:${DeployRegion}:${AWS::AccountId}:schedule/default/${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action:
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:ListTagsForResource
+            Resource: !Sub arn:${AWS::Partition}:ssm:${DeployRegion}:${AWS::AccountId}:parameter/ec2/keypair/*
+          # The public parameters for the latest AMIs have no account in their ARN
+          - Effect: Allow
+            Action: ssm:GetParameter
+            Resource: !Sub arn:${AWS::Partition}:ssm:${DeployRegion}::parameter/aws/service/*
+
+  # Writes, only after the approval. Names are scoped to <projectName>-<environment>- where the API allows it.
+  # LIMIT: with iam:CreateRole and iam:PutRolePolicy on that prefix, the apply role can make a strong role under that name.
+  # Closing it needs a permissions boundary on the modules' roles (trouble #11)
+  WritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Roles:
+        - !Ref ApplyRole
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # EC2 cannot be scoped by name: scope it to the deploy region
+          - Effect: Allow
+            Action:
+              - ec2:CreateVpc
+              - ec2:DeleteVpc
+              - ec2:ModifyVpcAttribute
+              - ec2:CreateSubnet
+              - ec2:DeleteSubnet
+              - ec2:ModifySubnetAttribute
+              - ec2:CreateInternetGateway
+              - ec2:DeleteInternetGateway
+              - ec2:AttachInternetGateway
+              - ec2:DetachInternetGateway
+              - ec2:CreateRouteTable
+              - ec2:DeleteRouteTable
+              - ec2:CreateRoute
+              - ec2:DeleteRoute
+              - ec2:ReplaceRoute
+              - ec2:AssociateRouteTable
+              - ec2:DisassociateRouteTable
+              - ec2:CreateSecurityGroup
+              - ec2:DeleteSecurityGroup
+              - ec2:AuthorizeSecurityGroupEgress
+              - ec2:RevokeSecurityGroupEgress
+              - ec2:AuthorizeSecurityGroupIngress
+              - ec2:RevokeSecurityGroupIngress
+              - ec2:ModifySecurityGroupRules
+              - ec2:RunInstances
+              - ec2:TerminateInstances
+              - ec2:StartInstances
+              - ec2:StopInstances
+              - ec2:ModifyInstanceAttribute
+              - ec2:ModifyInstanceMetadataOptions
+              - ec2:ModifyInstanceCreditSpecification
+              - ec2:CreateVolume
+              - ec2:DeleteVolume
+              - ec2:ModifyVolume
+              - ec2:AttachVolume
+              - ec2:DetachVolume
+              - ec2:CreateSnapshot
+              - ec2:AllocateAddress
+              - ec2:ReleaseAddress
+              - ec2:AssociateAddress
+              - ec2:DisassociateAddress
+              - ec2:ImportKeyPair
+              - ec2:DeleteKeyPair
+              - ec2:CreateFlowLogs
+              - ec2:DeleteFlowLogs
+              - ec2:CreateTags
+              - ec2:DeleteTags
+            Resource: "*"
+            Condition:
+              StringEquals: { aws:RequestedRegion: !Ref DeployRegion }
+          - Effect: Allow
+            Action:
+              - iam:CreateRole
+              - iam:DeleteRole
+              - iam:UpdateRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:TagRole
+              - iam:UntagRole
+              - iam:ListRoleTags
+              - iam:PutRolePolicy
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
+              - iam:CreateInstanceProfile
+              - iam:DeleteInstanceProfile
+              - iam:AddRoleToInstanceProfile
+              - iam:RemoveRoleFromInstanceProfile
+              - iam:TagInstanceProfile
+              - iam:UntagInstanceProfile
+            Resource:
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+              - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-${Environment}-*
+          # The only managed policy the modules attach
+          - Effect: Allow
+            Action: iam:AttachRolePolicy
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+            Condition:
+              ArnEquals: { iam:PolicyARN: !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
+          - Effect: Allow
+            Action: iam:PassRole
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+            Condition:
+              StringEquals:
+                iam:PassedToService:
+                  - ec2.amazonaws.com
+                  - scheduler.amazonaws.com
+                  - vpc-flow-logs.amazonaws.com
+          - Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:DeleteLogGroup
+              - logs:PutRetentionPolicy
+              - logs:DeleteRetentionPolicy
+              - logs:TagResource
+              - logs:UntagResource
+              - logs:TagLogGroup
+              - logs:UntagLogGroup
+            Resource:
+              - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action:
+              - cloudwatch:PutMetricAlarm
+              - cloudwatch:DeleteAlarms
+              - cloudwatch:TagResource
+              - cloudwatch:UntagResource
+            Resource: !Sub arn:${AWS::Partition}:cloudwatch:${DeployRegion}:${AWS::AccountId}:alarm:${ProjectName}-${Environment}-*
+          - Effect: Allow
+            Action:
+              - scheduler:CreateSchedule
+              - scheduler:UpdateSchedule
+              - scheduler:DeleteSchedule
+              - scheduler:TagResource
+              - scheduler:UntagResource
+            Resource: !Sub arn:${AWS::Partition}:scheduler:${DeployRegion}:${AWS::AccountId}:schedule/default/${ProjectName}-${Environment}-*
+          # The key pair's parameter is named by the key pair ID, so it cannot be scoped by the prefix
+          - Effect: Allow
+            Action:
+              - ssm:PutParameter
+              - ssm:DeleteParameter
+              - ssm:AddTagsToResource
+              - ssm:RemoveTagsFromResource
+            Resource: !Sub arn:${AWS::Partition}:ssm:${DeployRegion}:${AWS::AccountId}:parameter/ec2/keypair/*
+
+  # ---------------------------------------------------------------- builds
+  # The image is fixed: the tools are checked against it (glibc 2.34 for jv, bash 5.2, jq and AWS CLI v2 from the image)
+
+  CheckProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-check
+      ServiceRole: !GetAtt CheckRole.Arn
+      EncryptionKey: !GetAtt ArtifactKey.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-check.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-x86_64-standard:6.0
+      TimeoutInMinutes: 30
+
+  PlanProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-plan
+      ServiceRole: !GetAtt PlanRole.Arn
+      EncryptionKey: !GetAtt ArtifactKey.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-plan.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-x86_64-standard:6.0
+        EnvironmentVariables:
+          - { Name: TF_STATE_BUCKET, Value: !Ref StateBucketName }
+      TimeoutInMinutes: 60
+
+  ApplyProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${AWS::StackName}-apply
+      ServiceRole: !GetAtt ApplyRole.Arn
+      EncryptionKey: !GetAtt ArtifactKey.Arn
+      Source: { Type: CODEPIPELINE, BuildSpec: cloudformation/buildspec-apply.yml }
+      Artifacts: { Type: CODEPIPELINE }
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux-x86_64-standard:6.0
+        EnvironmentVariables:
+          - { Name: TF_STATE_BUCKET, Value: !Ref StateBucketName }
+      TimeoutInMinutes: 120
+
+  # ---------------------------------------------------------------- pipeline
+
+  Pipeline:
+    Type: AWS::CodePipeline::Pipeline
+    DependsOn:
+      - PipelinePolicy
+      - CodeBuildBasePolicy
+    Properties:
+      Name: !Ref AWS::StackName
+      PipelineType: V2
+      # Two runs never overlap: the second waits until the first ends
+      ExecutionMode: QUEUED
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStore:
+        Type: S3
+        Location: !Ref ArtifactBucket
+        EncryptionKey: { Id: !GetAtt ArtifactKey.Arn, Type: KMS }
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              Namespace: SourceVariables
+              ActionTypeId: { Category: Source, Owner: AWS, Provider: CodeCommit, Version: "1" }
+              Configuration:
+                RepositoryName: !GetAtt Repository.Name
+                BranchName: !Ref BranchName
+                # EventBridge starts the pipeline (the rule below)
+                PollForSourceChanges: false
+                # A full clone: gitleaks reads the history, and git keeps the executable bits
+                OutputArtifactFormat: CODEBUILD_CLONE_REF
+              OutputArtifacts: [{ Name: SourceOutput }]
+
+        - Name: Check
+          Actions:
+            - Name: JustCi
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration: { ProjectName: !Ref CheckProject }
+              InputArtifacts: [{ Name: SourceOutput }]
+
+        - Name: NetworkPlan
+          Actions:
+            - Name: Plan
+              Namespace: NetworkVars
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration:
+                ProjectName: !Ref PlanProject
+                EnvironmentVariables: '[{"name":"PLAN_MODE","value":"--network","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: NetworkPlanOutput }]
+
+        # Only when the network plan has changes (#{NetworkVars.CHANGED} is "true"); skipped otherwise
+        - Name: NetworkApprove
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: NetworkChanged
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: "1" }
+                    Configuration:
+                      Variable: "#{NetworkVars.CHANGED}"
+                      Value: "true"
+                      Operator: EQ
+          Actions:
+            - Name: Approve
+              ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: "1" }
+              Configuration:
+                CustomData: "#{NetworkVars.APPROVAL}"
+                ExternalEntityLink: !Sub https://${AWS::Region}.console.aws.amazon.com/codesuite/codecommit/repositories/${RepositoryName}/commit/#{SourceVariables.CommitId}?region=${AWS::Region}
+                NotificationArn: !If [HasApprovalTopic, !Ref ApprovalTopicArn, !Ref AWS::NoValue]
+
+        - Name: NetworkApply
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: NetworkChanged
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: "1" }
+                    Configuration:
+                      Variable: "#{NetworkVars.CHANGED}"
+                      Value: "true"
+                      Operator: EQ
+          Actions:
+            - Name: Apply
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration:
+                ProjectName: !Ref ApplyProject
+                PrimarySource: SourceOutput
+                EnvironmentVariables: '[{"name":"APPLY_MODE","value":"--network","type":"PLAINTEXT"},{"name":"PLAN_ARTIFACT","value":"NetworkPlanOutput","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }, { Name: NetworkPlanOutput }]
+
+        - Name: UsersPlan
+          Actions:
+            - Name: Plan
+              Namespace: UsersVars
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration:
+                ProjectName: !Ref PlanProject
+                EnvironmentVariables: '[{"name":"PLAN_MODE","value":"--users","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }]
+              OutputArtifacts: [{ Name: UsersPlanOutput }]
+
+        # Only when a user's plan has changes or a removed user's workspace is left (#{UsersVars.CHANGED} is "true")
+        - Name: Approve
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: UsersChanged
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: "1" }
+                    Configuration:
+                      Variable: "#{UsersVars.CHANGED}"
+                      Value: "true"
+                      Operator: EQ
+          Actions:
+            - Name: Approve
+              ActionTypeId: { Category: Approval, Owner: AWS, Provider: Manual, Version: "1" }
+              Configuration:
+                CustomData: "#{UsersVars.APPROVAL}"
+                ExternalEntityLink: !Sub https://${AWS::Region}.console.aws.amazon.com/codesuite/codecommit/repositories/${RepositoryName}/commit/#{SourceVariables.CommitId}?region=${AWS::Region}
+                NotificationArn: !If [HasApprovalTopic, !Ref ApprovalTopicArn, !Ref AWS::NoValue]
+
+        - Name: Apply
+          BeforeEntry:
+            Conditions:
+              - Result: SKIP
+                Rules:
+                  - Name: UsersChanged
+                    RuleTypeId: { Category: Rule, Owner: AWS, Provider: VariableCheck, Version: "1" }
+                    Configuration:
+                      Variable: "#{UsersVars.CHANGED}"
+                      Value: "true"
+                      Operator: EQ
+          Actions:
+            - Name: Apply
+              ActionTypeId: { Category: Build, Owner: AWS, Provider: CodeBuild, Version: "1" }
+              Configuration:
+                ProjectName: !Ref ApplyProject
+                PrimarySource: SourceOutput
+                EnvironmentVariables: '[{"name":"APPLY_MODE","value":"--users","type":"PLAINTEXT"},{"name":"PLAN_ARTIFACT","value":"UsersPlanOutput","type":"PLAINTEXT"}]'
+              InputArtifacts: [{ Name: SourceOutput }, { Name: UsersPlanOutput }]
+
+  # A push to the branch starts the pipeline
+  PushRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source: [aws.codecommit]
+        detail-type: [CodeCommit Repository State Change]
+        resources: [!GetAtt Repository.Arn]
+        detail:
+          event: [referenceCreated, referenceUpdated]
+          referenceType: [branch]
+          referenceName: [!Ref BranchName]
+      Targets:
+        - Id: pipeline
+          Arn: !Sub arn:${AWS::Partition}:codepipeline:${AWS::Region}:${AWS::AccountId}:${Pipeline}
+          RoleArn: !GetAtt EventsRole.Arn
+
+Outputs:
+  RepositoryCloneUrlGrc:
+    Description: Remote URL for git-remote-codecommit
+    Value: !Sub codecommit::${AWS::Region}://${RepositoryName}
+  RepositoryCloneUrlHttp:
+    Description: HTTPS clone URL (Git credentials of an IAM user)
+    Value: !GetAtt Repository.CloneUrlHttp
+  PipelineName:
+    Value: !Ref Pipeline

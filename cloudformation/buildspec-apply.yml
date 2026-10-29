@@ -1,0 +1,18 @@
+# CodePipeline の NetworkApply・Apply の段 (承認の後): 前の plan の段が保存した plan だけを scripts/tofu-apply.sh で apply する。
+# APPLY_MODE (--network か --users) と PLAN_ARTIFACT (plan の出力のアーティファクトの名前) は段の設定が渡す。
+# 途中で止まったら Retry ではなく Release change で plan から流し直す (Retry は古い plan を使い、必ず止まる)
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  install:
+    commands:
+      - bash scripts/install-tofu.sh
+  build:
+    commands:
+      - export PATH="$(bash -c '. scripts/lib/tools.sh; tools_path'):$PATH"
+      - jq --version && aws --version && tofu version
+      # 2 つ目の入力のアーティファクトは CODEBUILD_SRC_DIR_<名前> に置かれる
+      - plan_var="CODEBUILD_SRC_DIR_$PLAN_ARTIFACT" && bash scripts/tofu-apply.sh "$APPLY_MODE" "${!plan_var}"
