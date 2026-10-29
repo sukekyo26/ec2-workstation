@@ -22,6 +22,7 @@ phases:
       - bash scripts/tofu-plan.sh "$PLAN_MODE" "$CODEBUILD_SRC_DIR/plan-out"
       # exported-variables は buildspec のシェルの変数しか拾わない (tofu-plan.sh の中の export は届かない)
       - export CHANGED="$(cat plan-out/vars/changed)" SUMMARY="$(cat plan-out/vars/summary)" APPROVAL="$(cat plan-out/vars/approval)"
+      - echo "CHANGED=$CHANGED SUMMARY=$SUMMARY"
       # 空のまま渡すと、条件が「変更なし」と読んで段を飛ばす
       - test "$CHANGED" = true || test "$CHANGED" = false
       - test -n "$APPROVAL"
