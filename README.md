@@ -202,7 +202,10 @@ flowchart TB
 - 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは、その人の workstations の plan（[4. デプロイ](#4-デプロイ) の「差分だけ見る」）で `aws_instance` が `-/+` になるかで確認できます
 - 新しい AMI が出ていれば、`scripts/tofu-deploy.sh` は全員分を plan するので、ユーザーの追加など**どの目的の deploy でも全員のインスタンスが作り直されます**（端末なら、作り直す人の一覧を出して `yes` を待ちます）。自分の分だけを作り直すときは、[4. デプロイ](#4-デプロイ) の「1 人分だけ apply する」の手順を使います。state はユーザーごとに分かれているので、1 人分の apply はほかの人のインスタンスに触れません
 - インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
-- ルートに入れたツールを残したい場合は [user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl) に追加してください
+- ルートに入れたツールを残したい場合は [user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl) に追加してください。このファイルは OpenTofu の `templatefile` で展開されるので、シェルの書き方のうち次の 2 つは書き換えが要ります。書き換えないと、`tofu plan` が `vars map does not contain key "HOME"` のような誤りで止まります
+  - `${VAR}`（波かっこ付きの変数）は `$${VAR}` と書く（展開で `${VAR}` になる）。波かっこの無い `$VAR` は、そのまま書けます
+  - `%{` は `%%{` と書く
+  - テンプレートに値を渡している変数は `data_volume_id`・`username`・`login_user` の 3 つだけで（[main.tf](opentofu/modules/workstation/main.tf) の `templatefile`）、テンプレートの中で `${username}` のように波かっこ付きで書けるのはこの 3 つです
 - `dataVolumeSize` を増やして `apply` すると、EBS ボリュームは作り直さずに大きくなります（in-place 更新）。ただし、ファイルシステムを広げる `resize2fs` は user-data の中にしか無いため、インスタンスを作り直すまではファイルシステムは広がりません。すぐ使う場合は、インスタンスに入って `sudo resize2fs "$(findmnt -n -o SOURCE /data)"` を実行してください（`findmnt -n -o SOURCE /data` がデータボリュームのデバイス名で、例: `/dev/nvme1n1`）
 - EBS ボリュームは後から小さくできません。`dataVolumeSize` を減らすと、`tofu plan` は in-place 更新として通りますが、`apply` で AWS が断って失敗します。初めは小さめにして、必要に応じて増やしてください
 - データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`./scripts/tofu-init.sh workstations <username>` の後に `tofu -chdir=opentofu/stacks/workstations apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
