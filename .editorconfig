@@ -3,3 +3,11 @@ root = true
 
 [*.ps1]
 charset = utf-8-bom
+
+# shfmt の書式 (scripts/format-shell.sh は shfmt に書式の引数を渡さず、ここを読ませる)。
+# 対象のファイルは scripts/format-shell.sh の一覧と合わせる
+[{*.sh,*.sh.tftpl}]
+indent_style = space
+indent_size = 4
+switch_case_indent = true
+space_redirects = true
