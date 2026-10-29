@@ -166,7 +166,16 @@ case "$1 $2" in
         ;;
 esac
 FAKE
-chmod +x "$work/bin/tofu" "$work/bin/aws"
+# jq は本物を呼ぶ。FAKE_JQ_FAIL があれば、その文字列を含む式だけを失敗させる (plan の数え方の失敗を作る)
+real_jq=$(command -v jq)
+cat > "$work/bin/jq" << FAKE
+#!/usr/bin/env bash
+if [ -n "\${FAKE_JQ_FAIL:-}" ] && [[ "\$*" == *"\$FAKE_JQ_FAIL"* ]]; then
+    exit 5
+fi
+exec "$real_jq" "\$@"
+FAKE
+chmod +x "$work/bin/tofu" "$work/bin/aws" "$work/bin/jq"
 
 # 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。答えは、スキーマを厳しいメタスキーマで見るときは FAKE_JV_META、
 # 設定を見るときは FAKE_JV で変える (どちらも既定は通す)
@@ -807,6 +816,25 @@ expect_no_log apply-users-no-manifest "apply"
 run apply-network-no-plan tofu-apply.sh "" --network "$work/out/p-empty" RUN_REPO="$repo2"
 expect_rc apply-network-no-plan 1
 expect_err apply-network-no-plan "no network plan"
+
+# plan の数え方 (plan_counts の jq) が失敗したら、変数を書かずに止まる
+counts_expr='join(" ")'
+run plan-network-counts-fail tofu-plan.sh "" --network "$work/out/p-network-cf" "FAKE_JQ_FAIL=$counts_expr"
+expect_rc plan-network-counts-fail 1
+expect_err plan-network-counts-fail "could not count the changes in the plan"
+[ ! -e "$work/out/p-network-cf/vars" ] || fail "plan-network-counts-fail: vars written"
+run plan-users-counts-fail tofu-plan.sh "" --users "$work/out/p-users-cf" "FAKE_JQ_FAIL=$counts_expr"
+expect_rc plan-users-counts-fail 1
+expect_err plan-users-counts-fail "could not count the changes in the plan"
+[ ! -e "$work/out/p-users-cf/vars" ] || fail "plan-users-counts-fail: vars written"
+
+# 引数の誤りは、init より先に usage で止まる
+for script in tofu-plan.sh tofu-apply.sh; do
+    run "$script-bad-mode" "$script" "" --other "$work/out/x"
+    expect_rc "$script-bad-mode" 1
+    expect_err "$script-bad-mode" "usage:"
+    expect_no_log "$script-bad-mode" "init"
+done
 
 for args in "" "--network" "--other $work/out/x" "--users a b"; do
     # shellcheck disable=SC2086 # 引数を空白で分けて渡す

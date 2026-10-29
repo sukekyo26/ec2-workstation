@@ -13,7 +13,8 @@ set -euo pipefail
 # shellcheck source=scripts/lib/tofu-common.sh
 . "$(dirname "$0")/lib/tofu-common.sh"
 
-if [ $# -ne 2 ]; then
+# 引数の誤りを、init (S3 backend) の誤りより先に出す
+if [ $# -ne 2 ] || { [ "$1" != --network ] && [ "$1" != --users ]; }; then
     die "usage: TF_STATE_BUCKET=<bucket> $0 --network | --users <plan dir>"
 fi
 mode=$1
@@ -30,7 +31,9 @@ case "$mode" in
         refuse_leftover_shared_workstations_state
         plan_network "$plan_dir"
         summarize_plan network "$NETWORK_PLAN_JSON"
-        read -r c u r d <<< "$(plan_counts "$NETWORK_PLAN_JSON")"
+        # here-string の中のコマンド置換では、plan_counts の die で止まらない
+        counts=$(plan_counts "$NETWORK_PLAN_JSON")
+        read -r c u r d <<< "$counts"
         changed=false
         if [ "$PLAN_CHANGED" -eq 1 ]; then
             changed=true
@@ -54,7 +57,8 @@ case "$mode" in
         # 要約は危ない情報 (消える人・作り直し・削除) を先に置く (承認の文は長ければ末尾から切られる)
         create=0 update=0 replace=0 delete=0 replaced=()
         for name in "${USERS[@]}" "${REMOVED[@]}"; do
-            read -r c u r d <<< "${USER_COUNTS[$name]}"
+            counts=$(plan_counts "${USER_PLAN_JSON[$name]}")
+            read -r c u r d <<< "$counts"
             create=$((create + c)) update=$((update + u)) replace=$((replace + r)) delete=$((delete + d))
             if [ "$r" -gt 0 ]; then
                 replaced+=("$name")
@@ -68,6 +72,5 @@ case "$mode" in
         write_pipeline_vars "$plan_dir" "$changed" \
             "removed: ${REMOVED[*]:-none} / replace: $replace (${replaced[*]:-none}) / delete: $delete / create: $create / update: $update"
         ;;
-    *) die "usage: TF_STATE_BUCKET=<bucket> $0 --network | --users <plan dir>" ;;
 esac
 log "plan saved in $plan_dir: $(cat "$plan_dir/vars/summary")"

@@ -284,7 +284,7 @@ plan_network() {
 }
 
 # ユーザーの workspace ごとに plan を保存し、要約を出す (1 つでも失敗したら止まる)。init_stack workstations の後に呼ぶ。
-# USER_CHANGES に変更のある plan の数、USER_COUNTS[<名前>] に plan_counts の 4 つの数を入れる
+# USER_CHANGES に変更のある plan の数、USER_PLAN_JSON[<名前>] にその plan の JSON を入れる
 #   plan_user_stacks <plan の置き場所> <apply するユーザー...> -- <destroy するユーザー...>
 plan_user_stacks() {
     local plan_dir=$1 dir u plan_json
@@ -300,7 +300,7 @@ plan_user_stacks() {
     destroy_users=("$@")
     dir=$(stack_dir workstations)
     USER_CHANGES=0
-    declare -gA USER_COUNTS=()
+    declare -gA USER_PLAN_JSON=()
 
     # LIMIT: ユーザーを 1 人ずつ順に plan・apply するので、人数に比例して時間がかかる。CI の時間が問題になったら並列にする (state もロックも人ごと)
     for u in "${apply_users[@]}"; do
@@ -311,7 +311,7 @@ plan_user_stacks() {
         summarize_plan "workstations/$u" "$plan_json"
         USER_CHANGES=$((USER_CHANGES + PLAN_CHANGED))
         # shellcheck disable=SC2034 # tofu-plan.sh が読む
-        USER_COUNTS[$u]=$(plan_counts "$plan_json")
+        USER_PLAN_JSON[$u]=$plan_json
     done
     # data source (AMI の SSM パラメータ・VPC の検索) を読まずに、state にあるものを消す
     for u in "${destroy_users[@]}"; do
@@ -322,7 +322,7 @@ plan_user_stacks() {
         summarize_plan "workstations/$u" "$plan_json"
         USER_CHANGES=$((USER_CHANGES + PLAN_CHANGED))
         # shellcheck disable=SC2034 # tofu-plan.sh が読む
-        USER_COUNTS[$u]=$(plan_counts "$plan_json")
+        USER_PLAN_JSON[$u]=$plan_json
     done
 }
 

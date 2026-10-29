@@ -9,7 +9,8 @@ set -euo pipefail
 # shellcheck source=scripts/lib/tofu-common.sh
 . "$(dirname "$0")/lib/tofu-common.sh"
 
-if [ $# -ne 2 ]; then
+# 引数の誤りを、init (S3 backend) の誤りより先に出す
+if [ $# -ne 2 ] || { [ "$1" != --network ] && [ "$1" != --users ]; }; then
     die "usage: TF_STATE_BUCKET=<bucket> $0 --network | --users <plan dir>"
 fi
 mode=$1
@@ -51,5 +52,4 @@ case "$mode" in
         init_stack workstations
         apply_user_stacks "$plan_dir" "$retry_hint" "${users[@]}" -- "${removed[@]}"
         ;;
-    *) die "usage: TF_STATE_BUCKET=<bucket> $0 --network | --users <plan dir>" ;;
 esac
