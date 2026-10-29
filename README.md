@@ -631,6 +631,9 @@ ec2-workstation/
 just ci
 ```
 
+- PowerShell のスクリプト（`scripts/**/*.ps1`）は、CI の `PowerShell 5.1` のジョブ（windows-latest の Windows PowerShell 5.1）が構文と PSScriptAnalyzer で確かめます。SSH の ProxyCommand が Windows PowerShell 5.1 で動くためです。`just ci` の `pwsh-check` は手元の pwsh 7 での目安で（pwsh が無ければ飛ばします）、5.1 で通らない書き方は CI で見ます
+- `PowerShell 5.1` のジョブは、ps1 か、その検査のファイルを触ったときだけ走り、必須のチェックではありません。ps1 を触った PR では、マージの前にこのジョブが通っていることを確かめてください
+
 ---
 
 ## 📚 参考資料
