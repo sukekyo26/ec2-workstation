@@ -33,11 +33,12 @@ tofu-check:
         tofu -chdir="$stack" validate
     done
 
-# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、道具の取り方を偽の curl で、format-shell.sh を偽の shfmt で確かめる（CI と同じ）
+# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、道具の取り方を偽の curl で、format-shell.sh を偽の shfmt で、start-ec2 の 2 本を偽の aws で確かめる（CI と同じ）
 scripts-test:
     scripts/tests/tofu-deploy.test.sh
     scripts/tests/install-tools.test.sh
     scripts/tests/format-shell.test.sh
+    scripts/tests/start-ec2.test.sh
 
 # シェルスクリプトの静的解析（対象は scripts/format-shell.sh の一覧）
 shellcheck:

@@ -112,6 +112,9 @@ jobs:
       - name: Test format-shell.sh with a fake shfmt
         run: scripts/tests/format-shell.test.sh
 
+      - name: Test start-ec2-and-wait.sh and start-ec2.sh with a fake aws
+        run: scripts/tests/start-ec2.test.sh
+
   shell-format:
     name: Shell format
     runs-on: ubuntu-latest
@@ -195,3 +198,7 @@ jobs:
       - name: Parse and analyze scripts/**/*.ps1
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
+
+      - name: Test start-ec2-and-wait.ps1 and start-ec2.ps1 with a fake aws
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1
