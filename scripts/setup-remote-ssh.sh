@@ -175,7 +175,9 @@ chmod 600 "$SECRET_KEY_PATH"
 # ============================================
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 AUTO_START_SCRIPT="start-ec2-and-wait.sh"
-AUTO_START_SCRIPT_PATH="$SSH_CONFIG_DIR/$AUTO_START_SCRIPT"
+# ホストごとに 1 つ: 別のホストの setup で、このホストが使うスクリプトを変えない。
+# 前の版の setup が置いた共有の ~/.ssh/start-ec2-and-wait.sh は、まだ使うホストのために触らない
+AUTO_START_SCRIPT_PATH="$SSH_CONFIG_DIR/ec2-workstation-proxy-$SSH_HOST.sh"
 
 echo -e "${CYAN}Copying auto-start script...${NC}"
 cp "$SCRIPT_DIR/$AUTO_START_SCRIPT" "$AUTO_START_SCRIPT_PATH"
@@ -238,3 +240,4 @@ echo -e "${GREEN}Updated: $SSH_CONFIG_PATH${NC}"
 echo ""
 echo -e "${GREEN}✓ Configuration complete!${NC}"
 echo -e "${GREEN}You can now connect to '$SSH_HOST' using VS Code Remote-SSH.${NC}"
+echo -e "${GRAY}'$SSH_HOST' runs $AUTO_START_SCRIPT_PATH. The other hosts keep their own scripts; to update one, run this setup again for that host.${NC}"
