@@ -64,11 +64,6 @@ variable "data_volume_type" {
   type        = string
 }
 
-variable "user_data_template" {
-  description = "Path to the user data script template (rendered with data_volume_id, username and login_user)"
-  type        = string
-}
-
 variable "enable_elastic_ip" {
   description = "Whether to allocate and associate an Elastic IP"
   type        = bool

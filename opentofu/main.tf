@@ -25,8 +25,7 @@ module "workstation" {
   data_volume_size = each.value.instance_config.dataVolumeSize
   data_volume_type = each.value.instance_config.dataVolumeType
 
-  user_data_template = "${path.module}/../shared/user-data.sh"
-  enable_elastic_ip  = each.value.enable_elastic_ip
+  enable_elastic_ip = each.value.enable_elastic_ip
 
   cpu_threshold = local.auto_stop_config.cpuThreshold
   # CloudWatch Alarm は 5 分周期のため、監視期間(分)を期間数に変換

@@ -197,12 +197,12 @@ flowchart TB
 | `~/.gitconfig` | データボリューム（`/data/git/config` へのシンボリックリンク） | 残る |
 | 上記以外（dotfiles、apt で入れたパッケージなど） | ルートボリューム | **消える** |
 
-- AMI が同じでも、user-data（[user-data.sh](shared/user-data.sh)）が変わった `apply` ではインスタンスが作り直されます（cloud-init は同じインスタンスでは user-data を走らせ直さないため）。user-data は gzip して渡すので、`tofu plan` やコンソールでは中身が読めません。何が変わったかは git の差分で確かめてください
+- AMI が同じでも、user-data（[user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl)）が変わった `apply` ではインスタンスが作り直されます（cloud-init は同じインスタンスでは user-data を走らせ直さないため）。user-data は gzip して渡すので、`tofu plan` やコンソールでは中身が読めません。何が変わったかは git の差分で確かめてください
 - 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
 - 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは `tofu plan` で `aws_instance` が `-/+` になるかで確認できます
 - 新しい AMI が出ていれば、ユーザーの追加など**どの目的の `apply` でも全員のインスタンスが作り直されます**。作業中のメンバーがいるときは `tofu plan` で確認してから実行してください
 - インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
-- ルートに入れたツールを残したい場合は [user-data.sh](shared/user-data.sh) に追加してください
+- ルートに入れたツールを残したい場合は [user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl) に追加してください
 - `dataVolumeSize` を増やして `apply` すると、EBS ボリュームは作り直さずに大きくなります（in-place 更新）。ただし、ファイルシステムを広げる `resize2fs` は user-data の中にしか無いため、インスタンスを作り直すまではファイルシステムは広がりません。すぐ使う場合は、インスタンスに入って `sudo resize2fs "$(findmnt -n -o SOURCE /data)"` を実行してください（`findmnt -n -o SOURCE /data` がデータボリュームのデバイス名で、例: `/dev/nvme1n1`）
 - EBS ボリュームは後から小さくできません。`dataVolumeSize` を減らすと、`tofu plan` は in-place 更新として通りますが、`apply` で AWS が断って失敗します。初めは小さめにして、必要に応じて増やしてください
 - データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`tofu apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
@@ -415,7 +415,7 @@ tofu output workstations
 
 ### User Dataスクリプトで自動インストール
 
-EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh](shared/user-data.sh)）。
+EC2起動時に以下のソフトウェアが自動でインストールされます（[user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl)）。
 
 | カテゴリ | ソフトウェア |
 |---------|-------------|
@@ -573,12 +573,10 @@ ec2-workstation/
 ├── opentofu/                     # OpenTofu 実装
 │   ├── modules/
 │   │   ├── network/              # VPC・サブネット・IGW・Flow Logs
-│   │   └── workstation/            # SG・IAM・EC2・キーペア・自動停止
+│   │   └── workstation/          # SG・IAM・EC2・キーペア・自動停止、user-data は templates/
 │   ├── locals.tf                 # workstation-config.json 読み込み
 │   ├── main.tf
 │   └── README.md                 # OpenTofu 利用ガイド
-├── shared/
-│   └── user-data.sh              # EC2初期化スクリプト
 ├── scripts/
 │   ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
 │   ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
