@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$false)]
-    [string]$InstanceId,
+    [string]$InstanceName,
 
     [Parameter(Mandatory=$false)]
     [string]$SshHost,
@@ -50,20 +50,15 @@ if ($hasError) {
 Write-Host ""
 
 # ============================================
-# Prompt for EC2 Instance ID
+# Prompt for EC2 Instance Name tag
 # ============================================
-if ([string]::IsNullOrEmpty($InstanceId)) {
+# AMI 更新のたびにインスタンスが作り直されて ID が変わるため、ID ではなく Name タグで指定する
+if ([string]::IsNullOrEmpty($InstanceName)) {
     do {
-        $InstanceId = Read-Host "Enter EC2 Instance ID (e.g., i-0123456789abcdef0)"
+        $InstanceName = Read-Host "Enter EC2 instance Name tag (instance_name in 'tofu output workstations')"
 
-        if ([string]::IsNullOrEmpty($InstanceId)) {
-            Write-Host "Error: Instance ID is required." -ForegroundColor Red
-            continue
-        }
-
-        if ($InstanceId -notmatch '^i-[a-f0-9]{17}$') {
-            Write-Host "Error: Invalid Instance ID format. Must start with 'i-' followed by 17 hexadecimal characters." -ForegroundColor Red
-            $InstanceId = $null
+        if ([string]::IsNullOrEmpty($InstanceName)) {
+            Write-Host "Error: Instance Name tag is required." -ForegroundColor Red
             continue
         }
 
@@ -101,7 +96,7 @@ if ([string]::IsNullOrEmpty($Region)) {
 # ============================================
 # Set variables
 # ============================================
-$INSTANCE_ID = $InstanceId
+$INSTANCE_NAME = $InstanceName
 $SSH_HOST = $SshHost
 $REGION = $Region
 $USER = "ubuntu"
@@ -123,6 +118,18 @@ if (-not (Test-Path $SSH_CONFIG_DIR)) {
 # Get key pair information from EC2 instance
 # ============================================
 Write-Host "`nRetrieving key pair information from instance..." -ForegroundColor Cyan
+$instanceIds = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --region $REGION --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query "Reservations[].Instances[].InstanceId" --output text
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Error: Failed to look up instance: $instanceIds"
+    exit 1
+}
+
+$instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
+if ($instanceIdList.Count -ne 1) {
+    Write-Error "Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
+    exit 1
+}
+$INSTANCE_ID = $instanceIdList[0]
 $KEY_NAME = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].KeyName" --output text
 
 if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {
@@ -199,7 +206,7 @@ if (Test-Path $SSH_CONFIG_PATH) {
 $sshConfigEntry = @"
 # Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
-   HostName $INSTANCE_ID
+   HostName $INSTANCE_NAME
    User $USER
    IdentityFile $SECRET_KEY_PATH_UNIX
    IdentitiesOnly yes

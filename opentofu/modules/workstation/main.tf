@@ -2,6 +2,7 @@
 # - SG: 全インバウンド拒否、アウトバウンドは HTTPS/HTTP/DNS のみ
 # - SSM SessionManager 接続 (SSH ポート非開放)
 # - Ubuntu 24.04 LTS / EBS 暗号化 / IMDSv2 強制
+# - AMI はデプロイのたびに最新へ追従し、作業データはデータボリュームに分離して残す
 
 locals {
   resource_prefix = "${var.project_name}-${var.environment}-${var.username}"
@@ -137,8 +138,11 @@ resource "aws_instance" "this" {
   vpc_security_group_ids      = [aws_security_group.this.id]
   iam_instance_profile        = aws_iam_instance_profile.this.name
   key_name                    = aws_key_pair.this.key_name
-  user_data                   = var.user_data
   associate_public_ip_address = true
+  user_data = templatefile(var.user_data_template, {
+    data_volume_id = aws_ebs_volume.data.id
+    username       = var.username
+  })
 
   # IMDSv2 強制 (SSRF 対策)
   metadata_options {
@@ -147,8 +151,8 @@ resource "aws_instance" "this" {
   }
 
   root_block_device {
-    volume_size           = var.volume_size
-    volume_type           = var.volume_type
+    volume_size           = var.root_volume_size
+    volume_type           = var.root_volume_type
     encrypted             = true
     delete_on_termination = true
   }
@@ -158,11 +162,34 @@ resource "aws_instance" "this" {
     Owner    = var.username
     Schedule = "office-hours"
   }
+}
 
-  lifecycle {
-    # AMI は初回 apply 時に解決し以後固定する (新 AMI 公開でインスタンスを再作成させない)
-    ignore_changes = [ami]
+# ============================================================
+# データボリューム
+# インスタンス (= ルートボリューム) は AMI 更新のたびに作り直されるため、
+# 作業データはインスタンスと独立したこのボリュームに置く。
+# ============================================================
+
+resource "aws_ebs_volume" "data" {
+  availability_zone = var.availability_zone
+  size              = var.data_volume_size
+  type              = var.data_volume_type
+  encrypted         = true
+  # ユーザー削除・tofu destroy でボリュームが消えるときもスナップショットを残す
+  final_snapshot = true
+
+  tags = {
+    Name  = "${local.resource_prefix}-data"
+    Owner = var.username
   }
+}
+
+resource "aws_volume_attachment" "data" {
+  device_name = "/dev/sdf"
+  volume_id   = aws_ebs_volume.data.id
+  instance_id = aws_instance.this.id
+  # 稼働中のデタッチでファイルシステムを壊さないよう、先にインスタンスを停止する
+  stop_instance_before_detaching = true
 }
 
 # ============================================================

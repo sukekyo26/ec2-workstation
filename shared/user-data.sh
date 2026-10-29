@@ -19,12 +19,12 @@ export DEBIAN_FRONTEND=noninteractive
 export HOME=/root
 
 # システムアップデート
-echo "[1/6] Updating system packages..."
+echo "[1/7] Updating system packages..."
 apt-get update -y
 apt-get upgrade -y
 
 # 基本ツールインストール
-echo "[2/6] Installing essential tools..."
+echo "[2/7] Installing essential tools..."
 apt-get install -y \
     curl \
     wget \
@@ -50,8 +50,118 @@ apt-get install -y \
     iputils-ping \
     net-tools
 
+# データボリュームのマウント
+# AMI 更新でルートボリュームが作り直されても残すデータ (~/work・Docker・~/.gitconfig) を置く。
+# Docker インストールより前に bind mount しておき、最初からデータボリュームに書かせる。
+echo "[3/7] Mounting data volume..."
+# shellcheck disable=SC2154 # tofu の templatefile で埋め込まれる
+DATA_VOLUME_ID="${data_volume_id}"
+# shellcheck disable=SC2154 # 同上
+WORKSTATION_USER="${username}"
+DATA_MOUNT=/data
+DEFAULT_USER=$(id -nu 1000)
+DEFAULT_HOME=$(getent passwd "$DEFAULT_USER" | cut -d: -f6)
+
+# アタッチはインスタンス起動後に行われるため、デバイスが現れるまで待つ。
+# Nitro は NVMe シリアル (ボリューム ID からハイフンを除いたもの)、Xen は /dev/xvdf で見える。
+DATA_DEVICE=""
+for _ in $(seq 1 120); do
+    for candidate in "/dev/disk/by-id/nvme-Amazon_Elastic_Block_Store_$(echo "$DATA_VOLUME_ID" | tr -d -)" /dev/xvdf; do
+        if [ -b "$candidate" ]; then
+            DATA_DEVICE=$(readlink -f "$candidate")
+            break 2
+        fi
+    done
+    sleep 5
+done
+if [ -z "$DATA_DEVICE" ]; then
+    # user-data はインスタンスで 1 回しか走らないため、後からアタッチしてもマウントされない。作り直すしかない
+    echo "ERROR: data volume $DATA_VOLUME_ID was not attached within 10 minutes, so nothing was mounted or installed." >&2
+    echo "Check aws_volume_attachment in the tofu apply output, then recreate the instance:" >&2
+    echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
+    exit 1
+fi
+
+# ファイルシステムが無いとき (初回) だけフォーマットする。既存データは上書きしない。
+# blkid -p は「何も見つからない」ときだけでなく、読めないときも 2 を返す (man の EXIT STATUS)。
+# 読めないデバイスを空と取り違えないよう、先に先頭を実際に読めることを確かめる (読めなければ set -e で止まる)
+dd if="$DATA_DEVICE" of=/dev/null bs=1M count=1 status=none
+if DATA_FS_TYPE=$(blkid -p -o value -s TYPE "$DATA_DEVICE"); then
+    BLKID_STATUS=0
+else
+    BLKID_STATUS=$?
+fi
+case "$BLKID_STATUS" in
+    0)
+        if [ "$DATA_FS_TYPE" != ext4 ]; then
+            echo "ERROR: data volume $DATA_VOLUME_ID has '$DATA_FS_TYPE', not ext4. Refusing to mount or format it; inspect it with 'sudo blkid -p $DATA_DEVICE'." >&2
+            exit 1
+        fi
+        ;;
+    2) mkfs.ext4 -q "$DATA_DEVICE" ;;
+    *)
+        echo "ERROR: blkid -p failed on $DATA_DEVICE (exit $BLKID_STATUS). Refusing to format it; inspect it with 'sudo blkid -p $DATA_DEVICE' and 'sudo wipefs $DATA_DEVICE'." >&2
+        exit 1
+        ;;
+esac
+DATA_UUID=$(blkid -o value -s UUID "$DATA_DEVICE")
+
+mkdir -p "$DATA_MOUNT"
+if ! grep -q "$DATA_UUID" /etc/fstab; then
+    echo "UUID=$DATA_UUID $DATA_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
+fi
+mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
+# ボリュームを拡張した場合に追従する (サイズが同じなら何もしない)
+resize2fs "$DATA_DEVICE"
+
+for dir in work docker containerd; do
+    if [ ! -d "$DATA_MOUNT/$dir" ]; then
+        mkdir -p "$DATA_MOUNT/$dir"
+        if [ "$dir" = work ]; then
+            chown "$DEFAULT_USER:$DEFAULT_USER" "$DATA_MOUNT/$dir"
+        fi
+    fi
+done
+
+# containerd image store (Docker 29 以降の既定) は /var/lib/docker とは別に
+# /var/lib/containerd へイメージを置くため、両方をデータボリュームに向ける
+for target in "$DEFAULT_HOME/work:work" /var/lib/docker:docker /var/lib/containerd:containerd; do
+    mount_point=$(echo "$target" | cut -d: -f1)
+    source_dir="$DATA_MOUNT/$(echo "$target" | cut -d: -f2)"
+    mkdir -p "$mount_point"
+    # nofail のため、データボリュームが無いまま起動しても SSM では入れる。そのとき ~/work が
+    # ルートボリュームに黙って書かれ、次の作り直しで消えないよう、下地のディレクトリを書き込み禁止にする。
+    # Docker は RequiresMountsFor でマウント前に起動しないので対象外
+    if [ "$mount_point" = "$DEFAULT_HOME/work" ] && ! mountpoint -q "$mount_point"; then
+        chattr +i "$mount_point"
+    fi
+    if ! grep -q " $mount_point none bind" /etc/fstab; then
+        echo "$source_dir $mount_point none bind,nofail,x-systemd.requires-mounts-for=$DATA_MOUNT 0 0" >> /etc/fstab
+    fi
+    mountpoint -q "$mount_point" || mount "$mount_point"
+done
+chown "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/work"
+
+# 再起動時にマウント完了前に Docker が起動して空のディレクトリへ書き込まないようにする
+for unit in docker containerd; do
+    mkdir -p "/etc/systemd/system/$unit.service.d"
+    cat > "/etc/systemd/system/$unit.service.d/data-volume.conf" << 'UNIT'
+[Unit]
+RequiresMountsFor=/var/lib/docker /var/lib/containerd
+UNIT
+done
+systemctl daemon-reload
+
+# git の設定 (git config --global) はデータボリューム上の実体を指すシンボリックリンクにする
+if [ ! -f "$DATA_MOUNT/gitconfig" ]; then
+    touch "$DATA_MOUNT/gitconfig"
+    chown "$DEFAULT_USER:$DEFAULT_USER" "$DATA_MOUNT/gitconfig"
+fi
+ln -sfn "$DATA_MOUNT/gitconfig" "$DEFAULT_HOME/.gitconfig"
+chown -h "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/.gitconfig"
+
 # Dockerインストール
-echo "[3/6] Installing Docker..."
+echo "[4/7] Installing Docker..."
 if ! command -v docker &> /dev/null; then
     # Docker公式インストールスクリプトを使用
     curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
@@ -63,8 +173,8 @@ if ! command -v docker &> /dev/null; then
     systemctl start docker
 fi
 
-# デフォルトユーザー（ubuntu）をdockerグループに追加
-usermod -aG docker ubuntu
+# デフォルトユーザーをdockerグループに追加
+usermod -aG docker "$DEFAULT_USER"
 
 # Docker Compose確認
 echo "Docker version:"
@@ -73,7 +183,7 @@ echo "Docker Compose version:"
 docker compose version
 
 # AWS CLI v2インストール
-echo "[4/6] Installing AWS CLI v2..."
+echo "[5/7] Installing AWS CLI v2..."
 if ! command -v aws &> /dev/null; then
     cd /tmp
     curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -84,17 +194,13 @@ fi
 echo "AWS CLI version:"
 aws --version
 
-# 開発用ディレクトリ作成
-echo "[5/6] Setting up workstation directory..."
-mkdir -p /home/ubuntu/work
-chown -R ubuntu:ubuntu /home/ubuntu/work
-
 # sudoヘルプメッセージを非表示にする
-touch /home/ubuntu/.sudo_as_admin_successful
-chown ubuntu:ubuntu /home/ubuntu/.sudo_as_admin_successful
+echo "[6/7] Configuring user environment..."
+touch "$DEFAULT_HOME/.sudo_as_admin_successful"
+chown "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/.sudo_as_admin_successful"
 
 # タイムゾーン設定（日本時間）
-echo "[6/6] Setting timezone and swap space..."
+echo "[7/7] Setting timezone and swap space..."
 timedatectl set-timezone Asia/Tokyo
 
 # スワップ領域作成（メモリ不足対策）

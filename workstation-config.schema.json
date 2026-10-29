@@ -42,8 +42,10 @@
       "description": "デフォルトのEC2インスタンス設定",
       "required": [
         "instanceType",
-        "volumeSize",
-        "volumeType"
+        "rootVolumeSize",
+        "rootVolumeType",
+        "dataVolumeSize",
+        "dataVolumeType"
       ],
       "additionalProperties": false,
       "properties": {
@@ -51,15 +53,29 @@
           "type": "string",
           "description": "インスタンスタイプ (例: t3.medium)"
         },
-        "volumeSize": {
+        "rootVolumeSize": {
           "type": "number",
-          "description": "EBSボリュームサイズ (GB)",
+          "description": "ルートEBSボリュームサイズ (GB)。OS とパッケージ用で、AMI 更新のたびに作り直される",
           "minimum": 20,
           "maximum": 1000
         },
-        "volumeType": {
+        "rootVolumeType": {
           "type": "string",
-          "description": "EBSボリュームタイプ",
+          "description": "ルートEBSボリュームタイプ",
+          "enum": [
+            "gp3",
+            "gp2"
+          ]
+        },
+        "dataVolumeSize": {
+          "type": "number",
+          "description": "データEBSボリュームサイズ (GB)。~/work・Docker・~/.gitconfig を保存し、AMI 更新後も残る",
+          "minimum": 20,
+          "maximum": 1000
+        },
+        "dataVolumeType": {
+          "type": "string",
+          "description": "データEBSボリュームタイプ",
           "enum": [
             "gp3",
             "gp2"
@@ -136,12 +152,24 @@
               "instanceType": {
                 "type": "string"
               },
-              "volumeSize": {
+              "rootVolumeSize": {
                 "type": "number",
                 "minimum": 20,
                 "maximum": 1000
               },
-              "volumeType": {
+              "rootVolumeType": {
+                "type": "string",
+                "enum": [
+                  "gp3",
+                  "gp2"
+                ]
+              },
+              "dataVolumeSize": {
+                "type": "number",
+                "minimum": 20,
+                "maximum": 1000
+              },
+              "dataVolumeType": {
                 "type": "string",
                 "enum": [
                   "gp3",

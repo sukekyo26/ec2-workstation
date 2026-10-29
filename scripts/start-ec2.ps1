@@ -5,14 +5,14 @@
     EC2インスタンスが停止中の場合は起動し、
     SSM Agentの接続完了まで待機してから終了します。
     VS Code Remote-SSH接続前に手動で実行します。
-.PARAMETER InstanceId
-    EC2インスタンスID
+.PARAMETER InstanceName
+    EC2インスタンスの Name タグ（AMI 更新でインスタンス ID が変わるため ID ではなく Name タグで指定する）
 .PARAMETER Region
     AWSリージョン
 #>
 param(
     [Parameter(Mandatory=$false)]
-    [string]$InstanceId,
+    [string]$InstanceName,
 
     [Parameter(Mandatory=$false)]
     [string]$Region
@@ -59,20 +59,14 @@ function Wait-SSMAgentReady {
 
 try {
     # ============================================
-    # Prompt for EC2 Instance ID
+    # Prompt for EC2 Instance Name tag
     # ============================================
-    if ([string]::IsNullOrEmpty($InstanceId)) {
+    if ([string]::IsNullOrEmpty($InstanceName)) {
         do {
-            $InstanceId = Read-Host "Enter EC2 Instance ID (e.g., i-0123456789abcdef0)"
+            $InstanceName = Read-Host "Enter EC2 instance Name tag (instance_name in 'tofu output workstations')"
 
-            if ([string]::IsNullOrEmpty($InstanceId)) {
-                Write-Host "Error: Instance ID is required." -ForegroundColor Red
-                continue
-            }
-
-            if ($InstanceId -notmatch '^i-[a-f0-9]{17}$') {
-                Write-Host "Error: Invalid Instance ID format. Must start with 'i-' followed by 17 hexadecimal characters." -ForegroundColor Red
-                $InstanceId = $null
+            if ([string]::IsNullOrEmpty($InstanceName)) {
+                Write-Host "Error: Instance Name tag is required." -ForegroundColor Red
                 continue
             }
 
@@ -89,6 +83,23 @@ try {
     }
 
     Write-Log "Checking EC2 instance state..."
+
+    # Name タグからインスタンス ID を引く (AMI 更新のたびにインスタンスが作り直されて ID が変わるため)
+    $instanceIds = & $awsCli ec2 describe-instances `
+        --region $Region `
+        --filters "Name=tag:Name,Values=$InstanceName" "Name=instance-state-name,Values=pending,running,stopping,stopped" `
+        --query "Reservations[].Instances[].InstanceId" `
+        --output text 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to look up instance: $instanceIds"
+    }
+
+    $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
+    if ($instanceIdList.Count -ne 1) {
+        throw "Expected exactly one instance tagged Name=$InstanceName in $Region, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
+    }
+    $InstanceId = $instanceIdList[0]
 
     # EC2インスタンスの状態を確認
     $state = & $awsCli ec2 describe-instances `

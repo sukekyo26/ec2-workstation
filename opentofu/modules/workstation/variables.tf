@@ -28,18 +28,33 @@ variable "instance_type" {
   type        = string
 }
 
-variable "volume_size" {
+variable "availability_zone" {
+  description = "Availability zone of the subnet (the data volume must be in the same AZ)"
+  type        = string
+}
+
+variable "root_volume_size" {
   description = "Root EBS volume size (GB)"
   type        = number
 }
 
-variable "volume_type" {
+variable "root_volume_type" {
   description = "Root EBS volume type"
   type        = string
 }
 
-variable "user_data" {
-  description = "User data script content"
+variable "data_volume_size" {
+  description = "Data EBS volume size (GB)"
+  type        = number
+}
+
+variable "data_volume_type" {
+  description = "Data EBS volume type"
+  type        = string
+}
+
+variable "user_data_template" {
+  description = "Path to the user data script template (rendered with data_volume_id)"
   type        = string
 }
 

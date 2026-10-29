@@ -15,23 +15,18 @@ CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 # 引数を変数に代入
-INSTANCE_ID="$1"
+INSTANCE_NAME="$1"
 REGION="$2"
 
 # ============================================
-# Prompt for EC2 Instance ID
+# Prompt for EC2 Instance Name tag
 # ============================================
-if [ -z "$INSTANCE_ID" ]; then
+if [ -z "$INSTANCE_NAME" ]; then
     while true; do
-        read -rp "Enter EC2 Instance ID (e.g., i-0123456789abcdef0): " INSTANCE_ID
+        read -rp "Enter EC2 instance Name tag (instance_name in 'tofu output workstations'): " INSTANCE_NAME
 
-        if [ -z "$INSTANCE_ID" ]; then
-            echo -e "${RED}Error: Instance ID is required.${NC}"
-            continue
-        fi
-
-        if ! [[ "$INSTANCE_ID" =~ ^i-[a-f0-9]{17}$ ]]; then
-            echo -e "${RED}Error: Invalid Instance ID format. Must start with 'i-' followed by 17 hexadecimal characters.${NC}"
+        if [ -z "$INSTANCE_NAME" ]; then
+            echo -e "${RED}Error: Instance Name tag is required.${NC}"
             continue
         fi
 
@@ -83,6 +78,24 @@ wait_ssm_agent_ready() {
 }
 
 log "Checking EC2 instance state..."
+
+# Name タグからインスタンス ID を引く (AMI 更新のたびにインスタンスが作り直されて ID が変わるため)
+if ! INSTANCE_IDS=$(aws ec2 describe-instances \
+    --region "$REGION" \
+    --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+    --query "Reservations[].Instances[].InstanceId" \
+    --output text 2>&1); then
+    echo -e "${RED}Error: Failed to look up instance: $INSTANCE_IDS${NC}" >&2
+    exit 1
+fi
+
+read -ra INSTANCE_ID_LIST <<< "$INSTANCE_IDS"
+if [ "${#INSTANCE_ID_LIST[@]}" -ne 1 ]; then
+    echo -e "${RED}Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found ${#INSTANCE_ID_LIST[@]}: $INSTANCE_IDS${NC}" >&2
+    echo -e "${YELLOW}Check the instance_name in 'tofu output workstations'.${NC}" >&2
+    exit 1
+fi
+INSTANCE_ID="${INSTANCE_ID_LIST[0]}"
 
 # EC2インスタンスの状態を確認
 if ! STATE=$(aws ec2 describe-instances \

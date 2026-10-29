@@ -5,8 +5,10 @@
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
     "instanceType": "t3.medium",
-    "volumeSize": 80,
-    "volumeType": "gp3"
+    "rootVolumeSize": 30,
+    "rootVolumeType": "gp3",
+    "dataVolumeSize": 80,
+    "dataVolumeType": "gp3"
   },
   "autoStopConfig": {
     "cpuThreshold": 3,

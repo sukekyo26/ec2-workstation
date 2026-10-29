@@ -68,6 +68,7 @@ flowchart LR
 
     subgraph WorkstationA["📦 workstation モジュール (User A)"]
         EC2A["EC2 Instance"]
+        DVA["Data Volume"]
         SGA["Security Group"]
         IAMA["IAM Role"]
         KPA["SSH Key Pair"]
@@ -75,6 +76,7 @@ flowchart LR
 
     subgraph WorkstationB["📦 workstation モジュール (User B)"]
         EC2B["EC2 Instance"]
+        DVB["Data Volume"]
         SGB["Security Group"]
         IAMB["IAM Role"]
         KPB["SSH Key Pair"]
@@ -93,7 +95,7 @@ flowchart LR
 | IaC | OpenTofu | 宣言的なインフラ構築 |
 | OS | Ubuntu 24.04 LTS | 2029年までサポート |
 | インスタンス | EC2（タイプは `workstation-config.json` で指定） | ユーザー単位で上書き可（例: t3.medium = 2vCPU / 4GB RAM） |
-| ストレージ | EBS gp3 / gp2（サイズ・タイプは `workstation-config.json` で指定） | 暗号化有効、高速I/O |
+| ストレージ | EBS gp3 / gp2（ルート + データの 2 本。サイズ・タイプは `workstation-config.json` で指定） | 暗号化有効、データボリュームは AMI 更新後も残る |
 | 接続方式 | SSM SessionManager | SSH不要、IAM認証 |
 
 ### Public Subnet採用について
@@ -184,6 +186,45 @@ flowchart TB
 >
 > ⚙️ **設定変更**: `workstation-config.json` の `autoStopConfig` で CPU閾値、監視期間、定時停止時刻をカスタマイズできます。
 
+### AMI の自動更新とデータボリューム
+
+`tofu apply` のたびに最新の AMI を参照し、新しい AMI が公開されていればインスタンスを作り直します（OS・パッケージを AMI 単位で更新する）。作業データはインスタンスと独立した**データボリューム**に置くため、作り直し後もそのまま残ります。
+
+| 場所 | 置き場所 | AMI 更新後 |
+|------|---------|-----------|
+| `~/work` | データボリューム（`/data/work` を bind mount） | 残る |
+| Docker のイメージ・コンテナ・ボリューム | データボリューム（`/var/lib/docker`・`/var/lib/containerd` を bind mount） | 残る |
+| `~/.gitconfig` | データボリューム（`/data/gitconfig` へのシンボリックリンク） | 残る |
+| 上記以外（dotfiles、apt で入れたパッケージなど） | ルートボリューム | **消える** |
+
+- 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
+- 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは `tofu plan` で `aws_instance` が `-/+` になるかで確認できます
+- 新しい AMI が出ていれば、ユーザーの追加など**どの目的の `apply` でも全員のインスタンスが作り直されます**。作業中のメンバーがいるときは `tofu plan` で確認してから実行してください
+- インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
+- ルートに入れたツールを残したい場合は [user-data.sh](shared/user-data.sh) に追加してください
+- データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`tofu apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
+
+#### データボリュームを持たない環境から移る場合
+
+データボリュームが無い構成（`ignore_changes = [ami]` で AMI を固定していた版）で作ったインスタンスは、この版での最初の `apply` で作り直され、**ルートボリューム上の `~/work` と Docker のデータは新しいデータボリュームに移りません**（初回のデータボリュームは空です）。最初の `apply` の前に退避してください。
+
+```bash
+# 1. 残したい Docker ボリュームを ~/work に tar で書き出す（旧インスタンスに接続できる SSH 設定のまま）
+ssh ec2 'docker run --rm -v <volume>:/v -v ~/work:/b alpine tar czf /b/<volume>.tgz -C /v .'
+
+# 2. ~/work をローカルへ退避する
+rsync -a ec2:~/work/ ./work-backup/
+
+# 3. 新しい構成をデプロイし、setup-remote-ssh をやり直す（HostName が Name タグに変わるため）
+cd opentofu && tofu apply
+./scripts/setup-remote-ssh.sh
+
+# 4. 新しいインスタンスへ戻す
+rsync -a ./work-backup/ ec2:~/work/
+```
+
+Docker イメージは移さず、必要なものを pull し直してください。
+
 ---
 
 ## 📋 前提条件
@@ -233,8 +274,10 @@ cd ec2-workstation
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
     "instanceType": "t3.medium",
-    "volumeSize": 80,
-    "volumeType": "gp3"
+    "rootVolumeSize": 30,
+    "rootVolumeType": "gp3",
+    "dataVolumeSize": 80,
+    "dataVolumeType": "gp3"
   },
   "autoStopConfig": {
     "cpuThreshold": 5,
@@ -253,7 +296,7 @@ cd ec2-workstation
       "displayName": "Developer Two",
       "instanceConfig": {
         "instanceType": "t3.xlarge",
-        "volumeSize": 200
+        "dataVolumeSize": 200
       },
       "enableElasticIp": true
     }
@@ -275,8 +318,10 @@ cd ec2-workstation
 | `environment` | ✅ | 環境名（dev, staging, prod） |
 | `vpcCidr` | ✅ | VPCのCIDRブロック |
 | `defaultInstanceConfig.instanceType` | ✅ | EC2インスタンスタイプ |
-| `defaultInstanceConfig.volumeSize` | ✅ | EBSボリュームサイズ（GB、20〜1000） |
-| `defaultInstanceConfig.volumeType` | ✅ | EBSボリュームタイプ（gp3 / gp2） |
+| `defaultInstanceConfig.rootVolumeSize` | ✅ | ルートEBSボリュームサイズ（GB、20〜1000）。OS とパッケージ用で、AMI 更新のたびに作り直される |
+| `defaultInstanceConfig.rootVolumeType` | ✅ | ルートEBSボリュームタイプ（gp3 / gp2） |
+| `defaultInstanceConfig.dataVolumeSize` | ✅ | データEBSボリュームサイズ（GB、20〜1000）。`~/work`・Docker・`~/.gitconfig` を保存し、AMI 更新後も残る |
+| `defaultInstanceConfig.dataVolumeType` | ✅ | データEBSボリュームタイプ（gp3 / gp2） |
 | `autoStopConfig.cpuThreshold` | ✅ | CPU使用率閾値（%）- この値以下が続くと停止 |
 | `autoStopConfig.cpuEvaluationMinutes` | ✅ | CPU監視期間（分）- この期間低負荷が続くと停止 |
 | `autoStopConfig.scheduledStopHour` | ✅ | 定時停止時刻（時、0-23、Asia/Tokyo） |
@@ -335,7 +380,7 @@ state の保護（秘密鍵が state に記録されるため重要）を含む�
 
 ### 5. デプロイ確認
 
-デプロイ完了後、インスタンスIDと接続コマンドが出力されます。
+デプロイ完了後、インスタンスの Name タグ（`instance_name`）・インスタンスID・接続コマンドが出力されます。
 
 ```bash
 tofu output workstations
@@ -378,16 +423,13 @@ SessionManager経由でVS Code Remote-SSHを使用してEC2に接続できます
 
 ### セットアップ手順
 
-#### 1. インスタンスIDを取得
+#### 1. インスタンスの Name タグを確認
 
-AWSコンソールまたはCLIでデプロイしたEC2インスタンスのIDを確認します。
+インスタンス ID は AMI 更新のたびに変わるため、接続設定には Name タグ（例: `ec2-workstation-dev-developer1-instance`）を使います。
 
 ```bash
-# Linux/Mac/Windows (PowerShell)
-aws ec2 describe-instances \
-  --filters "Name=tag:Owner,Values=<username>" \
-  --query 'Reservations[].Instances[].InstanceId' \
-  --output text
+cd opentofu
+tofu output workstations   # 各ユーザーの instance_name
 ```
 
 #### 2. セットアップスクリプトを実行
@@ -405,7 +447,7 @@ aws ec2 describe-instances \
 ```
 
 スクリプトが以下を行います：
-- EC2インスタンスIDの入力を受け付け
+- EC2インスタンスの Name タグの入力を受け付け
 - SSHホスト名の設定（デフォルト: `ec2`）
 - AWSリージョンの設定（デフォルト: `ap-northeast-1`）
 - AWS SSM Parameter Storeから秘密鍵を取得
@@ -438,7 +480,7 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 ./scripts/start-ec2.sh
 ```
 
-スクリプトは対話的にインスタンスIDとリージョンを尋ね、起動とSSM Agent接続完了まで待機します。
+スクリプトは対話的にインスタンスの Name タグとリージョンを尋ね、起動とSSM Agent接続完了まで待機します。
 
 ---
 
@@ -454,7 +496,7 @@ tofu destroy
 # 該当ユーザーを削除して tofu apply
 ```
 
-> ⚠️ EBSボリュームはインスタンス削除時に一緒に削除されます。必要なデータは事前にバックアップしてください。
+> ⚠️ データボリュームは削除時に最終スナップショット（`final_snapshot`）を作成してから削除されます。復元が不要になったらスナップショットを手動で削除してください（残している間は課金されます）。ルートボリュームはスナップショットを残さず削除されます。
 
 ---
 
@@ -472,10 +514,10 @@ tofu destroy
 | リソース | スペック | 単価 | 月額コスト |
 |----------|---------|------|-----------|
 | EC2 (t3.medium) | 2vCPU / 4GB | $0.0544/時間 | **$8.70** |
-| EBS (gp3) | 80GB | $0.096/GB/月 | **$7.68** |
+| EBS (gp3) | ルート 30GB + データ 80GB | $0.096/GB/月 | **$10.56** |
 | データ転送 | 10GB想定 | $0.114/GB | **$1.14** |
 | Elastic IP | オプション（有効時） | $0.005/時間 | **$3.65** |
-| **小計（ユーザーごと）** | | | **約 $17.5/月** |
+| **小計（ユーザーごと）** | | | **約 $20.4/月** |
 
 ### 共有リソースコスト（チーム全体）
 
@@ -490,9 +532,9 @@ tofu destroy
 
 | 規模 | 月額コスト (USD) | 月額コスト (JPY) |
 |------|-----------------|-----------------|
-| 1ユーザー | 約 $17.5 | 約 ¥2,625 |
-| 5ユーザー | 約 $87.5 | 約 ¥13,125 |
-| 10ユーザー | 約 $175 | 約 ¥26,250 |
+| 1ユーザー | 約 $20.4 | 約 ¥3,060 |
+| 5ユーザー | 約 $102 | 約 ¥15,300 |
+| 10ユーザー | 約 $204 | 約 ¥30,600 |
 
 ※ 1 USD = 150 JPY で計算
 
