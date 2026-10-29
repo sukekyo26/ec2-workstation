@@ -115,6 +115,9 @@ jobs:
       - name: Test start-ec2-and-wait.sh and start-ec2.sh with a fake aws
         run: scripts/tests/start-ec2.test.sh
 
+      - name: Test setup-remote-ssh.sh with a fake aws
+        run: scripts/tests/setup-remote-ssh.test.sh
+
   shell-format:
     name: Shell format
     runs-on: ubuntu-latest
@@ -213,6 +216,6 @@ jobs:
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
 
-      - name: Test start-ec2-and-wait.ps1 and start-ec2.ps1 with a fake aws
+      - name: Test start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake aws
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1
