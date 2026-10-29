@@ -375,13 +375,13 @@ aws configure
 
 ### 4. デプロイ
 
-state は 2 つに分かれています。network（VPC・サブネットなど、全員で使うもの）と、workstations（各ユーザーのインスタンスなど）です。`scripts/tofu-deploy.sh` が、network を plan → apply し、次に workstations を plan → apply します。どちらの段も、plan が失敗すればその段は apply しません。
+state は 2 つに分かれています。network（VPC・サブネットなど、全員で使うもの）と、workstations（各ユーザーのインスタンスなど）です。`scripts/tofu-deploy.sh` が、network を plan → apply し、次に workstations を plan → apply します。どちらの段も、plan が失敗すればその段は apply しません。端末で実行したときは、変更のある段ごとに plan の要約（作る・変える・作り直す・消すの数と、作り直すアドレス）を出し、`yes` と打つまで apply しません。`yes` 以外なら何も apply せずに終わります（終了コード 1）。CI など端末でないときは確かめずに進みます。
 
 ```bash
 # state バケット（作成手順は opentofu/README.md）
 export TF_STATE_BUCKET=<your-state-bucket>
 
-# デプロイ（確認を挟まずに apply する。先に差分を見るなら、下の「差分だけ見る」）
+# デプロイ（変更のある段ごとに要約を出し、yes で apply する）
 ./scripts/tofu-deploy.sh
 
 # 差分だけ見る（apply しない）
@@ -389,7 +389,7 @@ export TF_STATE_BUCKET=<your-state-bucket>
 ./scripts/tofu-init.sh workstations && tofu -chdir=opentofu/stacks/workstations plan
 ```
 
-- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意して `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください（重なっても、同じ state のロックで後の方が止まります）
+- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意して `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
 - VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
@@ -523,7 +523,7 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 # 該当ユーザーを削除して ./scripts/tofu-deploy.sh
 ```
 
-GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
+端末で実行したときは、workstations・network の段ごとに消すものの要約を出し、`yes` と打つまで消しません。前の版で作った環境が残っている（同じ名前の VPC があるのに state が空）ときは、何も消さずに止まります（前の版で `tofu destroy` してください）。GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
 
 > ⚠️ データボリュームは削除時に最終スナップショット（`final_snapshot`）を作成してから削除されます。復元が不要になったらスナップショットを手動で削除してください（残している間は課金されます）。ルートボリュームはスナップショットを残さず削除されます。
 
