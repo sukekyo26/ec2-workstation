@@ -343,14 +343,20 @@ if ([IO.File]::ReadAllText($betaScript) -ne $betaBefore -or [IO.File]::ReadAllTe
     Add-Failure 'setup alpha-again: changed beta or the shared script'
 }
 
-# 4. A bad -SshHost stops before anything is written (it would name a file outside ~/.ssh)
-$before = @(Get-ChildItem -Recurse -Name $profileDir, $work | Sort-Object)
-$result = Invoke-Setup -Name 'bad-host' -SshHost '..\x' -WantExitCode 1
-if ($result.Stderr -notlike '*is not a valid host name*') {
-    Add-Failure "setup bad-host: want 'is not a valid host name', got: $($result.Stderr)"
+# 4. A bad -SshHost stops before anything is written or changed (..\x would name a file outside ~/.ssh, and a final
+# newline would go into the file name and the Host line)
+function Get-Snapshot {
+    return @(Get-ChildItem -Recurse -File $work | Sort-Object FullName | ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
 }
-if ((@(Get-ChildItem -Recurse -Name $profileDir, $work | Sort-Object) -join '|') -ne ($before -join '|')) {
-    Add-Failure 'setup bad-host: files were written'
+foreach ($badHost in @('..\x', "alpha`n")) {
+    $before = Get-Snapshot
+    $result = Invoke-Setup -Name 'bad-host' -SshHost $badHost -WantExitCode 1
+    if ($result.Stderr -notlike '*is not a valid host name*') {
+        Add-Failure "setup bad-host '$badHost': want 'is not a valid host name', got: $($result.Stderr)"
+    }
+    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
+        Add-Failure "setup bad-host '$badHost': files were written or changed"
+    }
 }
 
 } finally {

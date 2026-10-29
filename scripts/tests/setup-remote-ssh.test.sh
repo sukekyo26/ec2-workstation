@@ -102,7 +102,8 @@ if [ "$(cat "$ssh_dir/start-ec2-and-wait.sh")" != "old shared script" ]; then
 fi
 
 # 3. alpha をもう一度: alpha のスクリプトだけが新しい版になり、Host alpha は 1 つだけ
-cp "$beta_script" "$work/beta-before"
+# beta のスクリプトが無くても、テストを止めずに残りを見る
+cp "$beta_script" "$work/beta-before" 2> /dev/null || fail "alpha-again: $beta_script is missing"
 setup alpha-again $'ws-alpha-instance\nalpha\nap-northeast-1\n'
 if ! cmp -s "$scripts_dir/start-ec2-and-wait.sh" "$alpha_script"; then
     fail "alpha-again: $alpha_script is not the new version"
