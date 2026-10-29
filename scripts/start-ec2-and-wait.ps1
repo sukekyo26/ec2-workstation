@@ -80,7 +80,7 @@ function Invoke-AwsCli {
     foreach ($line in $stderr) {
         [Console]::Error.WriteLine($line)
     }
-    return $stdout
+    return $all
 }
 
 function Wait-SSMAgentReady {
@@ -115,7 +115,7 @@ function Wait-SSMAgentReady {
 function Invoke-StartInstance {
     param([string]$InstanceId, [string]$Region)
     Write-ScriptLog "Starting instance $InstanceId..."
-    $null = Invoke-AwsCli -Description "Failed to start instance $InstanceId" -Arguments @(
+    Invoke-AwsCli -Description "Failed to start instance $InstanceId" -Arguments @(
         'ec2', 'start-instances', '--instance-ids', $InstanceId, '--region', $Region)
 }
 
@@ -163,7 +163,7 @@ try {
     }
     elseif ($state -eq "stopping") {
         Write-ScriptLog "Instance is stopping, waiting for it to stop..."
-        Wait-InstanceState -InstanceId $InstanceId -Region $Region -State stopped
+        try { Wait-InstanceState -InstanceId $InstanceId -Region $Region -State stopped } catch { Write-ScriptLog "ignored" }
         Invoke-StartInstance -InstanceId $InstanceId -Region $Region
         Write-ScriptLog "Waiting for instance to be running..."
         Wait-InstanceState -InstanceId $InstanceId -Region $Region -State running
