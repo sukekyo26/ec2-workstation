@@ -28,6 +28,28 @@ function Write-ScriptLog {
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message" -ForegroundColor Cyan
 }
 
+# aws を呼び、成功なら stdout の行だけを返す。失敗 (rc≠0) なら stderr の行を付けて throw する。
+# 成功のときの stderr の警告は、ID や状態に混ぜずに stderr にそのまま流す
+function Invoke-Aws {
+    param(
+        [string]$Description,
+        [string[]]$Arguments
+    )
+    # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw する (成功のときの警告でも止まる)
+    $ErrorActionPreference = 'Continue'
+    $all = & $awsCli @Arguments 2>&1
+    $exitCode = $LASTEXITCODE
+    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    $stdout = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    if ($exitCode -ne 0) {
+        throw "${Description}: $($stderr -join ' ')"
+    }
+    foreach ($line in $stderr) {
+        [Console]::Error.WriteLine($line)
+    }
+    return $stdout
+}
+
 function Wait-SSMAgentReady {
     param(
         [string]$InstanceId,
@@ -39,15 +61,15 @@ function Wait-SSMAgentReady {
     Write-ScriptLog "Waiting for SSM Agent to be ready..."
 
     for ($i = 1; $i -le $MaxRetries; $i++) {
-        $pingStatus = & $awsCli ssm describe-instance-information `
-            --region $Region `
-            --filters "Key=InstanceIds,Values=$InstanceId" `
-            --query "InstanceInformationList[0].PingStatus" `
-            --output text 2>&1
+        # 問い合わせの失敗 (認証の切れなど) は待っても直らないので、Invoke-Aws の throw ですぐ止まる
+        $pingStatus = Invoke-Aws -Description "Failed to check the SSM Agent of $InstanceId" -Arguments @(
+            'ssm', 'describe-instance-information', '--region', $Region,
+            '--filters', "Key=InstanceIds,Values=$InstanceId",
+            '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
 
         if ($pingStatus -eq "Online") {
             Write-ScriptLog "SSM Agent is online"
-            return $true
+            return
         }
 
         Write-ScriptLog "SSM Agent not ready yet (attempt $i/$MaxRetries, status: $pingStatus)"
@@ -55,6 +77,19 @@ function Wait-SSMAgentReady {
     }
 
     throw "Timeout waiting for SSM Agent to become ready after $($MaxRetries * $RetryIntervalSeconds) seconds"
+}
+
+function Invoke-StartInstance {
+    param([string]$InstanceId, [string]$Region)
+    Write-ScriptLog "Starting instance $InstanceId..."
+    $null = Invoke-Aws -Description "Failed to start instance $InstanceId" -Arguments @(
+        'ec2', 'start-instances', '--instance-ids', $InstanceId, '--region', $Region)
+}
+
+function Wait-InstanceState {
+    param([string]$InstanceId, [string]$Region, [string]$State)
+    $null = Invoke-Aws -Description "Failed while waiting for instance $InstanceId to be $State" -Arguments @(
+        'ec2', 'wait', "instance-$State", '--instance-ids', $InstanceId, '--region', $Region)
 }
 
 try {
@@ -85,15 +120,10 @@ try {
     Write-ScriptLog "Checking EC2 instance state..."
 
     # Name タグからインスタンス ID を引く (AMI 更新のたびにインスタンスが作り直されて ID が変わるため)
-    $instanceIds = & $awsCli ec2 describe-instances `
-        --region $Region `
-        --filters "Name=tag:Name,Values=$InstanceName" "Name=instance-state-name,Values=pending,running,stopping,stopped" `
-        --query "Reservations[].Instances[].InstanceId" `
-        --output text 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to look up instance: $instanceIds"
-    }
+    $instanceIds = Invoke-Aws -Description "Failed to look up instance" -Arguments @(
+        'ec2', 'describe-instances', '--region', $Region,
+        '--filters', "Name=tag:Name,Values=$InstanceName", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
+        '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
 
     $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
     if ($instanceIdList.Count -ne 1) {
@@ -102,90 +132,38 @@ try {
     $InstanceId = $instanceIdList[0]
 
     # EC2インスタンスの状態を確認
-    $state = & $awsCli ec2 describe-instances `
-        --instance-ids $InstanceId `
-        --region $Region `
-        --query "Reservations[0].Instances[0].State.Name" `
-        --output text 2>&1
-
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to get instance state: $state"
-    }
+    $state = Invoke-Aws -Description "Failed to get instance state" -Arguments @(
+        'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
+        '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
 
     Write-ScriptLog "Instance $InstanceId state: $state"
 
-    # インスタンスが停止中の場合は起動
     if ($state -eq "stopped") {
-        Write-ScriptLog "Starting instance $InstanceId..."
-
-        $result = & $awsCli ec2 start-instances `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Failed to start instance: $result"
-        }
-
+        Invoke-StartInstance -InstanceId $InstanceId -Region $Region
         Write-ScriptLog "Waiting for instance to be running..."
-
-        & $awsCli ec2 wait instance-running `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Timeout waiting for instance to start"
-        }
-
-        # SSM Agentが接続されるまで待機
-        Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
-
-        Write-ScriptLog "Instance is now running and ready for SSH connection"
+        Wait-InstanceState -InstanceId $InstanceId -Region $Region -State running
     }
     elseif ($state -eq "stopping") {
         Write-ScriptLog "Instance is stopping, waiting for it to stop..."
-
-        & $awsCli ec2 wait instance-stopped `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
-        Write-ScriptLog "Starting instance $InstanceId..."
-
-        & $awsCli ec2 start-instances `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
+        Wait-InstanceState -InstanceId $InstanceId -Region $Region -State stopped
+        Invoke-StartInstance -InstanceId $InstanceId -Region $Region
         Write-ScriptLog "Waiting for instance to be running..."
-
-        & $awsCli ec2 wait instance-running `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
-        # SSM Agentが接続されるまで待機
-        Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
-
-        Write-ScriptLog "Instance is now running and ready for SSH connection"
+        Wait-InstanceState -InstanceId $InstanceId -Region $Region -State running
     }
     elseif ($state -eq "pending") {
         Write-ScriptLog "Instance is starting, waiting..."
-
-        & $awsCli ec2 wait instance-running `
-            --instance-ids $InstanceId `
-            --region $Region 2>&1
-
-        # SSM Agentが接続されるまで待機
-        Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
-
-        Write-ScriptLog "Instance is now running and ready for SSH connection"
+        Wait-InstanceState -InstanceId $InstanceId -Region $Region -State running
     }
     elseif ($state -eq "running") {
         Write-ScriptLog "Instance is already running, checking SSM Agent..."
-        # 既に起動中でもSSM Agentが接続されていない可能性があるため確認
-        Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
-        Write-ScriptLog "Instance is ready for SSH connection"
     }
     else {
         throw "Unexpected instance state: $state"
     }
+
+    # 起動した後も、既に起動中でも、SSM Agent が接続されていない可能性があるため確認
+    Wait-SSMAgentReady -InstanceId $InstanceId -Region $Region
+    Write-ScriptLog "Instance is ready for SSH connection"
 
     Write-Host "`n✓ EC2 instance is ready!" -ForegroundColor Green
     Write-Host "You can now connect using VS Code Remote-SSH." -ForegroundColor Green
