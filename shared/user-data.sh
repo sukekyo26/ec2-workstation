@@ -117,6 +117,10 @@ DATA_VOLUME_ID="${data_volume_id}"
 WORKSTATION_USER="${username}"
 # shellcheck disable=SC2154 # 同上 (os-images.json の login_user)
 DEFAULT_USER="${login_user}"
+# user-data はインスタンスで 1 回しか走らないため、直した後は作り直して走らせ直すしかない
+print_recreate_hint() {
+    echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
+}
 DATA_MOUNT=/data
 # 既定ユーザーは cloud-init が user-data より前に作る
 if ! DEFAULT_PASSWD=$(getent passwd "$DEFAULT_USER"); then
@@ -138,10 +142,9 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 if [ -z "$DATA_DEVICE" ]; then
-    # user-data はインスタンスで 1 回しか走らないため、後からアタッチしてもマウントされない。作り直すしかない
     echo "ERROR: data volume $DATA_VOLUME_ID was not attached within 10 minutes, so nothing was mounted or installed." >&2
     echo "Check aws_volume_attachment in the tofu apply output, then recreate the instance:" >&2
-    echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
+    print_recreate_hint
     exit 1
 fi
 
@@ -223,13 +226,43 @@ UNIT
 done
 systemctl daemon-reload
 
-# git の設定 (git config --global) はデータボリューム上の実体を指すシンボリックリンクにする
-if [ ! -f "$DATA_MOUNT/gitconfig" ]; then
-    touch "$DATA_MOUNT/gitconfig"
-    chown "$DEFAULT_USER:$DEFAULT_USER" "$DATA_MOUNT/gitconfig"
+# git の設定 (git config --global) は、データボリューム上の既定ユーザーの持ち物のディレクトリに置き、
+# ~/.gitconfig をそこへのシンボリックリンクにする。git はリンク先と同じディレクトリにロックファイルを
+# 作るので、root の持ち物の /data の直下に置くと書き込めない
+DATA_GIT_DIR="$DATA_MOUNT/git"
+DATA_GIT_CONFIG="$DATA_GIT_DIR/config"
+OLD_DATA_GIT_CONFIG="$DATA_MOUNT/gitconfig"
+# root が mv や chown でリンクの先 (データボリュームの外) を触らないよう、リンクは断る (user-data はリンクを作らない)
+for path in "$DATA_GIT_DIR" "$DATA_GIT_CONFIG" "$OLD_DATA_GIT_CONFIG"; do
+    if [ -L "$path" ]; then
+        echo "ERROR: $path is a symbolic link. Replace it with a regular file or directory, then recreate the instance:" >&2
+        print_recreate_hint
+        exit 1
+    fi
+done
+mkdir -p "$DATA_GIT_DIR"
+# 古い置き場所 (/data/gitconfig) からの移行。何度走っても同じ結果になる
+# LIMIT: PR #3 の版で作った環境が全部作り直されたら、この移行の分岐を消す
+if [ -e "$OLD_DATA_GIT_CONFIG" ]; then
+    if [ ! -e "$DATA_GIT_CONFIG" ]; then
+        mv "$OLD_DATA_GIT_CONFIG" "$DATA_GIT_CONFIG"
+    elif [ ! -s "$OLD_DATA_GIT_CONFIG" ] || cmp -s "$OLD_DATA_GIT_CONFIG" "$DATA_GIT_CONFIG"; then
+        rm -f "$OLD_DATA_GIT_CONFIG"
+    else
+        echo "ERROR: both $OLD_DATA_GIT_CONFIG and $DATA_GIT_CONFIG exist with different contents." >&2
+        echo "Decide which to keep (merge into $DATA_GIT_CONFIG if needed), delete the other, then recreate the instance:" >&2
+        print_recreate_hint
+        exit 1
+    fi
 fi
-ln -sfn "$DATA_MOUNT/gitconfig" "$DEFAULT_HOME/.gitconfig"
-chown -h "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/.gitconfig"
+# user-data は既定ユーザーの git より先に走るので、残った config.lock は前のインスタンスの途中のもの (git は消さずに断る)。
+# 途中で SSM から入って git を打つと生きたロックを消しうるが、その git の rename が失敗するだけで config は壊れない
+rm -f "$DATA_GIT_DIR/config.lock"
+touch "$DATA_GIT_CONFIG"
+# 中に置かれたファイル (残った lock など) の持ち主もそろえる (-R の既定 -P で、中のリンクの先はたどらない)
+chown -R "$DEFAULT_USER:" "$DATA_GIT_DIR"
+ln -sfn "$DATA_GIT_CONFIG" "$DEFAULT_HOME/.gitconfig"
+chown -h "$DEFAULT_USER:" "$DEFAULT_HOME/.gitconfig"
 
 # Dockerインストール
 echo "[4/7] Installing Docker..."
