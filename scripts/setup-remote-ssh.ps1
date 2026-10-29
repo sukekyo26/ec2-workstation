@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory=$false)]
     [string]$InstanceName,
 
@@ -71,8 +71,8 @@ if ([string]::IsNullOrEmpty($InstanceName)) {
 # ============================================
 if ([string]::IsNullOrEmpty($SshHost)) {
     do {
-        $input = Read-Host "Enter SSH Host name [ec2]"
-        $SshHost = if ([string]::IsNullOrWhiteSpace($input)) { "ec2" } else { $input.ToLower() }
+        $answer = Read-Host "Enter SSH Host name [ec2]"
+        $SshHost = if ([string]::IsNullOrWhiteSpace($answer)) { "ec2" } else { $answer.ToLower() }
 
         # Validate: must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores
         if ($SshHost -notmatch '^[a-z]([a-z0-9_-]*[a-z0-9])?$') {
@@ -89,8 +89,8 @@ if ([string]::IsNullOrEmpty($SshHost)) {
 # Prompt for AWS Region
 # ============================================
 if ([string]::IsNullOrEmpty($Region)) {
-    $input = Read-Host "Enter AWS Region [ap-northeast-1]"
-    $Region = if ([string]::IsNullOrWhiteSpace($input)) { "ap-northeast-1" } else { $input }
+    $answer = Read-Host "Enter AWS Region [ap-northeast-1]"
+    $Region = if ([string]::IsNullOrWhiteSpace($answer)) { "ap-northeast-1" } else { $answer }
 }
 
 # ============================================
