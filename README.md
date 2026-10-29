@@ -193,7 +193,7 @@ flowchart TB
 | 場所 | 置き場所 | AMI 更新後 |
 |------|---------|-----------|
 | `~/work` | データボリューム（`/data/work` を bind mount） | 残る |
-| Docker のイメージ・コンテナ・ボリューム | データボリューム（`/var/lib/docker`・`/var/lib/containerd` を bind mount） | 残る。`os` を変えたときは、名前付きボリュームは引き継ぐ見込みで、イメージは見えなくなることがある（Docker の版と置き場所の形が OS で違うため。devcontainer を開き直して build し直す）※実機で確認中 |
+| Docker のイメージ・コンテナ・ボリューム | データボリューム（`/var/lib/docker`・`/var/lib/containerd` を bind mount） | 残る。`os` を変えたときも、名前付きボリュームは引き継がれる。イメージは、別の系統の OS（Ubuntu・Debian ↔ Amazon Linux）にいる間は見えず、戻せば見える（Docker の系統でイメージの置き場所が違うため。見えない間は devcontainer を開き直して build し直す） |
 | `~/.gitconfig` | データボリューム（`/data/git/config` へのシンボリックリンク） | 残る |
 | 上記以外（dotfiles、apt で入れたパッケージなど） | ルートボリューム | **消える** |
 

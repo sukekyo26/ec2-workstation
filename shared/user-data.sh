@@ -284,6 +284,11 @@ install_cli_plugin() {
 
 if ! command -v docker &> /dev/null; then
     if [ "$PKG_MANAGER" = apt ]; then
+        # イメージの置き場所を containerd image store に固定する。OS を変えて /var/lib/docker に
+        # 既存の overlay2 データがあると、既定でも overlay2 に倒れるため明示する。
+        # LIMIT: docker 29.9.2 はこの鍵を「既定なので不要」と warning にする。廃止されて dockerd が起動しなくなったら、置き場所を固定する別の手段に替える
+        mkdir -p /etc/docker
+        echo '{"features": {"containerd-snapshotter": true}}' > /etc/docker/daemon.json
         # Docker公式インストールスクリプトを使用
         curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
         sh /tmp/get-docker.sh
