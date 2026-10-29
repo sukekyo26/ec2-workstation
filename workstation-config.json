@@ -2,6 +2,7 @@
   "$schema": "./workstation-config.schema.json",
   "projectName": "ec2-workstation",
   "environment": "dev",
+  "awsRegion": "ap-northeast-1",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
     "os": "al2023",

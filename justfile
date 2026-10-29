@@ -6,7 +6,7 @@ default:
     @just --list
 
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
-ci: validate-config check-os-images check-user-data-size tofu-check shellcheck shfmt-check gitleaks-scan
+ci: validate-config check-os-images check-user-data-size tofu-check scripts-test shellcheck shfmt-check gitleaks-scan
 
 # workstation-config を JSON Schema で検証
 validate-config:
@@ -28,9 +28,17 @@ check-user-data-size:
 
 # OpenTofu のフォーマットチェックと validate
 tofu-check:
+    #!/usr/bin/env bash
+    set -euo pipefail
     tofu -chdir=opentofu fmt -check -recursive
-    tofu -chdir=opentofu init -backend=false
-    tofu -chdir=opentofu validate
+    for stack in opentofu/stacks/*/; do
+        tofu -chdir="$stack" init -backend=false
+        tofu -chdir="$stack" validate
+    done
+
+# デプロイ・削除のスクリプトの順番と止まり方を、偽の tofu で確かめる（CI と同じ）
+scripts-test:
+    scripts/tests/tofu-deploy.test.sh
 
 # シェルスクリプトの静的解析
 shellcheck:

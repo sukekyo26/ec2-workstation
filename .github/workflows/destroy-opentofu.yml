@@ -21,9 +21,6 @@ jobs:
   destroy:
     name: OpenTofu Destroy
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: opentofu
     steps:
       - name: Validate confirmation input
         if: inputs.confirm != 'destroy'
@@ -36,6 +33,9 @@ jobs:
 
       - name: Setup OpenTofu
         uses: opentofu/setup-opentofu@847eaa4afeb791b06daa46e8eafa8b1b68d7cfb4 # v2.0.1
+        with:
+          # The wrapper adds its own lines to stdout, and the script pipes tofu show/console output into jq
+          tofu_wrapper: false
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@e7f100cf4c008499ea8adda475de1042d6975c7b # v6.2.0
@@ -43,15 +43,8 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ap-northeast-1
 
-      - name: Init
-        run: |
-          tofu init \
-            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
-            -backend-config="key=ec2-workstation/dev/terraform.tfstate" \
-            -backend-config="region=ap-northeast-1"
-
-      - name: Plan (destroy)
-        run: tofu plan -destroy -input=false -out=tfplan
-
+      # The order (workstations, then network) lives in the script, so any CI that runs it behaves the same
       - name: Destroy
-        run: tofu apply -input=false tfplan
+        run: scripts/tofu-destroy.sh
+        env:
+          TF_STATE_BUCKET: ${{ secrets.TF_STATE_BUCKET }}
