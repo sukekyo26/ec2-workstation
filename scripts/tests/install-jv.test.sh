@@ -72,9 +72,11 @@ fail() {
     failures=$((failures + 1))
 }
 
-# run <name> <repo> <uname -s> <uname -m> [args...]: rc・標準エラー・curl が取りにいった URL を残す
+# run <name> <repo> <uname -s> <uname -m> [args...]: rc・標準エラー・curl が取りにいった URL を残す。
+# 場合の名前を "case: <name>" で出す (作り替えの前と後で、同じ場合を見ていることを比べるため)
 run() {
     local name=$1 repo=$2 rc=0
+    echo "case: $name"
     export FAKE_UNAME_S=$3 FAKE_UNAME_M=$4 FAKE_CURL_LOG="$work/out/$name.curl"
     shift 4
     : > "$FAKE_CURL_LOG"
@@ -161,6 +163,7 @@ expect_err usage "usage:"
 
 # 版を上げると、古い版の jv があっても validate-config.sh は「無い」で止まり、install-jv.sh は新しい版の場所に置く
 edit 's/^JV_VERSION=.*/JV_VERSION=v9.9.9/' "$work/ok/scripts/lib/tofu-common.sh"
+echo "case: bump-validate"
 rc=0
 "$work/ok/scripts/validate-config.sh" 2> "$work/out/bump-validate.err" || rc=$?
 if [ "$rc" != 1 ] || ! grep -qF "jv v9.9.9 is not installed" "$work/out/bump-validate.err"; then
