@@ -186,6 +186,11 @@ case "${FAKE_JV:-ok}" in
         printf '%s\n' "instance $2: failed" "unexpected EOF"
         exit 1
         ;;
+    # スキーマがメタスキーマに違反するときも、- at '...' の行が出る
+    bad-schema)
+        printf '%s\n' "schema $1: failed" "- at '/type': value must be one of 'array', 'boolean'"
+        exit 1
+        ;;
     crash) exit 3 ;;
 esac
 FAKE
@@ -641,8 +646,15 @@ for case in "deploy tofu-deploy.sh" "init-network tofu-init.sh network" "init-us
     run "$name-unreadable" "$script" "" FAKE_JV=unreadable $args
     expect_rc "$name-unreadable" 1
     expect_log "$name-unreadable" ""
-    expect_err "$name-unreadable" "could not read workstation-config.json or workstation-config.schema.json"
+    expect_err "$name-unreadable" "could not read workstation-config.json (a missing file or broken JSON)"
     expect_no_err "$name-unreadable" "breaks the rules"
+
+    # shellcheck disable=SC2086
+    run "$name-bad-schema" "$script" "" FAKE_JV=bad-schema $args
+    expect_rc "$name-bad-schema" 1
+    expect_log "$name-bad-schema" ""
+    expect_err "$name-bad-schema" "could not load workstation-config.schema.json"
+    expect_no_err "$name-bad-schema" "breaks the rules"
 
     # shellcheck disable=SC2086
     run "$name-jv-crash" "$script" "" FAKE_JV=crash $args

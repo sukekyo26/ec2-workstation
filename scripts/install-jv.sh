@@ -25,29 +25,13 @@ case "$(uname -m)" in
     *) die "unsupported CPU $(uname -m): jv $JV_VERSION is released for amd64 and arm64" ;;
 esac
 
-# GitHub のリリースの添付ファイルの sha256 (版は scripts/lib/tofu-common.sh の JV_VERSION)
-case "$os-$arch" in
-    linux-amd64) want=36e9ab8481cc8e2cb27c8336decc9abdcbd606b05792ca88d6188e01ec28766b ;;
-    linux-arm64) want=a9b06c4d73bf3cbe9b3224aacef5329d96267c27febac1152db1ff1659550122 ;;
-    darwin-amd64) want=f41e3541d0ba2b5f628d1a04701db3acefcf6aa1feb5c28e10f446dfc584952d ;;
-    darwin-arm64) want=d5962c5a7abe0c82be6b69bbed6bd5c9883462f13e0353ddca9878c46ec6ed6f ;;
-esac
+want=$(jv_sha256 "$os-$arch")
 
 dest=$(jv_path)
 if [ -x "$dest" ] && [ "${1:-}" != --force ]; then
     log "jv $JV_VERSION is already installed at $dest"
     exit 0
 fi
-
-sha256() {
-    if command -v sha256sum > /dev/null; then
-        sha256sum "$1" | cut -d' ' -f1
-    elif command -v shasum > /dev/null; then
-        shasum -a 256 "$1" | cut -d' ' -f1
-    else
-        die "install sha256sum or shasum to check the download"
-    fi
-}
 
 # 一時ディレクトリで取って確かめ、最後に mv で置く。途中で止まっても置き場所に中途半端な jv が残らない
 mkdir -p "$REPO_ROOT/.tools"
@@ -56,8 +40,15 @@ trap 'rm -rf "$tmp"' EXIT
 
 asset="jv-$JV_VERSION-$os-$arch.tar.gz"
 log "downloading $asset"
-curl -fsSL -o "$tmp/$asset" "https://github.com/santhosh-tekuri/jsonschema/releases/download/$JV_VERSION/$asset"
-got=$(sha256 "$tmp/$asset")
+# deploy のたびに GitHub Releases から取るので、一時的な失敗は取り直す。--retry-all-errors は curl 7.71 から
+retry=(--retry 3 --retry-delay 2)
+# grep -q で途中で読むのをやめると、pipefail の下で curl の SIGPIPE が失敗になるので、全部読ませる
+if curl --help all 2> /dev/null | grep -- --retry-all-errors > /dev/null; then
+    retry+=(--retry-all-errors)
+fi
+curl -fsSL "${retry[@]}" --connect-timeout 10 --max-time 120 -o "$tmp/$asset" \
+    "https://github.com/santhosh-tekuri/jsonschema/releases/download/$JV_VERSION/$asset"
+got=$(file_sha256 "$tmp/$asset")
 if [ "$got" != "$want" ]; then
     die "sha256 mismatch for $asset: got $got, want $want"
 fi

@@ -12,18 +12,23 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/out" "$work/tarball"
 
+# 偽の curl: --help all には --retry-all-errors を含む一覧を返す。取るときは最後の引数を URL として書き残す
 cat > "$work/bin/curl" << 'FAKE'
 #!/usr/bin/env bash
 set -euo pipefail
+if [ "$1" = --help ]; then
+    printf '%s\n' " --retry <num>  Retry request if transient problems occur" " --retry-all-errors  Retry all errors"
+    exit 0
+fi
 out=
-while [ $# -gt 0 ]; do
-    case "$1" in
-        -o) out=$2 && shift ;;
-        -*) ;;
-        *) echo "$1" >> "$FAKE_CURL_LOG" ;;
-    esac
-    shift
+args=("$@")
+for i in "${!args[@]}"; do
+    if [ "${args[$i]}" = -o ]; then
+        out=${args[$((i + 1))]}
+    fi
 done
+echo "${args[-1]}" >> "$FAKE_CURL_LOG"
+echo "$*" >> "$FAKE_CURL_LOG.args"
 cp "$FAKE_TARBALL" "$out"
 FAKE
 cat > "$work/bin/uname" << 'FAKE'
@@ -40,7 +45,15 @@ printf '#!/bin/sh\necho fake jv\n' > "$work/tarball/jv"
 chmod +x "$work/tarball/jv"
 export FAKE_TARBALL="$work/jv.tar.gz"
 tar -czf "$FAKE_TARBALL" -C "$work/tarball" jv
-fake_sha=$(sha256sum "$FAKE_TARBALL" | cut -d' ' -f1)
+lib="$scripts_src/lib/tofu-common.sh"
+fake_sha=$(bash -c '. "$1"; file_sha256 "$2"' _ "$lib" "$FAKE_TARBALL")
+version=$(bash -c '. "$1"; echo "$JV_VERSION"' _ "$lib")
+
+# sed -i は GNU と macOS で書き方が違うので、一時ファイルに書いて置き換える
+edit() {
+    sed -E "$1" "$2" > "$2.new"
+    mv "$2.new" "$2"
+}
 
 # 写しを作る。"ok" なら linux-amd64 の sha256 を偽の tarball のものに書き換える
 new_repo() {
@@ -48,8 +61,8 @@ new_repo() {
     mkdir -p "$repo"
     cp -R "$scripts_src" "$repo/scripts"
     if [ "${2:-}" = ok ]; then
-        sed -i -E "s/^( *linux-amd64\) want=)[0-9a-f]+/\1$fake_sha/" "$repo/scripts/install-jv.sh"
-        grep -qF "$fake_sha" "$repo/scripts/install-jv.sh"
+        edit "s/^( *linux-amd64\) echo )[0-9a-f]+/\1$fake_sha/" "$repo/scripts/lib/tofu-common.sh"
+        grep -qF "$fake_sha" "$repo/scripts/lib/tofu-common.sh"
     fi
 }
 
@@ -65,6 +78,7 @@ run() {
     export FAKE_UNAME_S=$3 FAKE_UNAME_M=$4 FAKE_CURL_LOG="$work/out/$name.curl"
     shift 4
     : > "$FAKE_CURL_LOG"
+    : > "$FAKE_CURL_LOG.args"
     "$work/$repo/scripts/install-jv.sh" "$@" > /dev/null 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
@@ -92,14 +106,20 @@ expect_curl() {
     fi
 }
 
-url=https://github.com/santhosh-tekuri/jsonschema/releases/download/v6.0.3
+url=https://github.com/santhosh-tekuri/jsonschema/releases/download/$version
 
 # sha256 が合わなければ止まり、jv も一時ディレクトリも残さない
 new_repo bad
 run bad bad Linux x86_64
 expect_rc bad 1
-expect_err bad "sha256 mismatch for jv-v6.0.3-linux-amd64.tar.gz: got $fake_sha"
-expect_curl bad "$url/jv-v6.0.3-linux-amd64.tar.gz"
+expect_err bad "sha256 mismatch for jv-$version-linux-amd64.tar.gz: got $fake_sha"
+expect_curl bad "$url/jv-$version-linux-amd64.tar.gz"
+# 一時的な失敗は取り直し、待ち続けない
+for flag in "--retry 3" --retry-all-errors --connect-timeout --max-time; do
+    if ! grep -qF -- "$flag" "$work/out/bad.curl.args"; then
+        fail "bad: curl is called without $flag: $(cat "$work/out/bad.curl.args")"
+    fi
+done
 if [ -n "$(ls -A "$work/bad/.tools")" ]; then
     fail "bad: .tools is not empty: $(ls -A "$work/bad/.tools")"
 fi
@@ -108,7 +128,7 @@ fi
 for c in "Linux aarch64 linux-arm64" "Darwin arm64 darwin-arm64" "Darwin x86_64 darwin-amd64" "Linux amd64 linux-amd64"; do
     read -r s m asset <<< "$c"
     run "arch-$s-$m" bad "$s" "$m"
-    expect_curl "arch-$s-$m" "$url/jv-v6.0.3-$asset.tar.gz"
+    expect_curl "arch-$s-$m" "$url/jv-$version-$asset.tar.gz"
 done
 run arch-riscv64 bad Linux riscv64
 expect_rc arch-riscv64 1
@@ -123,7 +143,7 @@ expect_curl os-mingw ""
 new_repo ok ok
 run ok ok Linux x86_64
 expect_rc ok 0
-if [ "$("$work/ok/.tools/jv-v6.0.3/jv" 2>&1)" != "fake jv" ]; then
+if [ "$("$work/ok/.tools/jv-$version/jv" 2>&1)" != "fake jv" ]; then
     fail "ok: the installed jv does not run"
 fi
 if [ -n "$(find "$work/ok/.tools" -maxdepth 1 -name 'tmp.*')" ]; then
@@ -134,13 +154,13 @@ expect_rc again 0
 expect_curl again ""
 run force ok Linux x86_64 --force
 expect_rc force 0
-expect_curl force "$url/jv-v6.0.3-linux-amd64.tar.gz"
+expect_curl force "$url/jv-$version-linux-amd64.tar.gz"
 run usage ok Linux x86_64 --forse
 expect_rc usage 1
 expect_err usage "usage:"
 
 # 版を上げると、古い版の jv があっても validate-config.sh は「無い」で止まり、install-jv.sh は新しい版の場所に置く
-sed -i 's/^JV_VERSION=.*/JV_VERSION=v9.9.9/' "$work/ok/scripts/lib/tofu-common.sh"
+edit 's/^JV_VERSION=.*/JV_VERSION=v9.9.9/' "$work/ok/scripts/lib/tofu-common.sh"
 rc=0
 "$work/ok/scripts/validate-config.sh" 2> "$work/out/bump-validate.err" || rc=$?
 if [ "$rc" != 1 ] || ! grep -qF "jv v9.9.9 is not installed" "$work/out/bump-validate.err"; then
