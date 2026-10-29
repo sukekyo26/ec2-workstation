@@ -39,36 +39,66 @@ show_aws_authentication_error() {
     echo "" >&2
 }
 
-# SSM Agentの接続状態を確認して待機
+# SSM Agentの接続状態を確認して待機する。問い合わせの一時的な失敗 (スロットリング・ネットワークの断) は待って問い合わせ直し、
+# 続けて max_failures 回失敗したら、認証の切れなど待っても直らないものとして止まる (成功を 1 回挟めば数え直す)
 wait_ssm_agent_ready() {
     local instance_id="$1"
     local region="$2"
     local max_retries=60
     local retry_interval=5
+    local max_failures=3
+    local failures=0
+    local i ping_status
 
     log "Waiting for SSM Agent to be ready..."
 
     for ((i = 1; i <= max_retries; i++)); do
-        if ! ping_status=$(aws ssm describe-instance-information \
+        if ping_status=$(aws ssm describe-instance-information \
             --region "$region" \
             --filters "Key=InstanceIds,Values=$instance_id" \
             --query "InstanceInformationList[0].PingStatus" \
             --output text); then
-            log "Error: Failed to check the SSM Agent of $instance_id (the aws error is above)"
-            return 1
+            failures=0
+            if [ "$ping_status" = "Online" ]; then
+                log "SSM Agent is online"
+                return 0
+            fi
+            log "SSM Agent not ready yet (attempt $i/$max_retries, status: $ping_status)"
+        else
+            failures=$((failures + 1))
+            if [ "$failures" -ge "$max_failures" ]; then
+                show_aws_authentication_error
+                log "Error: Failed to check the SSM Agent of $instance_id $max_failures times in a row (the aws error is above)"
+                return 1
+            fi
+            log "Failed to check the SSM Agent (attempt $i/$max_retries, failure $failures/$max_failures), retrying"
         fi
-
-        if [ "$ping_status" = "Online" ]; then
-            log "SSM Agent is online"
-            return 0
-        fi
-
-        log "SSM Agent not ready yet (attempt $i/$max_retries, status: $ping_status)"
         sleep "$retry_interval"
     done
 
     log "Error: Timeout waiting for SSM Agent to become ready after $((max_retries * retry_interval)) seconds"
     return 1
+}
+
+start_instance() {
+    log "Starting instance $INSTANCE_ID..."
+    # stdout には起動の結果の JSON が出るので捨てる。stderr (失敗の理由) はそのまま出す
+    if ! aws ec2 start-instances \
+        --instance-ids "$INSTANCE_ID" \
+        --region "$REGION" > /dev/null; then
+        log "Error: Failed to start instance $INSTANCE_ID (the aws error is above)"
+        exit 1
+    fi
+}
+
+# wait_instance_state <running | stopped>
+wait_instance_state() {
+    if ! aws ec2 wait "instance-$1" \
+        --instance-ids "$INSTANCE_ID" \
+        --region "$REGION"; then
+        log "Error: Failed while waiting for instance $INSTANCE_ID to be $1 (the aws error is above)"
+        exit 1
+    fi
 }
 
 # Name タグからインスタンス ID を引く
@@ -107,78 +137,26 @@ log "Instance $INSTANCE_ID state: $STATE"
 
 case "$STATE" in
     "stopped")
-        log "Starting instance $INSTANCE_ID..."
-        if ! aws ec2 start-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION" > /dev/null; then
-            log "Error: Failed to start instance $INSTANCE_ID (the aws error is above)"
-            exit 1
-        fi
-
+        start_instance
         log "Waiting for instance to be running..."
-        if ! aws ec2 wait instance-running \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION"; then
-            log "Error: Failed while waiting for instance $INSTANCE_ID to be running (the aws error is above)"
-            exit 1
-        fi
-
-        # SSM Agentが接続されるまで待機
-        wait_ssm_agent_ready "$INSTANCE_ID" "$REGION"
-
-        log "Instance is now running"
+        wait_instance_state running
         ;;
 
     "stopping")
         log "Instance is stopping, waiting for it to stop..."
-        if ! aws ec2 wait instance-stopped \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION"; then
-            log "Error: Failed while waiting for instance $INSTANCE_ID to be stopped (the aws error is above)"
-            exit 1
-        fi
-
-        log "Starting instance $INSTANCE_ID..."
-        if ! aws ec2 start-instances \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION" > /dev/null; then
-            log "Error: Failed to start instance $INSTANCE_ID (the aws error is above)"
-            exit 1
-        fi
-
+        wait_instance_state stopped
+        start_instance
         log "Waiting for instance to be running..."
-        if ! aws ec2 wait instance-running \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION"; then
-            log "Error: Failed while waiting for instance $INSTANCE_ID to be running (the aws error is above)"
-            exit 1
-        fi
-
-        # SSM Agentが接続されるまで待機
-        wait_ssm_agent_ready "$INSTANCE_ID" "$REGION"
-
-        log "Instance is now running"
+        wait_instance_state running
         ;;
 
     "pending")
         log "Instance is starting, waiting..."
-        if ! aws ec2 wait instance-running \
-            --instance-ids "$INSTANCE_ID" \
-            --region "$REGION"; then
-            log "Error: Failed while waiting for instance $INSTANCE_ID to be running (the aws error is above)"
-            exit 1
-        fi
-
-        # SSM Agentが接続されるまで待機
-        wait_ssm_agent_ready "$INSTANCE_ID" "$REGION"
-
-        log "Instance is now running"
+        wait_instance_state running
         ;;
 
     "running")
         log "Instance is already running, checking SSM Agent..."
-        # 既に起動中でもSSM Agentが接続されていない可能性があるため確認
-        wait_ssm_agent_ready "$INSTANCE_ID" "$REGION"
         ;;
 
     *)
@@ -186,6 +164,9 @@ case "$STATE" in
         exit 1
         ;;
 esac
+
+# 起動した後も、既に起動中でも、SSM Agent が接続されていない可能性があるため確認
+wait_ssm_agent_ready "$INSTANCE_ID" "$REGION"
 
 # SSMセッションを開始
 exec aws ssm start-session \

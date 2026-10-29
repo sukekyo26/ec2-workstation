@@ -23,6 +23,17 @@ $ErrorActionPreference = "Stop"
 # AWS CLI path
 $awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
 
+# aws の警告を stderr に UTF-8 (BOM なし) で書く (日本語の Windows の既定の cp932 にしない)
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$stderrWriter = [System.IO.StreamWriter]::new([Console]::OpenStandardError(), $utf8NoBom)
+$stderrWriter.AutoFlush = $true
+$stderrWriter.NewLine = "`n"
+
+function Write-Stderr {
+    param([string]$Message)
+    $stderrWriter.WriteLine($Message)
+}
+
 function Write-ScriptLog {
     param([string]$Message)
     Write-Host "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message" -ForegroundColor Cyan
@@ -45,7 +56,7 @@ function Invoke-AwsCli {
         throw "${Description}: $($stderr -join ' ')"
     }
     foreach ($line in $stderr) {
-        [Console]::Error.WriteLine($line)
+        Write-Stderr $line
     }
     return $stdout
 }
@@ -55,17 +66,31 @@ function Wait-SSMAgentReady {
         [string]$InstanceId,
         [string]$Region,
         [int]$MaxRetries = 60,
-        [int]$RetryIntervalSeconds = 5
+        [int]$RetryIntervalSeconds = 5,
+        [int]$MaxFailures = 3
     )
 
     Write-ScriptLog "Waiting for SSM Agent to be ready..."
 
+    # 問い合わせの一時的な失敗 (スロットリング・ネットワークの断) は待って問い合わせ直し、続けて $MaxFailures 回失敗したら、
+    # 認証の切れなど待っても直らないものとして止まる (成功を 1 回挟めば数え直す)
+    $failures = 0
     for ($i = 1; $i -le $MaxRetries; $i++) {
-        # 問い合わせの失敗 (認証の切れなど) は待っても直らないので、Invoke-AwsCli の throw ですぐ止まる
-        $pingStatus = Invoke-AwsCli -Description "Failed to check the SSM Agent of $InstanceId" -Arguments @(
-            'ssm', 'describe-instance-information', '--region', $Region,
-            '--filters', "Key=InstanceIds,Values=$InstanceId",
-            '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
+        try {
+            $pingStatus = Invoke-AwsCli -Description "Failed to check the SSM Agent of $InstanceId" -Arguments @(
+                'ssm', 'describe-instance-information', '--region', $Region,
+                '--filters', "Key=InstanceIds,Values=$InstanceId",
+                '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
+        } catch {
+            $failures++
+            if ($failures -ge $MaxFailures) {
+                throw "$_ ($MaxFailures times in a row)"
+            }
+            Write-ScriptLog "Failed to check the SSM Agent (attempt $i/$MaxRetries, failure $failures/$MaxFailures), retrying: $_"
+            Start-Sleep -Seconds $RetryIntervalSeconds
+            continue
+        }
+        $failures = 0
 
         if ($pingStatus -eq "Online") {
             Write-ScriptLog "SSM Agent is online"
