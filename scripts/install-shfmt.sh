@@ -14,9 +14,4 @@ case "${1:-}" in
     *) die "usage: $0 [--force]" ;;
 esac
 
-platform=$(host_platform shfmt "$SHFMT_VERSION")
-want=$(shfmt_sha256 "$platform")
-# リリースの添付ファイルは tar でなくバイナリそのもので、名前は shfmt_<版>_linux_amd64 の形 (_ で区切る)
-install_pinned_tool shfmt "$SHFMT_VERSION" \
-    "https://github.com/mvdan/sh/releases/download/$SHFMT_VERSION/shfmt_${SHFMT_VERSION}_${platform/-/_}" \
-    "$want" "" "${1:-}"
+install_tool shfmt "${1:-}"

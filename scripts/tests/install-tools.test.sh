@@ -81,8 +81,8 @@ new_repo() {
     mkdir -p "$repo"
     cp -R "$scripts_src" "$repo/scripts"
     if [ "${2:-}" = ok ]; then
-        replace_in_copy "$repo" "$(tool jv_sha256 linux-amd64)" "$fake_sha"
-        replace_in_copy "$repo" "$(tool shfmt_sha256 linux-amd64)" "$fake_shfmt_sha"
+        replace_in_copy "$repo" "$(tool tool_sha256 jv linux-amd64)" "$fake_sha"
+        replace_in_copy "$repo" "$(tool tool_sha256 shfmt linux-amd64)" "$fake_shfmt_sha"
     fi
 }
 
@@ -249,6 +249,48 @@ FAKE_DOWNLOAD="$work/no-member.tar.gz" FAKE_UNAME_S=Linux FAKE_UNAME_M=x86_64 FA
 if [ "$rc" = 0 ] || [ -e "$work/no-member/.tools/jv-v0" ] || [ -n "$(find "$work/no-member/.tools" -maxdepth 1 -name 'tmp.*')" ]; then
     fail "no-member: rc=$rc, want rc!=0 and nothing installed: $(ls -A "$work/no-member/.tools")"
 fi
+
+# tofu・just・shellcheck・gitleaks: 添付ファイルの名前の形から URL を作る (OS・CPU の 2 通り)。版は tools.sh から読む
+export FAKE_DOWNLOAD=$jv_tarball
+gh=https://github.com
+tv=$(tool tool_version tofu) jt=$(tool tool_version just) sc=$(tool tool_version shellcheck) gl=$(tool tool_version gitleaks)
+for c in "tofu Linux x86_64 opentofu/opentofu/releases/download/$tv/tofu_${tv#v}_linux_amd64.tar.gz" \
+    "tofu Darwin arm64 opentofu/opentofu/releases/download/$tv/tofu_${tv#v}_darwin_arm64.tar.gz" \
+    "just Linux x86_64 casey/just/releases/download/$jt/just-$jt-x86_64-unknown-linux-musl.tar.gz" \
+    "just Darwin arm64 casey/just/releases/download/$jt/just-$jt-aarch64-apple-darwin.tar.gz" \
+    "shellcheck Linux x86_64 koalaman/shellcheck/releases/download/$sc/shellcheck-$sc.linux.x86_64.tar.gz" \
+    "shellcheck Darwin arm64 koalaman/shellcheck/releases/download/$sc/shellcheck-$sc.darwin.aarch64.tar.gz" \
+    "gitleaks Linux x86_64 gitleaks/gitleaks/releases/download/$gl/gitleaks_${gl#v}_linux_x64.tar.gz" \
+    "gitleaks Darwin arm64 gitleaks/gitleaks/releases/download/$gl/gitleaks_${gl#v}_darwin_arm64.tar.gz"; do
+    read -r t s m path <<< "$c"
+    SCRIPT="install-$t.sh" run "url-$t-$s-$m" bad "$s" "$m"
+    expect_rc "url-$t-$s-$m" 1
+    expect_curl "url-$t-$s-$m" "$gh/$path"
+    expect_err "url-$t-$s-$m" "sha256 mismatch"
+done
+
+# tar の中でディレクトリの下にあるもの (shellcheck-<版>/shellcheck) も取り出して置く
+mkdir -p "$work/sc/shellcheck-$sc"
+printf '#!/bin/sh\necho fake shellcheck\n' > "$work/sc/shellcheck-$sc/shellcheck"
+chmod +x "$work/sc/shellcheck-$sc/shellcheck"
+tar -czf "$work/shellcheck.tar.gz" -C "$work/sc" "shellcheck-$sc"
+new_repo sc
+replace_in_copy "$work/sc" "$(tool tool_sha256 shellcheck linux-amd64)" "$(tool file_sha256 "$work/shellcheck.tar.gz")"
+FAKE_DOWNLOAD="$work/shellcheck.tar.gz" SCRIPT=install-shellcheck.sh run shellcheck-ok sc Linux x86_64
+expect_rc shellcheck-ok 0
+if [ "$("$work/sc/.tools/shellcheck-$sc/shellcheck" 2>&1)" != "fake shellcheck" ]; then
+    fail "shellcheck-ok: the installed shellcheck does not run"
+fi
+
+# tools_path は全部の道具の置き場所のディレクトリを : でつなぐ
+echo "case: tools-path"
+got=$(tool tools_path)
+for t in jv shfmt tofu just shellcheck gitleaks; do
+    t="$t-$(tool tool_version "$t")"
+    if [[ ":$got:" != *"/.tools/$t:"* ]]; then
+        fail "tools-path: $t is missing in $got"
+    fi
+done
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

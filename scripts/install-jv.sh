@@ -14,8 +14,4 @@ case "${1:-}" in
     *) die "usage: $0 [--force]" ;;
 esac
 
-platform=$(host_platform jv "$JV_VERSION")
-want=$(jv_sha256 "$platform")
-install_pinned_tool jv "$JV_VERSION" \
-    "https://github.com/santhosh-tekuri/jsonschema/releases/download/$JV_VERSION/jv-$JV_VERSION-$platform.tar.gz" \
-    "$want" jv "${1:-}"
+install_tool jv "${1:-}"
