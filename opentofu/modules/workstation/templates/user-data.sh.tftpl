@@ -237,7 +237,7 @@ systemctl daemon-reload
 # 作るので、root の持ち物の /data の直下に置くと書き込めない
 DATA_GIT_DIR="$DATA_MOUNT/git"
 DATA_GIT_CONFIG="$DATA_GIT_DIR/config"
-# root が mv や chown でリンクの先 (データボリュームの外) を触らないよう、リンクは断る (user-data はリンクを作らない)
+# root が chown でリンクの先 (データボリュームの外) を触らないよう、リンクは断る (user-data はリンクを作らない)
 for path in "$DATA_GIT_DIR" "$DATA_GIT_CONFIG"; do
     if [ -L "$path" ]; then
         echo "ERROR: $path is a symbolic link. Replace it with a regular file or directory, then recreate the instance:" >&2
