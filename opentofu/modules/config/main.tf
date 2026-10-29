@@ -60,9 +60,7 @@ output "auto_stop_config" {
   value       = local.raw_config.autoStopConfig
 }
 
-# ユーザー名をキーにすることで、ユーザーの追加・削除が他ユーザーのリソースの
-# 作り直しを起こさない。ただし AMI は常に最新を追うため、新しい AMI が出ていれば
-# どの apply でも全員のインスタンスが作り直される。
+# ユーザー名をキーにする (stacks/workstations は、workspace の名前のユーザーだけを持つ)。
 # try() はオプションキー (instanceConfig / enableElasticIp) の欠落時アクセス用。
 output "users" {
   description = "Per-user settings keyed by username, with defaultInstanceConfig merged in"

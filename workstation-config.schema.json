@@ -160,8 +160,13 @@
         "properties": {
           "username": {
             "type": "string",
-            "description": "ユーザー名（3-32文字、小文字英数字とハイフン・アンダースコア）",
-            "pattern": "^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$"
+            "description": "ユーザー名（3-32文字、小文字英数字とハイフン・アンダースコア）。default は使えない（OpenTofu の default の workspace と同じ名前になるため）",
+            "pattern": "^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$",
+            "not": {
+              "enum": [
+                "default"
+              ]
+            }
           },
           "displayName": {
             "type": "string",

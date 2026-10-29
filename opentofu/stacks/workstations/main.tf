@@ -2,9 +2,11 @@ module "config" {
   source = "../../modules/config"
 }
 
+# 1 つの workspace = 1 人のユーザーの state。workspace の名前のユーザーだけを持つので、
+# 設定から消えたユーザーの workspace では、destroy の plan だけが通る
 module "workstation" {
   source   = "../../modules/workstation"
-  for_each = module.config.users
+  for_each = { for username, user in module.config.users : username => user if username == terraform.workspace }
 
   project_name = module.config.project_name
   environment  = module.config.environment

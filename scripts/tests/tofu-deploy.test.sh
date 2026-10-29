@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
-# scripts/tofu-deploy.sh・scripts/tofu-destroy.sh の順番と止まり方を、偽の tofu・aws で確かめる。
+# scripts/tofu-deploy.sh・scripts/tofu-destroy.sh・scripts/tofu-init.sh の順番と止まり方を、偽の tofu・aws で確かめる。
 # - スクリプトは一時ディレクトリのリポジトリの形 (scripts/・opentofu/stacks/・workstation-config.json) に写して走らせ、
 #   設定はテストが用意したものを読ませる (リポジトリの workstation-config.json の値に頼らない)
 # - 偽の tofu・aws は一時ディレクトリに実行できるファイルとして置き、PATH の先頭に足す
 #   (シェルの関数は子プロセスに届かないため)
+# - 偽の tofu は、workstations の workspace (一覧と選んでいるもの) を覚え、本物と同じ書式で一覧を返し、
+#   選んだままの workspace の delete を断り、plan を取った workspace と違う所での apply を断る
 #
 #   scripts/tests/tofu-deploy.test.sh
 set -euo pipefail
@@ -15,14 +17,22 @@ trap 'rm -rf "$work"' EXIT
 repo="$work/repo"
 mkdir -p "$repo/opentofu/stacks/network" "$repo/opentofu/stacks/workstations" "$work/bin" "$work/out"
 cp -R "$scripts_src" "$repo/scripts"
-echo '{"projectName": "testproj", "environment": "staging"}' > "$repo/workstation-config.json"
+echo '{"projectName": "testproj", "environment": "staging", "users": [{"username": "developer1"}, {"username": "developer2"}]}' > "$repo/workstation-config.json"
 
 cat > "$work/bin/tofu" << 'FAKE'
 #!/usr/bin/env bash
-# 偽の tofu: 呼ばれたコマンドを "<stack> <args>" で $FAKE_LOG に 1 行ずつ書く。plan のファイルはパスを落として名前だけ書く
+# 偽の tofu: 呼ばれたコマンドを "<stack>[@<選んでいる workspace>] <args>" で $FAKE_LOG に 1 行ずつ書く。
+# plan のファイルはパスを落として名前だけ書く。workspace の状態は $FAKE_STATE に置く
 set -euo pipefail
 stack=$(basename "${1#-chdir=}")
 shift
+selected_file="$FAKE_STATE/$stack.selected"
+workspaces_file="$FAKE_STATE/$stack.workspaces"
+selected=$(cat "$selected_file" 2> /dev/null || echo default)
+where=$stack
+if [ "$stack" = workstations ]; then
+    where="$stack@$selected"
+fi
 args=()
 for a in "$@"; do
     case "$a" in
@@ -31,10 +41,53 @@ for a in "$@"; do
         *) args+=("$a") ;;
     esac
 done
-echo "$stack ${args[*]}" >> "$FAKE_LOG"
+echo "$where ${args[*]}" >> "$FAKE_LOG"
+
+has_workspace() {
+    grep -qxF -- "$1" "$workspaces_file" 2> /dev/null
+}
 
 case "$1" in
-    init) ;;
+    init)
+        # スクリプトは init の前に .terraform/environment を消すので、選択は default に戻る
+        echo default > "$selected_file"
+        ;;
+    workspace)
+        case "$2" in
+            list)
+                # 本物と同じ書式: 選んでいるものに "* "、ほかは空白 2 つ、最後に空行。FAKE_LIST_SELECTED で印の位置を変えられる
+                mark=${FAKE_LIST_SELECTED:-$selected}
+                for w in default $(cat "$workspaces_file" 2> /dev/null); do
+                    if [ "$w" = "$mark" ]; then echo "* $w"; else echo "  $w"; fi
+                done
+                echo
+                ;;
+            select)
+                if [ "$3" = -or-create ]; then
+                    name=$4
+                    if [ "$name" != default ] && ! has_workspace "$name"; then
+                        echo "$name" >> "$workspaces_file"
+                    fi
+                else
+                    name=$3
+                    if [ "$name" != default ] && ! has_workspace "$name"; then
+                        echo "fake tofu: workspace $name does not exist" >&2
+                        exit 1
+                    fi
+                fi
+                echo "$name" > "$selected_file"
+                ;;
+            delete)
+                if [ "$3" = "$selected" ]; then
+                    echo "fake tofu: cannot delete the currently selected workspace $3" >&2
+                    exit 1
+                fi
+                grep -vxF -- "$3" "$workspaces_file" > "$workspaces_file.new" || true
+                mv "$workspaces_file.new" "$workspaces_file"
+                ;;
+            *) exit 1 ;;
+        esac
+        ;;
     console)
         echo '"{\"aws_region\":\"us-west-2\",\"vpc_name\":\"testproj-staging-vpc\"}"'
         ;;
@@ -47,7 +100,11 @@ case "$1" in
                 echo '{"format_version":"1.0","values":{"root_module":{"child_modules":[{"resources":[{"address":"module.network.aws_vpc.this","mode":"managed","type":"aws_vpc"}]}]}}}'
             fi
         else
-            var="FAKE_SHOW_PLAN_$stack"
+            # FAKE_SHOW_PLAN_<stack>_<workspace>、無ければ FAKE_SHOW_PLAN_<stack>
+            var="FAKE_SHOW_PLAN_${stack}_$selected"
+            if [ -z "${!var:-}" ]; then
+                var="FAKE_SHOW_PLAN_$stack"
+            fi
             if [ "${!var:-}" = fail ]; then
                 exit 1
             fi
@@ -56,18 +113,18 @@ case "$1" in
         fi
         ;;
     plan)
-        if [ "${FAKE_PLAN_FAIL:-}" = "$stack" ]; then
+        if [ "${FAKE_PLAN_FAIL:-}" = "$where" ]; then
             exit 1
         fi
         for a in "$@"; do
-            case "$a" in -out=*) echo "$stack" > "${a#-out=}" ;; esac
+            case "$a" in -out=*) echo "$where" > "${a#-out=}" ;; esac
         done
         ;;
     apply)
-        # 保存した plan だけを、その plan を取ったルートで apply する
+        # 保存した plan だけを、その plan を取ったルート・workspace で apply する
         planfile=${*: -1}
-        if [ ! -f "$planfile" ] || [ "$(cat "$planfile")" != "$stack" ]; then
-            echo "fake tofu: apply in $stack needs a plan file saved by plan in $stack: $planfile" >&2
+        if [ ! -f "$planfile" ] || [ "$(cat "$planfile")" != "$where" ]; then
+            echo "fake tofu: apply in $where needs a plan file saved by plan in $where: $planfile" >&2
             exit 1
         fi
         ;;
@@ -95,19 +152,27 @@ fi
 failures=0
 
 # run <name> <script> <stdin> [VAR=value ... | arg ...]: 偽の環境でスクリプトを走らせ、rc・ログ・標準エラーを残す。
-# = を含むものは環境変数、ほかはスクリプトの引数。端末でない形で走らせ (EC2WS_ASSUME_TERMINAL=no)、端末のふりは引数で上書きする
+# = を含むものは環境変数、ほかはスクリプトの引数。端末でない形で走らせ (EC2WS_ASSUME_TERMINAL=no)、端末のふりは引数で上書きする。
+# workstations の workspace は FAKE_WORKSPACES (空白区切り。既定は設定の 2 人) で始める
 run() {
-    local name=$1 script=$2 input=$3 a
+    local name=$1 script=$2 input=$3 a w
     shift 3
-    local vars=() args=()
+    local vars=() args=() workspaces="developer1 developer2"
     for a in "$@"; do
         case "$a" in
+            FAKE_WORKSPACES=*) workspaces=${a#FAKE_WORKSPACES=} ;;
             *=*) vars+=("$a") ;;
             *) args+=("$a") ;;
         esac
     done
-    export FAKE_LOG="$work/out/$name.log"
+    export FAKE_LOG="$work/out/$name.log" FAKE_STATE="$work/out/$name.state"
     : > "$FAKE_LOG"
+    rm -rf "$FAKE_STATE"
+    mkdir "$FAKE_STATE"
+    : > "$FAKE_STATE/workstations.workspaces"
+    for w in $workspaces; do
+        echo "$w" >> "$FAKE_STATE/workstations.workspaces"
+    done
     local rc=0
     printf '%s' "$input" | env TF_STATE_BUCKET=test-bucket EC2WS_ASSUME_TERMINAL=no "${vars[@]}" \
         "$repo/scripts/$script" "${args[@]}" > /dev/null 2> "$work/out/$name.err" || rc=$?
@@ -152,41 +217,98 @@ expect_no_err() {
     fi
 }
 
+expect_no_log() {
+    local name=$1 unwanted=$2
+    if grep -qF -- "$unwanted" "$work/out/$name.log"; then
+        fail "$name: unexpected command: $(grep -F -- "$unwanted" "$work/out/$name.log" | head -1)"
+    fi
+}
+
+expect_workspaces() {
+    local name=$1 want=$2 got
+    got=$(tr '\n' ' ' < "$work/out/$name.state/workstations.workspaces" | sed 's/ $//')
+    if [ "$got" != "$want" ]; then
+        fail "$name: workspaces left: '$got', want '$want'"
+    fi
+}
+
 init_network="network init -input=false -reconfigure -backend-config=bucket=test-bucket -backend-config=key=testproj/staging/network.tfstate -backend-config=region=ap-northeast-1"
-init_workstations="workstations init -input=false -reconfigure -backend-config=bucket=test-bucket -backend-config=key=testproj/staging/workstations.tfstate -backend-config=region=ap-northeast-1"
+init_workstations="workstations@default init -input=false -reconfigure -backend-config=bucket=test-bucket -backend-config=key=testproj/staging/workstation.tfstate -backend-config=workspace_key_prefix=testproj/staging/users -backend-config=region=ap-northeast-1"
 leftover_check="network show -json
 network console
 aws ec2 describe-vpcs --region us-west-2 --filters Name=tag:Name,Values=testproj-staging-vpc --query length(Vpcs) --output text"
 network_plan="network plan -input=false -out=network.tfplan
 network show -json network.tfplan"
 network_apply="network apply -input=false network.tfplan"
-workstations_plan="workstations plan -input=false -out=workstations.tfplan
-workstations show -json workstations.tfplan"
-workstations_apply="workstations apply -input=false workstations.tfplan"
+network_stage="$init_network
+network show -json
+$network_plan
+$network_apply"
+users_plan="workstations@default workspace select -or-create developer1
+workstations@developer1 plan -input=false -out=user-developer1.tfplan
+workstations@developer1 show -json user-developer1.tfplan
+workstations@developer1 workspace select -or-create developer2
+workstations@developer2 plan -input=false -out=user-developer2.tfplan
+workstations@developer2 show -json user-developer2.tfplan"
+users_apply="workstations@developer2 workspace select developer1
+workstations@developer1 apply -input=false user-developer1.tfplan
+workstations@developer1 workspace select developer2
+workstations@developer2 apply -input=false user-developer2.tfplan"
 creates='{"resource_changes":[{"address":"module.a.aws_vpc.this","type":"aws_vpc","change":{"actions":["create"]}},{"address":"module.a.aws_subnet.public","type":"aws_subnet","change":{"actions":["create"]}}]}'
 replaces='{"resource_changes":[{"address":"module.workstation[\"dev1\"].aws_instance.this","type":"aws_instance","change":{"actions":["delete","create"]}},{"address":"module.workstation[\"dev1\"].aws_volume_attachment.data","type":"aws_volume_attachment","change":{"actions":["create","delete"]}},{"address":"module.workstation[\"dev1\"].aws_ebs_volume.data","type":"aws_ebs_volume","change":{"actions":["update"]}}]}'
+destroys='{"resource_changes":[{"address":"a","type":"aws_vpc","change":{"actions":["delete"]}}]}'
 
 # --- deploy ---
 
 run deploy tofu-deploy.sh ""
 expect_rc deploy 0
-expect_log deploy "$init_network
-network show -json
-$network_plan
-$network_apply
+expect_log deploy "$network_stage
 $init_workstations
-$workstations_plan
-$workstations_apply"
+workstations@default workspace list
+$users_plan
+$users_apply"
+expect_err deploy "users to destroy (removed from workstation-config.json): none"
 
-# workstations の plan が失敗したら workstations は apply しない。network の apply はその前に 1 回だけ
-run deploy-workstations-plan-fails tofu-deploy.sh "" FAKE_PLAN_FAIL=workstations
-expect_rc deploy-workstations-plan-fails 1
-expect_log deploy-workstations-plan-fails "$init_network
-network show -json
-$network_plan
-$network_apply
+# 設定から消えたユーザー (state だけが残る workspace) は、ほかの人の plan と一緒に destroy の plan を取り、apply の後に workspace を消す。
+# 一覧は本物と同じ書式で、設定にいる developer1 を選んだ印 (* developer1) が付いている
+run deploy-removed tofu-deploy.sh "" "FAKE_WORKSPACES=developer1 gone developer2" FAKE_LIST_SELECTED=developer1
+expect_rc deploy-removed 0
+expect_log deploy-removed "$network_stage
 $init_workstations
-workstations plan -input=false -out=workstations.tfplan"
+workstations@default workspace list
+$users_plan
+workstations@developer2 workspace select gone
+workstations@gone plan -destroy -refresh=false -input=false -out=user-gone.tfplan
+workstations@gone show -json user-gone.tfplan
+workstations@gone workspace select developer1
+workstations@developer1 apply -input=false user-developer1.tfplan
+workstations@developer1 workspace select developer2
+workstations@developer2 apply -input=false user-developer2.tfplan
+workstations@developer2 workspace select gone
+workstations@gone apply -input=false user-gone.tfplan
+workstations@gone workspace select default
+workstations@default workspace delete gone"
+expect_err deploy-removed "users to destroy (removed from workstation-config.json): gone"
+expect_workspaces deploy-removed "developer1 developer2"
+
+# 新しいユーザー (workspace がまだ無い) は workspace を作って plan する
+run deploy-new-user tofu-deploy.sh "" "FAKE_WORKSPACES=developer1"
+expect_rc deploy-new-user 0
+expect_workspaces deploy-new-user "developer1 developer2"
+
+# 1 人の plan が失敗したら、ユーザーの workspace では 1 つも apply しない。network の apply はその前に 1 回だけ
+for who in developer1 developer2 gone; do
+    run "deploy-plan-fails-$who" tofu-deploy.sh "" "FAKE_WORKSPACES=developer1 developer2 gone" "FAKE_PLAN_FAIL=workstations@$who"
+    expect_rc "deploy-plan-fails-$who" 1
+    expect_no_log "deploy-plan-fails-$who" "workstations@developer1 apply"
+    expect_no_log "deploy-plan-fails-$who" "workstations@developer2 apply"
+    expect_no_log "deploy-plan-fails-$who" "workstations@gone apply"
+    expect_no_log "deploy-plan-fails-$who" "workspace delete"
+    if [ "$(grep -c '^network apply' "$work/out/deploy-plan-fails-$who.log")" != 1 ] ||
+        [ "$(grep -n '^network apply' "$work/out/deploy-plan-fails-$who.log" | cut -d: -f1)" -gt "$(grep -n 'workstations@.* plan' "$work/out/deploy-plan-fails-$who.log" | head -1 | cut -d: -f1)" ]; then
+        fail "deploy-plan-fails-$who: network must be applied exactly once, before the first user plan"
+    fi
+done
 
 run deploy-network-plan-fails tofu-deploy.sh "" FAKE_PLAN_FAIL=network
 expect_rc deploy-network-plan-fails 1
@@ -216,14 +338,14 @@ for plan in "$creates" \
 done
 
 # plan を読めなければ apply しない
-for stack in network workstations; do
+for target in network workstations_developer2; do
     for show in fail 'not json'; do
-        run "deploy-show-broken-$stack" tofu-deploy.sh "" "FAKE_SHOW_PLAN_$stack=$show"
-        expect_rc "deploy-show-broken-$stack" 1
-        if ! grep -q "^$stack apply" "$work/out/deploy-show-broken-$stack.log"; then
-            continue
+        run "deploy-show-broken-$target" tofu-deploy.sh "" "FAKE_SHOW_PLAN_$target=$show"
+        expect_rc "deploy-show-broken-$target" 1
+        expect_no_log "deploy-show-broken-$target" "workstations@developer1 apply"
+        if [ "$target" = network ]; then
+            expect_no_log "deploy-show-broken-$target" "network apply"
         fi
-        fail "deploy-show-broken-$stack ($show): $stack was applied"
     done
 done
 
@@ -235,30 +357,30 @@ $leftover_check"
 expect_err deploy-leftover-vpc "Destroy it with that version"
 
 # 初めての deploy (state が空で VPC も無い) は進む
-run deploy-first tofu-deploy.sh "" FAKE_NETWORK_STATE_EMPTY=1 FAKE_VPC_COUNT=0
+run deploy-first tofu-deploy.sh "" FAKE_NETWORK_STATE_EMPTY=1 FAKE_VPC_COUNT=0 FAKE_WORKSPACES=
 expect_rc deploy-first 0
 expect_log deploy-first "$init_network
 $leftover_check
 $network_plan
 $network_apply
 $init_workstations
-$workstations_plan
-$workstations_apply"
+workstations@default workspace list
+$users_plan
+$users_apply"
 
-# 端末: 変更のある段ごとに要約を出し、yes で apply する
-run deploy-terminal-yes tofu-deploy.sh $'yes\nyes\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_network=$creates" "FAKE_SHOW_PLAN_workstations=$replaces"
+# 端末: 変更のある段ごとに要約を出し、yes で apply する。workstations は全員の plan の後に 1 回だけ聞く
+run deploy-terminal-yes tofu-deploy.sh $'yes\nyes\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_network=$creates" "FAKE_SHOW_PLAN_workstations_developer1=$replaces" "FAKE_SHOW_PLAN_workstations_developer2=$creates"
 expect_rc deploy-terminal-yes 0
-expect_log deploy-terminal-yes "$init_network
-network show -json
-$network_plan
-$network_apply
+expect_log deploy-terminal-yes "$network_stage
 $init_workstations
-$workstations_plan
-$workstations_apply"
+workstations@default workspace list
+$users_plan
+$users_apply"
 expect_err deploy-terminal-yes "network: create 2, update 0, replace 0, delete 0"
-expect_err deploy-terminal-yes "workstations: create 0, update 1, replace 2, delete 0"
+expect_err deploy-terminal-yes "workstations/developer1: create 0, update 1, replace 2, delete 0"
 expect_err deploy-terminal-yes '  replace: module.workstation["dev1"].aws_instance.this'
 expect_err deploy-terminal-yes '  replace: module.workstation["dev1"].aws_volume_attachment.data'
+expect_err deploy-terminal-yes "workstations/developer2: create 2, update 0, replace 0, delete 0"
 expect_err deploy-terminal-yes 'Apply the workstations plan above? Only "yes" applies'
 
 # 端末: yes 以外なら apply せずに止まる (1 段目で断れば network も apply しない)
@@ -271,27 +393,27 @@ $network_plan"
     expect_err deploy-terminal-no "network: not applied"
 done
 
-# 端末: 2 段目で断れば workstations は apply しない
-run deploy-terminal-no-workstations tofu-deploy.sh $'yes\nno\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_network=$creates" "FAKE_SHOW_PLAN_workstations=$replaces"
+# 端末: 2 段目で断れば、どのユーザーも apply せず、消えたユーザーの workspace も消さない
+run deploy-terminal-no-workstations tofu-deploy.sh $'yes\nno\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_WORKSPACES=developer1 developer2 gone" "FAKE_SHOW_PLAN_network=$creates" "FAKE_SHOW_PLAN_workstations=$replaces"
 expect_rc deploy-terminal-no-workstations 1
-expect_log deploy-terminal-no-workstations "$init_network
-network show -json
-$network_plan
-$network_apply
-$init_workstations
-$workstations_plan"
+expect_no_log deploy-terminal-no-workstations "workstations@developer1 apply"
+expect_no_log deploy-terminal-no-workstations "workstations@gone apply"
+expect_no_log deploy-terminal-no-workstations "workspace delete"
 expect_err deploy-terminal-no-workstations "workstations: not applied"
+expect_workspaces deploy-terminal-no-workstations "developer1 developer2 gone"
 
 # 端末: 変更の無い段は確かめない (network は変更なし、workstations だけ確かめる)
-run deploy-terminal-no-change tofu-deploy.sh $'yes\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_workstations=$replaces"
+run deploy-terminal-no-change tofu-deploy.sh $'yes\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_workstations_developer2=$replaces"
 expect_rc deploy-terminal-no-change 0
 expect_err deploy-terminal-no-change "network: no changes"
+expect_err deploy-terminal-no-change "workstations/developer1: no changes"
 expect_no_err deploy-terminal-no-change "Apply the network plan above?"
+expect_err deploy-terminal-no-change "Apply the workstations plan above?"
 
 # 端末でなければ、変更があっても確かめずに進む (要約は出す)
 run deploy-not-terminal tofu-deploy.sh "" "FAKE_SHOW_PLAN_network=$creates" "FAKE_SHOW_PLAN_workstations=$replaces"
 expect_rc deploy-not-terminal 0
-expect_err deploy-not-terminal "workstations: create 0, update 1, replace 2, delete 0"
+expect_err deploy-not-terminal "workstations/developer2: create 0, update 1, replace 2, delete 0"
 expect_no_err deploy-not-terminal "Apply the"
 
 # TF_WORKSPACE と TF_STATE_BUCKET の誤りは、tofu を呼ぶ前に止まる
@@ -311,22 +433,72 @@ for script in tofu-deploy.sh tofu-destroy.sh tofu-init.sh; do
     expect_err "$script-no-bucket" "set TF_STATE_BUCKET"
 done
 
-run init tofu-init.sh "" network
-expect_rc init 0
-expect_log init "$init_network"
+# --- init ---
+
+run init-network tofu-init.sh "" network
+expect_rc init-network 0
+expect_log init-network "$init_network"
+
+# 設定にいるユーザーの workspace を選ぶ (無ければ作る)
+run init-user tofu-init.sh "" workstations developer2 FAKE_WORKSPACES=developer1
+expect_rc init-user 0
+expect_log init-user "$init_workstations
+workstations@default workspace list
+workstations@default workspace select -or-create developer2"
+
+# 設定から消えたが state のあるユーザーも選べる (手で destroy するため)
+run init-removed-user tofu-init.sh "" workstations gone "FAKE_WORKSPACES=developer1 gone"
+expect_rc init-removed-user 0
+expect_no_err init-removed-user "ERROR"
+
+# 設定にも state にも無い名前 (打ち間違い) では、workspace を作らずに止まる
+run init-typo tofu-init.sh "" workstations developr1
+expect_rc init-typo 1
+expect_err init-typo "developr1 is not a username in workstation-config.json and has no state"
+expect_no_log init-typo "workspace select"
+
+for args in "" "workstations" "network x" "workstations a b" "other"; do
+    # shellcheck disable=SC2086 # 引数を空白で分けて渡す
+    run init-usage tofu-init.sh "" $args
+    expect_rc init-usage 1
+    expect_log init-usage ""
+    expect_err init-usage "usage:"
+done
 
 # --- destroy ---
 
-destroys='{"resource_changes":[{"address":"a","type":"aws_vpc","change":{"actions":["delete"]}}]}'
-
-run destroy tofu-destroy.sh "" "FAKE_SHOW_PLAN_network=$destroys" "FAKE_SHOW_PLAN_workstations=$destroys"
+# 設定でなく、state を持つ全員 (設定から消えた gone も) を消し、workspace を消してから network
+run destroy tofu-destroy.sh "" "FAKE_WORKSPACES=developer1 gone" "FAKE_SHOW_PLAN_network=$destroys" "FAKE_SHOW_PLAN_workstations=$destroys"
 expect_rc destroy 0
 expect_log destroy "$init_network
 network show -json
 $init_workstations
-workstations plan -destroy -refresh=false -input=false -out=workstations.tfplan
-workstations show -json workstations.tfplan
-$workstations_apply
+workstations@default workspace list
+workstations@default workspace select developer1
+workstations@developer1 plan -destroy -refresh=false -input=false -out=user-developer1.tfplan
+workstations@developer1 show -json user-developer1.tfplan
+workstations@developer1 workspace select gone
+workstations@gone plan -destroy -refresh=false -input=false -out=user-gone.tfplan
+workstations@gone show -json user-gone.tfplan
+workstations@gone workspace select developer1
+workstations@developer1 apply -input=false user-developer1.tfplan
+workstations@developer1 workspace select gone
+workstations@gone apply -input=false user-gone.tfplan
+workstations@gone workspace select default
+workstations@default workspace delete developer1
+workstations@default workspace delete gone
+network plan -destroy -refresh=false -input=false -out=network.tfplan
+network show -json network.tfplan
+$network_apply"
+expect_workspaces destroy ""
+
+# ユーザーの state が無ければ、network だけを消す
+run destroy-no-users tofu-destroy.sh "" FAKE_WORKSPACES=
+expect_rc destroy-no-users 0
+expect_log destroy-no-users "$init_network
+network show -json
+$init_workstations
+workstations@default workspace list
 network plan -destroy -refresh=false -input=false -out=network.tfplan
 network show -json network.tfplan
 $network_apply"
@@ -338,36 +510,25 @@ expect_log destroy-leftover-vpc "$init_network
 $leftover_check"
 expect_err destroy-leftover-vpc "Destroy it with that version"
 
-# workstations を消せなければ network に進まない
-run destroy-workstations-fails tofu-destroy.sh "" FAKE_PLAN_FAIL=workstations
-expect_rc destroy-workstations-fails 1
-expect_log destroy-workstations-fails "$init_network
-network show -json
-$init_workstations
-workstations plan -destroy -refresh=false -input=false -out=workstations.tfplan"
+# 1 人でも消せなければ、誰も apply せず、network に進まない
+run destroy-user-fails tofu-destroy.sh "" FAKE_PLAN_FAIL=workstations@developer2
+expect_rc destroy-user-fails 1
+expect_no_log destroy-user-fails "apply"
+expect_no_log destroy-user-fails "network plan"
 
 # plan を読めなければ apply しない
 run destroy-show-fails tofu-destroy.sh "" FAKE_SHOW_PLAN_workstations=fail
 expect_rc destroy-show-fails 1
-expect_log destroy-show-fails "$init_network
-network show -json
-$init_workstations
-workstations plan -destroy -refresh=false -input=false -out=workstations.tfplan
-workstations show -json workstations.tfplan"
+expect_no_log destroy-show-fails "apply"
 
 # 端末: 段ごとに yes を待つ。2 段目 (network) で断れば network は消さない
 run destroy-terminal tofu-destroy.sh $'yes\nno\n' EC2WS_ASSUME_TERMINAL=yes "FAKE_SHOW_PLAN_network=$destroys" "FAKE_SHOW_PLAN_workstations=$destroys"
 expect_rc destroy-terminal 1
-expect_log destroy-terminal "$init_network
-network show -json
-$init_workstations
-workstations plan -destroy -refresh=false -input=false -out=workstations.tfplan
-workstations show -json workstations.tfplan
-$workstations_apply
-network plan -destroy -refresh=false -input=false -out=network.tfplan
-network show -json network.tfplan"
+expect_no_log destroy-terminal "network apply"
+expect_err destroy-terminal "workstations/developer1: create 0, update 0, replace 0, delete 1"
 expect_err destroy-terminal "network: create 0, update 0, replace 0, delete 1"
 expect_err destroy-terminal "network: not applied"
+expect_workspaces destroy-terminal ""
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

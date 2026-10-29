@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 全部を消す: workstations → network の順。どの CI からも、手元からも、これを呼べば同じになる。
+# 全部を消す: state を持つ全員の workstations → network の順。どの CI からも、手元からも、これを呼べば同じになる。
 # 要るもの: bash・jq・tofu・AWS CLI、AWS の認証、TF_STATE_BUCKET
 #
 # destroy の plan は -refresh=false で取る。data source (AMI の SSM パラメータ・VPC の検索) が
@@ -20,12 +20,19 @@ init_stack network
 refuse_leftover_vpc
 init_stack workstations
 
-for stack in workstations network; do
-    dir=$(stack_dir "$stack")
-    log "$stack: plan -destroy"
-    tofu -chdir="$dir" plan -destroy -refresh=false -input=false -out="$plan_dir/$stack.tfplan"
-    plan_json=$(tofu -chdir="$dir" show -json "$plan_dir/$stack.tfplan")
-    confirm_plan "$stack" "$plan_json"
-    log "$stack: apply"
-    tofu -chdir="$dir" apply -input=false "$plan_dir/$stack.tfplan"
-done
+# 設定でなく、state を持つ全員を消す (設定から消えたユーザーも残さない)
+users=()
+names=$(user_workspaces)
+if [ -n "$names" ]; then
+    mapfile -t users <<< "$names"
+fi
+log "users to destroy: ${users[*]:-none}"
+apply_user_plans "$plan_dir" -- "${users[@]}"
+
+network_dir=$(stack_dir network)
+log "network: plan -destroy"
+tofu -chdir="$network_dir" plan -destroy -refresh=false -input=false -out="$plan_dir/network.tfplan"
+plan_json=$(tofu -chdir="$network_dir" show -json "$plan_dir/network.tfplan")
+confirm_plan network "$plan_json"
+log "network: apply"
+tofu -chdir="$network_dir" apply -input=false "$plan_dir/network.tfplan"
