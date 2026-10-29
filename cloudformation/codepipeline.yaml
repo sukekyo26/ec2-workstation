@@ -121,6 +121,8 @@ Resources:
     Properties:
       Description: !Sub ${AWS::StackName} pipeline artifacts (OpenTofu plan files)
       EnableKeyRotation: true
+      # The shortest wait KMS allows: a deleted stack does not leave the key for 30 days
+      PendingWindowInDays: 7
       KeyPolicy:
         Version: "2012-10-17"
         Statement:
