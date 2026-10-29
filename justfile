@@ -5,11 +5,16 @@ default:
     @just --list
 
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
-ci: validate-config tofu-check shellcheck shfmt-check gitleaks-scan
+ci: validate-config check-os-images tofu-check shellcheck shfmt-check gitleaks-scan
 
 # workstation-config を JSON Schema で検証
 validate-config:
     npx --yes ajv-cli@5 validate -s workstation-config.schema.json -d workstation-config.json
+
+# スキーマの os の enum と os-images.json のキーが一致するか（CI と同じ比較）
+check-os-images:
+    #!/usr/bin/env bash
+    diff <(jq -S '.definitions.os.enum | sort' workstation-config.schema.json) <(jq -S 'keys | sort' opentofu/modules/workstation/os-images.json)
 
 # OpenTofu のフォーマットチェックと validate
 tofu-check:
