@@ -3,7 +3,8 @@
 # 要るもの: bash・jq・tofu・AWS CLI、AWS の認証、TF_STATE_BUCKET
 #
 # 1 段目: network を plan → apply する (workstations の plan は network の VPC・サブネットを引くため、先に要る)
-# 2 段目: workstations を plan → apply する
+# 2 段目: 設定にいる全員の plan と、設定から消えたユーザー (state だけが残る workspace) の destroy の plan を取り、
+#         1 つでも失敗したら何も apply しない。全部通ったら apply し、消えたユーザーの workspace を消す
 # どの段も、保存した plan だけを apply する (plan と apply の間で中身が変わらない)。
 # 端末で動かしたときは、変更のある段ごとに plan の要約を出し、"yes" を待つ
 set -euo pipefail
@@ -18,7 +19,6 @@ plan_dir=$(mktemp -d)
 trap 'rm -rf "$plan_dir"' EXIT
 
 network_dir=$(stack_dir network)
-workstations_dir=$(stack_dir workstations)
 
 # VPC・サブネットの作り直し・削除は、ユーザーのインスタンス・ENI・データボリューム (AZ に固定) を抱えたまま進められない
 refuse_network_replacement() {
@@ -32,9 +32,27 @@ refuse_network_replacement() {
     esac
 }
 
-log "network: plan"
 init_stack network
 refuse_leftover_vpc
+refuse_leftover_shared_workstations_state
+
+# 消える人は、何かを apply する前に決める (一覧を取れなければ、ここで止まる)
+init_stack workstations
+users=()
+removed=()
+names=$(config_usernames)
+mapfile -t users <<< "$names"
+names=$(user_workspaces)
+if [ -n "$names" ]; then
+    while IFS= read -r name; do
+        if ! in_list "$name" "${users[@]}"; then
+            removed+=("$name")
+        fi
+    done <<< "$names"
+fi
+log "users to destroy (removed from workstation-config.json): ${removed[*]:-none}"
+
+log "network: plan"
 tofu -chdir="$network_dir" plan -input=false -out="$plan_dir/network.tfplan"
 plan_json=$(tofu -chdir="$network_dir" show -json "$plan_dir/network.tfplan")
 refuse_network_replacement "$plan_json"
@@ -42,10 +60,4 @@ confirm_plan network "$plan_json"
 log "network: apply"
 tofu -chdir="$network_dir" apply -input=false "$plan_dir/network.tfplan"
 
-log "workstations: plan"
-init_stack workstations
-tofu -chdir="$workstations_dir" plan -input=false -out="$plan_dir/workstations.tfplan"
-plan_json=$(tofu -chdir="$workstations_dir" show -json "$plan_dir/workstations.tfplan")
-confirm_plan workstations "$plan_json"
-log "workstations: apply"
-tofu -chdir="$workstations_dir" apply -input=false "$plan_dir/workstations.tfplan"
+apply_user_plans "$plan_dir" "${users[@]}" -- "${removed[@]}"

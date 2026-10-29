@@ -5,6 +5,15 @@ data "aws_vpc" "this" {
   tags = {
     Name = module.config.vpc_name
   }
+
+  # ユーザーの workspace でだけ plan させる (default や打ち間違いの workspace に state を作らない)。
+  # data source に置くのは、validate では評価されず、-refresh=false の destroy の plan (設定から消えたユーザー) では読まれないため
+  lifecycle {
+    precondition {
+      condition     = terraform.workspace != "default" && contains(keys(module.config.users), terraform.workspace)
+      error_message = "Workspace \"${terraform.workspace}\" is the default workspace or a name that is not a username in workstation-config.json. Select a user's workspace with scripts/tofu-init.sh workstations <username>. To remove a user deleted from the config, run scripts/tofu-deploy.sh."
+    }
+  }
 }
 
 data "aws_subnet" "public" {
