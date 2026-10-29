@@ -279,7 +279,7 @@ cd ec2-workstation
   "environment": "dev",
   "vpcCidr": "10.0.0.0/16",
   "defaultInstanceConfig": {
-    "os": "ubuntu-24.04",
+    "os": "al2023",
     "instanceType": "t3.medium",
     "rootVolumeSize": 30,
     "rootVolumeType": "gp3",
@@ -302,7 +302,7 @@ cd ec2-workstation
       "username": "developer2",
       "displayName": "Developer Two",
       "instanceConfig": {
-        "os": "al2023",
+        "os": "ubuntu-24.04",
         "instanceType": "t3.xlarge",
         "dataVolumeSize": 200
       },
@@ -403,7 +403,7 @@ tofu output workstations
 
 | `os` | OS | ログインユーザー | 備考 |
 |------|----|-----------------|------|
-| `al2023` | Amazon Linux 2023 | `ec2-user` | minimal の AMI。SSM Agent が入っていないため user-data で導入 |
+| `al2023` | Amazon Linux 2023 | `ec2-user` | **既定**（`workstation-config.json` の `defaultInstanceConfig.os`）。minimal の AMI。SSM Agent が入っていないため user-data で導入 |
 | `al2027-preview` | Amazon Linux 2027（プレビュー版） | `ec2-user` | **プレビュー版**（本番利用非推奨）。minimal の AMI（SSM Agent は user-data で導入）。SELinux が enforcing。AWS がプレビューの SSM パラメータを廃止・改名すると、`al2027-preview` のユーザーが 1 人でもいれば全員の `tofu plan` が失敗する。そのときは `os` を別の値に変える。GA になったら `al2027` を別の値として足す |
 | `ubuntu-24.04` | Ubuntu 24.04 LTS | `ubuntu` | |
 | `ubuntu-26.04` | Ubuntu 26.04 LTS | `ubuntu` | |
