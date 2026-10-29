@@ -19,46 +19,17 @@ validate_config
 plan_dir=$(mktemp -d)
 trap 'rm -rf "$plan_dir"' EXIT
 
-network_dir=$(stack_dir network)
-
-# VPC・サブネットの作り直し・削除は、ユーザーのインスタンス・ENI・データボリューム (AZ に固定) を抱えたまま進められない
-refuse_network_replacement() {
-    local plan_json=$1 rc=0
-    jq -e '[(.resource_changes // [])[] | select(.type == "aws_vpc" or .type == "aws_subnet")
-            | select(.change.actions | index("delete"))] | length > 0' <<< "$plan_json" > /dev/null || rc=$?
-    case $rc in
-        0) die "the network plan replaces or deletes the VPC or subnet that the workstations use. Run scripts/tofu-destroy.sh first, then scripts/tofu-deploy.sh" ;;
-        1) ;;
-        *) die "could not read the network plan (jq exit $rc)" ;;
-    esac
-}
-
 init_stack network
 refuse_leftover_vpc
 refuse_leftover_shared_workstations_state
 
 # 消える人は、何かを apply する前に決める (一覧を取れなければ、ここで止まる)
 init_stack workstations
-users=()
-removed=()
-names=$(config_usernames)
-mapfile -t users <<< "$names"
-names=$(user_workspaces)
-if [ -n "$names" ]; then
-    while IFS= read -r name; do
-        if ! in_list "$name" "${users[@]}"; then
-            removed+=("$name")
-        fi
-    done <<< "$names"
-fi
-log "users to destroy (removed from workstation-config.json): ${removed[*]:-none}"
+find_users
 
-log "network: plan"
-tofu -chdir="$network_dir" plan -input=false -out="$plan_dir/network.tfplan"
-plan_json=$(tofu -chdir="$network_dir" show -json "$plan_dir/network.tfplan")
-refuse_network_replacement "$plan_json"
-confirm_plan network "$plan_json"
+plan_network "$plan_dir"
+confirm_plan network "$NETWORK_PLAN_JSON"
 log "network: apply"
-tofu -chdir="$network_dir" apply -input=false "$plan_dir/network.tfplan"
+tofu -chdir="$(stack_dir network)" apply -input=false "$plan_dir/network.tfplan"
 
-apply_user_plans "$plan_dir" "${users[@]}" -- "${removed[@]}"
+apply_user_plans "$plan_dir" "${USERS[@]}" -- "${REMOVED[@]}"
