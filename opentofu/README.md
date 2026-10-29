@@ -75,7 +75,7 @@ tofu output workstations
 apply 後の運用（VS Code Remote-SSH 設定・EC2 起動）は `../scripts/` のスクリプトを使います:
 
 ```bash
-../scripts/setup-remote-ssh.sh <instance-id> <region>
+../scripts/setup-remote-ssh.sh   # Name タグ (tofu output workstations の instance_name) を対話入力
 ```
 
 スクリプトは SSM Parameter Store の `/ec2/keypair/{key_pair_id}` から秘密鍵を取得します。

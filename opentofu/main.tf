@@ -14,15 +14,18 @@ module "workstation" {
   environment  = local.environment
   username     = each.key
 
-  vpc_id    = module.network.vpc_id
-  subnet_id = module.network.public_subnet_id
+  vpc_id            = module.network.vpc_id
+  subnet_id         = module.network.public_subnet_id
+  availability_zone = module.network.public_subnet_availability_zone
 
-  instance_type = each.value.instance_config.instanceType
-  volume_size   = each.value.instance_config.volumeSize
-  volume_type   = each.value.instance_config.volumeType
+  instance_type    = each.value.instance_config.instanceType
+  root_volume_size = each.value.instance_config.rootVolumeSize
+  root_volume_type = each.value.instance_config.rootVolumeType
+  data_volume_size = each.value.instance_config.dataVolumeSize
+  data_volume_type = each.value.instance_config.dataVolumeType
 
-  user_data         = file("${path.module}/../shared/user-data.sh")
-  enable_elastic_ip = each.value.enable_elastic_ip
+  user_data_template = "${path.module}/../shared/user-data.sh"
+  enable_elastic_ip  = each.value.enable_elastic_ip
 
   cpu_threshold = local.auto_stop_config.cpuThreshold
   # CloudWatch Alarm は 5 分周期のため、監視期間(分)を期間数に変換

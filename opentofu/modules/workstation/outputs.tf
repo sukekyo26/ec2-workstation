@@ -3,6 +3,16 @@ output "instance_id" {
   value       = aws_instance.this.id
 }
 
+output "instance_name" {
+  description = "EC2 instance Name tag (stable across AMI updates, used by scripts/ to look up the instance ID)"
+  value       = aws_instance.this.tags.Name
+}
+
+output "data_volume_id" {
+  description = "Data EBS volume ID"
+  value       = aws_ebs_volume.data.id
+}
+
 output "session_log_group_name" {
   description = "SessionManager log group name"
   value       = aws_cloudwatch_log_group.session_logs.name
