@@ -212,3 +212,5 @@ try {
     Write-Stderr "Error: $_"
     exit 1
 }
+
+Write-Output 'a' && Write-Output 'b'

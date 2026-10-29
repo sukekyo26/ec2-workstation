@@ -89,7 +89,7 @@ if ([string]::IsNullOrEmpty($SshHost)) {
 # Prompt for AWS Region
 # ============================================
 if ([string]::IsNullOrEmpty($Region)) {
-    $answer = Read-Host "Enter AWS Region [ap-northeast-1]"
+    $input = Read-Host "Enter AWS Region [ap-northeast-1]"
     $Region = if ([string]::IsNullOrWhiteSpace($answer)) { "ap-northeast-1" } else { $answer }
 }
 
