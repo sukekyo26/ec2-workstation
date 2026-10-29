@@ -141,6 +141,7 @@ resource "aws_instance" "this" {
   associate_public_ip_address = true
   user_data = templatefile(var.user_data_template, {
     data_volume_id = aws_ebs_volume.data.id
+    username       = var.username
   })
 
   # IMDSv2 強制 (SSRF 対策)

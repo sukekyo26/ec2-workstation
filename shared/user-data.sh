@@ -56,6 +56,8 @@ apt-get install -y \
 echo "[3/7] Mounting data volume..."
 # shellcheck disable=SC2154 # tofu の templatefile で埋め込まれる
 DATA_VOLUME_ID="${data_volume_id}"
+# shellcheck disable=SC2154 # 同上
+WORKSTATION_USER="${username}"
 DATA_MOUNT=/data
 DEFAULT_USER=$(id -nu 1000)
 DEFAULT_HOME=$(getent passwd "$DEFAULT_USER" | cut -d: -f6)
@@ -73,14 +75,35 @@ for _ in $(seq 1 120); do
     sleep 5
 done
 if [ -z "$DATA_DEVICE" ]; then
-    echo "ERROR: data volume $DATA_VOLUME_ID was not attached within 10 minutes. Check the aws_volume_attachment in tofu apply output." >&2
+    # user-data はインスタンスで 1 回しか走らないため、後からアタッチしてもマウントされない。作り直すしかない
+    echo "ERROR: data volume $DATA_VOLUME_ID was not attached within 10 minutes, so nothing was mounted or installed." >&2
+    echo "Check aws_volume_attachment in the tofu apply output, then recreate the instance:" >&2
+    echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
     exit 1
 fi
 
 # ファイルシステムが無いとき (初回) だけフォーマットする。既存データは上書きしない。
-if [ -z "$(blkid -o value -s TYPE "$DATA_DEVICE")" ]; then
-    mkfs.ext4 -q "$DATA_DEVICE"
+# blkid -p は「何も見つからない」ときだけでなく、読めないときも 2 を返す (man の EXIT STATUS)。
+# 読めないデバイスを空と取り違えないよう、先に先頭を実際に読めることを確かめる (読めなければ set -e で止まる)
+dd if="$DATA_DEVICE" of=/dev/null bs=1M count=1 status=none
+if DATA_FS_TYPE=$(blkid -p -o value -s TYPE "$DATA_DEVICE"); then
+    BLKID_STATUS=0
+else
+    BLKID_STATUS=$?
 fi
+case "$BLKID_STATUS" in
+    0)
+        if [ "$DATA_FS_TYPE" != ext4 ]; then
+            echo "ERROR: data volume $DATA_VOLUME_ID has '$DATA_FS_TYPE', not ext4. Refusing to mount or format it; inspect it with 'sudo blkid -p $DATA_DEVICE'." >&2
+            exit 1
+        fi
+        ;;
+    2) mkfs.ext4 -q "$DATA_DEVICE" ;;
+    *)
+        echo "ERROR: blkid -p failed on $DATA_DEVICE (exit $BLKID_STATUS). Refusing to format it; inspect it with 'sudo blkid -p $DATA_DEVICE' and 'sudo wipefs $DATA_DEVICE'." >&2
+        exit 1
+        ;;
+esac
 DATA_UUID=$(blkid -o value -s UUID "$DATA_DEVICE")
 
 mkdir -p "$DATA_MOUNT"
@@ -106,6 +129,12 @@ for target in "$DEFAULT_HOME/work:work" /var/lib/docker:docker /var/lib/containe
     mount_point=$(echo "$target" | cut -d: -f1)
     source_dir="$DATA_MOUNT/$(echo "$target" | cut -d: -f2)"
     mkdir -p "$mount_point"
+    # nofail のため、データボリュームが無いまま起動しても SSM では入れる。そのとき ~/work が
+    # ルートボリュームに黙って書かれ、次の作り直しで消えないよう、下地のディレクトリを書き込み禁止にする。
+    # Docker は RequiresMountsFor でマウント前に起動しないので対象外
+    if [ "$mount_point" = "$DEFAULT_HOME/work" ] && ! mountpoint -q "$mount_point"; then
+        chattr +i "$mount_point"
+    fi
     if ! grep -q " $mount_point none bind" /etc/fstab; then
         echo "$source_dir $mount_point none bind,nofail,x-systemd.requires-mounts-for=$DATA_MOUNT 0 0" >> /etc/fstab
     fi
