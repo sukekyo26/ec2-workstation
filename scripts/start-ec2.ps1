@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     EC2インスタンスを起動してSSM Agent接続完了まで待機するスクリプト
 .DESCRIPTION

@@ -1,0 +1,5 @@
+# Windows PowerShell 5.1 reads a .ps1 without a BOM in the system code page, which breaks non-ASCII strings
+root = true
+
+[*.ps1]
+charset = utf-8-bom
