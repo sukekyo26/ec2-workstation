@@ -12,8 +12,9 @@ locals {
   default_instance_config = local.raw_config.defaultInstanceConfig
   auto_stop_config        = local.raw_config.autoStopConfig
 
-  # ユーザー名をキーにすることで、ユーザーの追加・削除が他ユーザーの
-  # リソースに影響しない。
+  # ユーザー名をキーにすることで、ユーザーの追加・削除が他ユーザーのリソースの
+  # 作り直しを起こさない。ただし AMI は常に最新を追うため、新しい AMI が出ていれば
+  # どの apply でも全員のインスタンスが作り直される。
   # try() はオプションキー (instanceConfig / enableElasticIp) の欠落時アクセス用。
   users = {
     for user in local.raw_config.users : user.username => {
