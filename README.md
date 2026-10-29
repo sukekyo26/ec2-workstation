@@ -247,7 +247,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
 | OpenTofu | 1.10+ | [インストールガイド](https://opentofu.org/docs/intro/install/) |
-| jv（設定の検証） | 決まった版 | `./scripts/install-jv.sh`（`.tools/` に取る。curl・tar と sha256sum か shasum が要る） |
+| jv（設定の検証） | v6.0.3（`scripts/lib/tofu-common.sh` の `JV_VERSION`） | `./scripts/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
 
 ### AWS環境
 
