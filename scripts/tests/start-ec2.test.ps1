@@ -58,7 +58,7 @@ $fakeLines = @(
 $awsCliLine = '$awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"'
 
 # Copy a script with its $awsCli line pointed at the fake, keeping the BOM (5.1 reads a file without one in the ANSI code page)
-function Copy-WithFakeAws {
+function Copy-ScriptWithFakeCli {
     param([string]$Name)
     $text = [IO.File]::ReadAllText((Join-Path $root "scripts\$Name"))
     $lines = $text -split "`r?`n"
@@ -71,8 +71,8 @@ function Copy-WithFakeAws {
     return $copy
 }
 
-$waitScript = Copy-WithFakeAws 'start-ec2-and-wait.ps1'
-$startScript = Copy-WithFakeAws 'start-ec2.ps1'
+$waitScript = Copy-ScriptWithFakeCli 'start-ec2-and-wait.ps1'
+$startScript = Copy-ScriptWithFakeCli 'start-ec2.ps1'
 $powershell = (Get-Process -Id $PID).Path
 $failures = 0
 
