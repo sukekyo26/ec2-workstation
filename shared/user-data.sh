@@ -171,6 +171,7 @@ for path in "$DATA_GIT_DIR" "$DATA_GIT_CONFIG" "$OLD_DATA_GIT_CONFIG"; do
 done
 mkdir -p "$DATA_GIT_DIR"
 # 古い置き場所 (/data/gitconfig) からの移行。何度走っても同じ結果になる
+# LIMIT: PR #3 の版で作った環境が全部作り直されたら、この移行の分岐を消す
 if [ -e "$OLD_DATA_GIT_CONFIG" ]; then
     if [ ! -e "$DATA_GIT_CONFIG" ]; then
         mv "$OLD_DATA_GIT_CONFIG" "$DATA_GIT_CONFIG"
@@ -187,7 +188,7 @@ fi
 # 途中で SSM から入って git を打つと生きたロックを消しうるが、その git の rename が失敗するだけで config は壊れない
 rm -f "$DATA_GIT_DIR/config.lock"
 touch "$DATA_GIT_CONFIG"
-# ignore なども含めて持ち主をそろえる (-R の既定 -P で、中のリンクの先はたどらない)
+# 中に置かれたファイル (残った lock など) の持ち主もそろえる (-R の既定 -P で、中のリンクの先はたどらない)
 chown -R "$DEFAULT_USER:" "$DATA_GIT_DIR"
 ln -sfn "$DATA_GIT_CONFIG" "$DEFAULT_HOME/.gitconfig"
 chown -h "$DEFAULT_USER:" "$DEFAULT_HOME/.gitconfig"
