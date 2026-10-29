@@ -121,7 +121,7 @@ mv "$shfmt" "$shfmt.off"
 run no-shfmt
 mv "$shfmt.off" "$shfmt"
 expect_rc no-shfmt 1
-expect_err no-shfmt "Install it with scripts/install-shfmt.sh"
+expect_err no-shfmt "Install it with scripts/install/install-shfmt.sh"
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2

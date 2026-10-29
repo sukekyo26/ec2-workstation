@@ -56,7 +56,7 @@ resource "aws_instance" "this" {
     Name     = "${local.resource_prefix}-instance"
     Owner    = var.username
     Schedule = "office-hours"
-    # scripts/setup-remote-ssh が SSH の接続ユーザー名として読む
+    # scripts/client/setup-remote-ssh が SSH の接続ユーザー名として読む
     LoginUser = local.os_image.login_user
   }
 }

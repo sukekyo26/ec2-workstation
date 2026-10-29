@@ -6,7 +6,7 @@
 
 - OpenTofu 1.10 以降（S3 ネイティブロック `use_lockfile` を使用）
 - AWS CLI（認証設定済み）
-- jv（`scripts/install-jv.sh` で入れる。curl・tar と sha256sum か shasum が要る）。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が tofu を呼ぶ前に `workstation-config.json` を検証する
+- jv（`scripts/install/install-jv.sh` で入れる。curl・tar と sha256sum か shasum が要る）。`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` が tofu を呼ぶ前に `workstation-config.json` を検証する
 - state 保存用 S3 バケット
 
 ### State バケットの作成（初回のみ）
@@ -99,10 +99,10 @@ state はユーザーごとなので、1 人の apply がほかの人のリソ�
 
 ## 接続
 
-apply 後の運用（VS Code Remote-SSH 設定・EC2 起動）は `../scripts/` のスクリプトを使います:
+apply 後の運用（VS Code Remote-SSH 設定・EC2 起動）は `../scripts/client/` のスクリプトを使います:
 
 ```bash
-../scripts/setup-remote-ssh.sh   # Name タグ (tofu output workstations の instance_name) を対話入力
+../scripts/client/setup-remote-ssh.sh   # Name タグ (tofu output workstations の instance_name) を対話入力
 ```
 
 スクリプトは SSM Parameter Store の `/ec2/keypair/{key_pair_id}` から秘密鍵を取得します。

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/setup-remote-ssh.sh を、偽の aws と偽の session-manager-plugin で確かめる。
+# scripts/client/setup-remote-ssh.sh を、偽の aws と偽の session-manager-plugin で確かめる。
 # - 接続用のスクリプトはホストごと (~/.ssh/ec2-workstation-proxy-<ホスト>.sh)。別のホストの setup で、ほかのホストのスクリプトと
 #   config の節は変わらず、前の版が置いた共有の ~/.ssh/start-ec2-and-wait.sh も残る
 # - ホスト名は小文字にし、合わない名前は聞き直す
@@ -8,7 +8,7 @@
 #   scripts/tests/setup-remote-ssh.test.sh
 set -euo pipefail
 
-scripts_dir=$(cd "$(dirname "$0")/.." && pwd)
+scripts_dir=$(cd "$(dirname "$0")/../client" && pwd)
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin" "$work/home/.ssh"

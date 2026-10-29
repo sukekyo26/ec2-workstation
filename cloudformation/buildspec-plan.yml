@@ -13,8 +13,8 @@ env:
 phases:
   install:
     commands:
-      - bash scripts/install-jv.sh
-      - bash scripts/install-tofu.sh
+      - bash scripts/install/install-jv.sh
+      - bash scripts/install/install-tofu.sh
   build:
     commands:
       # export の終了コードはコマンド置換の失敗を隠すので、先に変数に受ける

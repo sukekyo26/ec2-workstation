@@ -714,7 +714,7 @@ run deploy-no-jv tofu-deploy.sh ""
 mv "$jv.off" "$jv"
 expect_rc deploy-no-jv 1
 expect_log deploy-no-jv ""
-expect_err deploy-no-jv "Install it with scripts/install-jv.sh"
+expect_err deploy-no-jv "Install it with scripts/install/install-jv.sh"
 
 # destroy は設定を検証しない (設定の違反があっても全部を消せる)
 run destroy-violation tofu-destroy.sh "" FAKE_JV=violation

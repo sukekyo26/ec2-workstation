@@ -3,11 +3,11 @@
 # <リポジトリ>/.tools/just-<版>/just に取る。sha256 が合わなければ置かずに止まる。既にあれば何もしない (--force で取り直す)。
 # 版と sha256 は scripts/lib/tools.sh にある。要るもの: curl・tar と sha256sum か shasum
 #
-#   scripts/install-just.sh [--force]
+#   scripts/install/install-just.sh [--force]
 set -euo pipefail
 
 # shellcheck source=scripts/lib/tools.sh
-. "$(dirname "$0")/lib/tools.sh"
+. "$(dirname "$0")/../lib/tools.sh"
 
 case "${1:-}" in
     '' | --force) ;;

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 全員分を deploy する。どの CI からも、手元からも、これを呼べば同じになる。
-# 要るもの: bash・jq・tofu・AWS CLI・jv (scripts/install-jv.sh)、AWS の認証、TF_STATE_BUCKET
+# 要るもの: bash・jq・tofu・AWS CLI・jv (scripts/install/install-jv.sh)、AWS の認証、TF_STATE_BUCKET
 #
 # 1 段目: network を plan → apply する (workstations の plan は network の VPC・サブネットを引くため、先に要る)
 # 2 段目: 設定にいる全員の plan と、設定から消えたユーザー (state だけが残る workspace) の destroy の plan を取り、

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/install-jv.sh・scripts/install-shfmt.sh (共通の流れは scripts/lib/tools.sh) の取り方と止まり方を、
+# scripts/install/install-jv.sh・scripts/install/install-shfmt.sh (共通の流れは scripts/lib/tools.sh) の取り方と止まり方を、
 # 偽の curl・uname で確かめる (ネットワークに出ない)。
 # - スクリプトは一時ディレクトリのリポジトリの形に写して走らせ、道具は写しの .tools に置かせる
 # - 偽の curl は URL を $FAKE_CURL_LOG に書き、$FAKE_DOWNLOAD (jv は tarball、shfmt はバイナリ) を返す
@@ -101,7 +101,7 @@ run() {
     shift 4
     : > "$FAKE_CURL_LOG"
     : > "$FAKE_CURL_LOG.args"
-    "$work/$repo/scripts/${SCRIPT:-install-jv.sh}" "$@" > /dev/null 2> "$work/out/$name.err" || rc=$?
+    "$work/$repo/scripts/install/${SCRIPT:-install-jv.sh}" "$@" > /dev/null 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
 
