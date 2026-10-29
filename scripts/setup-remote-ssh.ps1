@@ -9,6 +9,19 @@
     [string]$Region
 )
 
+# The host name becomes part of file names in ~/.ssh, so it is lowercased (NTFS ignores case) and kept to
+# letters, digits, - and _. Returns the lowercased name, or $null when it is not valid
+function ConvertTo-SshHostName {
+    param([string]$Name)
+    $lower = $Name.ToLowerInvariant()
+    # \z, not $: in .NET, $ also matches before a final newline
+    if ($lower -cmatch '^[a-z]([a-z0-9_-]*[a-z0-9])?\z') {
+        return $lower
+    }
+    return $null
+}
+$hostNameRule = "Host name must start with a lowercase letter, end with a letter or number, and contain only lowercase letters, numbers, hyphens, and underscores."
+
 # ============================================
 # Prerequisites Check
 # ============================================
@@ -20,13 +33,13 @@ $hasError = $false
 Write-Host "  PowerShell $($PSVersionTable.PSVersion) - OK" -ForegroundColor Green
 
 # Check AWS CLI v2
-$awsCliPath = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
-if (-not (Test-Path $awsCliPath)) {
+$awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+if (-not (Test-Path $awsCli)) {
     Write-Host "Error: AWS CLI v2 is not installed." -ForegroundColor Red
     Write-Host "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" -ForegroundColor Yellow
     $hasError = $true
 } else {
-    $awsVersion = & $awsCliPath --version 2>&1
+    $awsVersion = & $awsCli --version 2>&1
     Write-Host "  $awsVersion - OK" -ForegroundColor Green
 }
 
@@ -72,17 +85,22 @@ if ([string]::IsNullOrEmpty($InstanceName)) {
 if ([string]::IsNullOrEmpty($SshHost)) {
     do {
         $answer = Read-Host "Enter SSH Host name [ec2]"
-        $SshHost = if ([string]::IsNullOrWhiteSpace($answer)) { "ec2" } else { $answer.ToLower() }
-
-        # Validate: must start with lowercase letter, contain only lowercase letters, numbers, hyphens, underscores
-        if ($SshHost -notmatch '^[a-z]([a-z0-9_-]*[a-z0-9])?$') {
-            Write-Host "Error: Host name must start with a lowercase letter, end with a letter or number, and contain only lowercase letters, numbers, hyphens, and underscores." -ForegroundColor Red
-            $SshHost = $null
+        $SshHost = ConvertTo-SshHostName $(if ([string]::IsNullOrWhiteSpace($answer)) { "ec2" } else { $answer })
+        if ($null -eq $SshHost) {
+            Write-Host "Error: $hostNameRule" -ForegroundColor Red
             continue
         }
 
         break
     } while ($true)
+} else {
+    # -SshHost cannot be asked again, so a bad one stops here
+    $name = ConvertTo-SshHostName $SshHost
+    if ($null -eq $name) {
+        Write-Error "Error: '$SshHost' is not a valid host name. $hostNameRule"
+        exit 1
+    }
+    $SshHost = $name
 }
 
 # ============================================
@@ -117,7 +135,7 @@ if (-not (Test-Path $SSH_CONFIG_DIR)) {
 # Get key pair information from EC2 instance
 # ============================================
 Write-Host "`nRetrieving key pair information from instance..." -ForegroundColor Cyan
-$instanceIds = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --region $REGION --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query "Reservations[].Instances[].InstanceId" --output text
+$instanceIds = & $awsCli ec2 describe-instances --region $REGION --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query "Reservations[].Instances[].InstanceId" --output text
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Error: Failed to look up instance: $instanceIds"
     exit 1
@@ -131,7 +149,7 @@ if ($instanceIdList.Count -ne 1) {
 $INSTANCE_ID = $instanceIdList[0]
 
 # 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
-$SSH_USER = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
+$SSH_USER = & $awsCli ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Error: Failed to read the LoginUser tag (AWS CLI error). Check your AWS credentials (e.g. run 'aws login') and try again: $SSH_USER"
     exit 1
@@ -140,7 +158,7 @@ if ($SSH_USER -eq "None" -or [string]::IsNullOrEmpty($SSH_USER)) {
     Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
     exit 1
 }
-$KEY_NAME = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].KeyName" --output text
+$KEY_NAME = & $awsCli ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].KeyName" --output text
 
 if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {
     Write-Error "Error: No key pair is associated with instance $INSTANCE_ID"
@@ -152,7 +170,7 @@ Write-Host "Key name: $KEY_NAME" -ForegroundColor Green
 # ============================================
 # Get Key Pair ID from Key Name
 # ============================================
-$KEY_ID = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-key-pairs --key-names $KEY_NAME --region $REGION --query "KeyPairs[0].KeyPairId" --output text
+$KEY_ID = & $awsCli ec2 describe-key-pairs --key-names $KEY_NAME --region $REGION --query "KeyPairs[0].KeyPairId" --output text
 
 Write-Host "Key pair ID: $KEY_ID" -ForegroundColor Green
 
@@ -163,7 +181,7 @@ $SECRET_KEY_PATH = "$SSH_CONFIG_DIR\$SECRET_KEY"
 # Retrieve private key from Parameter Store
 # ============================================
 Write-Host "`nRetrieving private key from Parameter Store..." -ForegroundColor Cyan
-& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ssm get-parameter --region $REGION --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text | Set-Content -Path $SECRET_KEY_PATH
+& $awsCli ssm get-parameter --region $REGION --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text | Set-Content -Path $SECRET_KEY_PATH
 Write-Host "Created/Updated: $SECRET_KEY_PATH" -ForegroundColor Green
 
 # ============================================
@@ -178,7 +196,9 @@ icacls $SECRET_KEY_PATH /grant "$($env:USERNAME):F" | Out-Null
 # ============================================
 $SCRIPT_DIR = Split-Path -Parent $MyInvocation.MyCommand.Path
 $AUTO_START_SCRIPT = "start-ec2-and-wait.ps1"
-$AUTO_START_SCRIPT_PATH = "$SSH_CONFIG_DIR\$AUTO_START_SCRIPT"
+# One script per host: a setup for another host must not change the script this host runs.
+# An older setup's shared ~/.ssh/start-ec2-and-wait.ps1 is left as it is for the hosts that still use it
+$AUTO_START_SCRIPT_PATH = "$SSH_CONFIG_DIR\ec2-workstation-proxy-$SSH_HOST.ps1"
 
 Write-Host "Copying auto-start script..." -ForegroundColor Cyan
 Copy-Item -Path "$SCRIPT_DIR\$AUTO_START_SCRIPT" -Destination $AUTO_START_SCRIPT_PATH -Force
@@ -235,3 +255,4 @@ Write-Host "Updated: $SSH_CONFIG_PATH" -ForegroundColor Green
 
 Write-Host "`n✓ Configuration complete!" -ForegroundColor Green
 Write-Host "You can now connect to '$SSH_HOST' using VS Code Remote-SSH." -ForegroundColor Green
+Write-Host "'$SSH_HOST' runs $AUTO_START_SCRIPT_PATH. The other hosts keep their own scripts; to update one, run this setup again for that host." -ForegroundColor Gray

@@ -201,7 +201,7 @@ flowchart TB
 - 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
 - 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは、その人の workstations の plan（[4. デプロイ](#4-デプロイ) の「差分だけ見る」）で `aws_instance` が `-/+` になるかで確認できます
 - 新しい AMI が出ていれば、`scripts/tofu-deploy.sh` は全員分を plan するので、ユーザーの追加など**どの目的の deploy でも全員のインスタンスが作り直されます**（端末なら、作り直す人の一覧を出して `yes` を待ちます）。自分の分だけを作り直すときは、[4. デプロイ](#4-デプロイ) の「1 人分だけ apply する」の手順を使います。state はユーザーごとに分かれているので、1 人分の apply はほかの人のインスタンスに触れません
-- インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
+- インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、インスタンスの作り直しでは `setup-remote-ssh` のやり直しは不要です（接続用のスクリプトを新しい版にするときは、そのホストの `setup-remote-ssh` をやり直します）
 - ルートに入れたツールを残したい場合は [user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl) に追加してください。このファイルは OpenTofu の `templatefile` で展開されるので、シェルの書き方のうち次の 2 つは書き換えが要ります。書き換えないと、`tofu plan` が `vars map does not contain key "HOME"` のような誤りで止まります
   - `${VAR}`（波かっこ付きの変数）は `$${VAR}` と書く（展開で `${VAR}` になる）。波かっこの無い `$VAR` は、そのまま書けます
   - `%{` は `%%{` と書く
@@ -568,7 +568,7 @@ tofu -chdir=opentofu/stacks/workstations output workstations   # そのユーザ
 - AWSリージョンの設定（デフォルト: `ap-northeast-1`）
 - AWS SSM Parameter Storeから秘密鍵を取得
 - インスタンスの `LoginUser` タグから接続ユーザー名を取得
-- 自動起動スクリプト（`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`）を `~/.ssh/` にコピー
+- 自動起動スクリプト（`start-ec2-and-wait.ps1` / `start-ec2-and-wait.sh`）を、ホストごとの名前（`~/.ssh/ec2-workstation-proxy-<ホスト名>.ps1` / `.sh`）でコピー。別のホストの設定や、前の版が置いた `~/.ssh/start-ec2-and-wait.*` は変えません。新しい版にするには、ホストごとに `setup-remote-ssh` をやり直します
 - `~/.ssh/config` にSSM経由の接続設定を追加（ProxyCommandで自動起動を有効化）
 
 #### 3. VS Codeから接続

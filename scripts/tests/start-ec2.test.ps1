@@ -1,11 +1,13 @@
 ﻿<#
 .SYNOPSIS
-    Checks start-ec2-and-wait.ps1 and start-ec2.ps1 with a fake AWS CLI.
+    Checks start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake AWS CLI.
 .DESCRIPTION
     Each script is copied to a temp directory with its one $awsCli line pointed at a fake aws.cmd, and run in a
     child powershell.exe (the same one that runs this test). start-ec2-and-wait.ps1 runs as the SSH ProxyCommand,
     so its stdout must carry nothing but the session (the fake prints SSH-2.0-fake). A failed aws call must stop the
     script at once: each run is killed after 10 seconds (EC2WS_SSM_POLL_INTERVAL=1 shortens the wait between SSM checks).
+    setup-remote-ssh.ps1 runs with USERPROFILE in the temp directory; its ProxyCommand must not load the user's profile
+    (the output would go into the SSH channel).
     Windows only (the fake is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
 #>
 $ErrorActionPreference = 'Stop'
@@ -28,12 +30,13 @@ $fakeLines = @(
     '@echo off',
     'setlocal',
     'if defined FAKE_ARGS_LOG >>"%FAKE_ARGS_LOG%" echo(%*',
+    'if "%~1"=="--version" (echo aws-cli/2.0.0 fake& exit /b 0)',
     'set "what=%~2"',
     'if "%~2"=="wait" set "what=wait-%~3"',
     'if "%~2"=="describe-instances" if "%~3"=="--region" set "what=lookup"',
     'if "%~2"=="describe-instances" if "%~3"=="--instance-ids" set "what=state"',
     'set known=',
-    'for %%w in (lookup state start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session) do if "%what%"=="%%w" set known=1',
+    'for %%w in (lookup state start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session describe-key-pairs get-parameter) do if "%what%"=="%%w" set known=1',
     'if not defined known (',
     '    >&2 echo fake aws: unexpected call: %what%',
     '    exit /b 2',
@@ -65,6 +68,8 @@ $fakeLines = @(
     ')',
     'if "%what%"=="describe-instance-information" echo Online',
     'if "%what%"=="start-session" echo SSH-2.0-fake',
+    'if "%what%"=="describe-key-pairs" echo key-0123456789abcdef0',
+    'if "%what%"=="get-parameter" echo FAKE PRIVATE KEY',
     'exit /b 0'
 )
 [IO.File]::WriteAllText($fakeAws, ($fakeLines -join "`r`n") + "`r`n", [Text.Encoding]::ASCII)
@@ -252,10 +257,106 @@ foreach ($sequence in @('fail,fail,Online', 'fail,fail,None,fail,fail,Online')) 
     }
 }
 
-# The ProxyCommand that setup-remote-ssh.ps1 writes must not load the user's profile: its output would go into the SSH channel
-$proxyLines = @(Get-Content (Join-Path $root 'scripts\setup-remote-ssh.ps1') | Where-Object { $_ -match '^\s*ProxyCommand ' })
-if ($proxyLines.Count -ne 1 -or $proxyLines[0] -notmatch 'ProxyCommand powershell -NoProfile -NonInteractive ') {
-    Add-Failure "setup-remote-ssh.ps1: want one ProxyCommand line starting with 'powershell -NoProfile -NonInteractive', got: $proxyLines"
+# setup-remote-ssh.ps1: one auto-start script per host (ec2-workstation-proxy-<host>.ps1). A setup for another host must not
+# change this host's script or its Host block, and the shared start-ec2-and-wait.ps1 of an older setup stays as it is.
+# The setup copies start-ec2-and-wait.ps1 from its own folder, which is $work (already pointed at the fake)
+$setupScript = Copy-ScriptWithFakeCli 'setup-remote-ssh.ps1'
+$profileDir = Join-Path $work 'profile'
+$sshDir = Join-Path $profileDir '.ssh'
+$pluginDir = Join-Path $work 'plugin'
+New-Item -ItemType Directory -Path $sshDir, $pluginDir | Out-Null
+[IO.File]::WriteAllText((Join-Path $pluginDir 'session-manager-plugin.cmd'), "@echo 1.2.3`r`n", [Text.Encoding]::ASCII)
+$setupEnvironment = @{ FAKE_STATE = 'ec2-user'; USERPROFILE = $profileDir; PATH = "$pluginDir;$env:PATH" }
+$oldShared = Join-Path $sshDir 'start-ec2-and-wait.ps1'
+[IO.File]::WriteAllText($oldShared, "old shared script`n")
+$newVersion = [IO.File]::ReadAllText($waitScript)
+
+function Invoke-Setup {
+    param([string]$Name, [string]$SshHost, [int]$WantExitCode = 0)
+    $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', "ws-$Name", '-SshHost', $SshHost, '-Region', 'ap-northeast-1') -Environment $setupEnvironment
+    Write-Case -Name "setup $Name" -Result $result
+    if ($result.TimedOut -or $result.ExitCode -ne $WantExitCode) {
+        Add-Failure "setup ${Name}: want rc=$WantExitCode, stderr: $($result.Stderr)"
+    }
+    return $result
+}
+
+# The Host block of a host in ~/.ssh/config (the Host line and the indented lines after it), with LF line endings.
+# The setup writes the new block with the line endings of its own file (CRLF in a Windows checkout) and turns the rest
+# of the config into LF, so the blocks are compared without CR
+function Get-HostBlock {
+    param([string]$SshHost)
+    $config = [IO.File]::ReadAllText((Join-Path $sshDir 'config')) -replace "`r`n", "`n"
+    # The comma keeps a one-block result an array (a bare return unrolls it to a string, and [0] would be its first character)
+    return ,@([regex]::Matches($config, "(?m)^Host $SshHost\n(?:   .+\n)*") | ForEach-Object { $_.Value })
+}
+
+function Get-ProxyScript {
+    param([string]$SshHost)
+    return Join-Path $sshDir "ec2-workstation-proxy-$SshHost.ps1"
+}
+
+# 1. alpha, given as Alpha: the name is lowercased, and the ProxyCommand runs alpha's own script without the user's profile
+$result = Invoke-Setup -Name 'alpha' -SshHost 'Alpha'
+$alphaScript = Get-ProxyScript 'alpha'
+$wantProxy = "   ProxyCommand powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($alphaScript -replace '\\', '/')`" %h ap-northeast-1 %p"
+$alphaBlock = Get-HostBlock 'alpha'
+if (-not (Test-Path $alphaScript) -or [IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+    Add-Failure "setup alpha: $alphaScript is not a copy of start-ec2-and-wait.ps1"
+}
+if ($alphaBlock.Count -ne 1 -or ($alphaBlock[0] -split "`n") -notcontains $wantProxy -or ($alphaBlock[0] -split "`n") -notcontains '   User ec2-user') {
+    Add-Failure "setup alpha: want one Host alpha with '$wantProxy', got: $alphaBlock"
+}
+$output = $result.Stdout -join "`n"
+if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run this setup again for that host*') {
+    Add-Failure "setup alpha: the last message does not name the script or say how to update it"
+}
+
+# 2. beta: alpha's script (an older version, marked) and the content of its Host block stay; so does the shared script
+[IO.File]::AppendAllText($alphaScript, "# older alpha`r`n")
+$alphaBefore = [IO.File]::ReadAllText($alphaScript)
+$null = Invoke-Setup -Name 'beta' -SshHost 'beta'
+$betaScript = Get-ProxyScript 'beta'
+if (-not (Test-Path $betaScript) -or @(Get-HostBlock 'beta').Count -ne 1 -or (Get-HostBlock 'beta')[0] -notlike "*$($betaScript -replace '\\', '/')*") {
+    Add-Failure "setup beta: want Host beta running $betaScript"
+}
+if ([IO.File]::ReadAllText($alphaScript) -ne $alphaBefore) {
+    Add-Failure "setup beta: changed $alphaScript"
+}
+if (((Get-HostBlock 'alpha') -join '') -ne ($alphaBlock -join '')) {
+    Add-Failure "setup beta: changed Host alpha: $(Get-HostBlock 'alpha')"
+}
+if ([IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+    Add-Failure 'setup beta: changed the shared start-ec2-and-wait.ps1'
+}
+
+# 3. alpha again: only alpha's script becomes the new version, and there is one Host alpha
+$betaBefore = [IO.File]::ReadAllText($betaScript)
+$null = Invoke-Setup -Name 'alpha-again' -SshHost 'alpha'
+if ([IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+    Add-Failure "setup alpha-again: $alphaScript is not the new version"
+}
+if (@(Get-HostBlock 'alpha').Count -ne 1) {
+    Add-Failure "setup alpha-again: want one Host alpha, got $(@(Get-HostBlock 'alpha').Count)"
+}
+if ([IO.File]::ReadAllText($betaScript) -ne $betaBefore -or [IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+    Add-Failure 'setup alpha-again: changed beta or the shared script'
+}
+
+# 4. A bad -SshHost stops before anything is written or changed (..\x would name a file outside ~/.ssh, and a final
+# newline would go into the file name and the Host line)
+function Get-Snapshot {
+    return @(Get-ChildItem -Recurse -File $work | Sort-Object FullName | ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
+}
+foreach ($badHost in @('..\x', "alpha`n")) {
+    $before = Get-Snapshot
+    $result = Invoke-Setup -Name 'bad-host' -SshHost $badHost -WantExitCode 1
+    if ($result.Stderr -notlike '*is not a valid host name*') {
+        Add-Failure "setup bad-host '$badHost': want 'is not a valid host name', got: $($result.Stderr)"
+    }
+    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
+        Add-Failure "setup bad-host '$badHost': files were written or changed"
+    }
 }
 
 } finally {
