@@ -15,10 +15,10 @@
 
 ```bash
 aws cloudformation deploy --region ap-northeast-1 \
-  --template-file cloudformation/state-bucket.yaml --stack-name ec2-workstation-state
+  --template-file cloudformation/state-bucket.yaml --stack-name ec2-workstation-tofu-state
 # 名前を変えたいときだけ --parameter-overrides BucketName=<名前>。KMS の鍵で守るなら Encryption=SSE-KMS-CMK も並べる
 
-aws cloudformation describe-stacks --region ap-northeast-1 --stack-name ec2-workstation-state \
+aws cloudformation describe-stacks --region ap-northeast-1 --stack-name ec2-workstation-tofu-state \
   --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text
 ```
 
