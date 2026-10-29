@@ -3,8 +3,6 @@
 # - VPC Flow Logs (REJECT のみ) でセキュリティ監査対応
 
 locals {
-  resource_prefix = "${var.project_name}-${var.environment}"
-
   # VPC CIDR のプレフィックス長に関わらず /24 を切り出す
   public_subnet_cidr = cidrsubnet(var.vpc_cidr, 24 - tonumber(split("/", var.vpc_cidr)[1]), 0)
 }
@@ -38,7 +36,7 @@ resource "aws_internet_gateway" "this" {
   vpc_id = aws_vpc.this.id
 
   tags = {
-    Name = "${local.resource_prefix}-igw"
+    Name = "${var.resource_prefix}-igw"
   }
 }
 
@@ -51,7 +49,7 @@ resource "aws_route_table" "public" {
   }
 
   tags = {
-    Name = "${local.resource_prefix}-public-rt"
+    Name = "${var.resource_prefix}-public-rt"
   }
 }
 
@@ -65,11 +63,11 @@ resource "aws_route_table_association" "public" {
 # ============================================================
 
 resource "aws_cloudwatch_log_group" "flow_logs" {
-  name              = "/vpc/flow-logs/${local.resource_prefix}"
+  name              = "/vpc/flow-logs/${var.resource_prefix}"
   retention_in_days = 30
 
   tags = {
-    Name = "${local.resource_prefix}-flow-log-group"
+    Name = "${var.resource_prefix}-flow-log-group"
   }
 }
 
@@ -86,7 +84,7 @@ data "aws_iam_policy_document" "flow_logs_assume" {
 }
 
 resource "aws_iam_role" "flow_logs" {
-  name               = "${local.resource_prefix}-flow-log-role"
+  name               = "${var.resource_prefix}-flow-log-role"
   description        = "IAM role for VPC Flow Logs"
   assume_role_policy = data.aws_iam_policy_document.flow_logs_assume.json
 }
@@ -115,6 +113,6 @@ resource "aws_flow_log" "this" {
   iam_role_arn    = aws_iam_role.flow_logs.arn
 
   tags = {
-    Name = "${local.resource_prefix}-flow-log"
+    Name = "${var.resource_prefix}-flow-log"
   }
 }

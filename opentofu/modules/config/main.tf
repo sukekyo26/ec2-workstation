@@ -8,6 +8,18 @@ locals {
   resource_prefix = "${local.raw_config.projectName}-${local.raw_config.environment}"
 }
 
+# デプロイ先のリージョン。両方のルートの provider と scripts/tofu-deploy.sh がここから取る
+output "aws_region" {
+  description = "AWS region to deploy into"
+  value       = "ap-northeast-1"
+}
+
+# network のリソースの名前の頭。VPC とサブネットの Name タグもこれから作る
+output "resource_prefix" {
+  description = "Prefix of the shared network resource names (<projectName>-<environment>)"
+  value       = local.resource_prefix
+}
+
 output "project_name" {
   description = "Project name used for resource naming"
   value       = local.raw_config.projectName

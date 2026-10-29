@@ -60,7 +60,7 @@ state は 2 つのルートに分かれています。
 ```bash
 export TF_STATE_BUCKET=<your-state-bucket>
 
-# デプロイ（network → workstations。各段は plan が通ったときだけ、保存した plan を apply する）
+# デプロイ（network → workstations。各段は plan が通ったときだけ、保存した plan を apply する。端末なら変更のある段ごとに yes を待つ）
 ../scripts/tofu-deploy.sh
 
 # 差分だけ見る
