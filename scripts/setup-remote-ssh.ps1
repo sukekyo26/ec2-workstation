@@ -223,7 +223,7 @@ Host $SSH_HOST
    StrictHostKeyChecking no
    UserKnownHostsFile /dev/null
    ServerAliveInterval 60
-   ProxyCommand powershell -ExecutionPolicy Bypass -File "$AUTO_START_SCRIPT_PATH_UNIX" %h $REGION %p
+   ProxyCommand powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$AUTO_START_SCRIPT_PATH_UNIX" %h $REGION %p
 "@
 
 # Append new entry
