@@ -10,7 +10,6 @@ set -e
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 GRAY='\033[0;37m'
 NC='\033[0m' # No Color
@@ -134,8 +133,8 @@ INSTANCE_ID="${INSTANCE_ID_LIST[0]}"
 KEY_NAME=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].KeyName" --output text)
 
 # 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
-USER=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text)
-if [ "$USER" = "None" ] || [ -z "$USER" ]; then
+SSH_USER=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" --region "$REGION" --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text)
+if [ "$SSH_USER" = "None" ] || [ -z "$SSH_USER" ]; then
     echo -e "${RED}Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags.${NC}"
     exit 1
 fi
@@ -224,7 +223,7 @@ PROXY_COMMAND="ProxyCommand \"$AUTO_START_SCRIPT_PATH\" %h $REGION %p"
 SSH_CONFIG_ENTRY="# Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
    HostName $INSTANCE_NAME
-   User $USER
+   User $SSH_USER
    IdentityFile $SECRET_KEY_PATH
    IdentitiesOnly yes
    StrictHostKeyChecking no

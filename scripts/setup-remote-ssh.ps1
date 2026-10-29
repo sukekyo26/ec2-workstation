@@ -131,12 +131,12 @@ if ($instanceIdList.Count -ne 1) {
 $INSTANCE_ID = $instanceIdList[0]
 
 # 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
-$USER = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
+$SSH_USER = & "C:\Program Files\Amazon\AWSCLIV2\aws.exe" ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Error: Failed to read the LoginUser tag (AWS CLI error). Check your AWS credentials (e.g. run 'aws login') and try again: $USER"
+    Write-Error "Error: Failed to read the LoginUser tag (AWS CLI error). Check your AWS credentials (e.g. run 'aws login') and try again: $SSH_USER"
     exit 1
 }
-if ($USER -eq "None" -or [string]::IsNullOrEmpty($USER)) {
+if ($SSH_USER -eq "None" -or [string]::IsNullOrEmpty($SSH_USER)) {
     Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
     exit 1
 }
@@ -217,7 +217,7 @@ $sshConfigEntry = @"
 # Remote development EC2 (Auto-start enabled)
 Host $SSH_HOST
    HostName $INSTANCE_NAME
-   User $USER
+   User $SSH_USER
    IdentityFile $SECRET_KEY_PATH_UNIX
    IdentitiesOnly yes
    StrictHostKeyChecking no
