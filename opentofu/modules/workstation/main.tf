@@ -31,6 +31,8 @@ resource "aws_instance" "this" {
   user_data_replace_on_change = true
   # EC2 の user-data は base64 にする前で 16KB まで。cloud-init は gzip を見分けて展開するので、gzip して渡す
   # LIMIT: 上限は base64 前で 16KB。余裕を見て base64 後の長さで 16KB 未満を CI で見る (今は約 8.8KB)。超えたら S3 から取る形に作り直す
+  # テンプレートの中で、シェルの ${VAR} は $${VAR}、%{ は %%{ と書く (渡す変数は下の 3 つだけ)。
+  # このことはテンプレートの中には書かない: user-data が 1 バイトでも変わると、次の deploy で全員のインスタンスが作り直されるため
   user_data_base64 = base64gzip(templatefile("${path.module}/templates/user-data.sh.tftpl", {
     data_volume_id = aws_ebs_volume.data.id
     username       = var.username
