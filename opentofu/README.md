@@ -15,11 +15,14 @@
 
 ```bash
 aws cloudformation deploy --region ap-northeast-1 \
-  --template-file cloudformation/state-bucket.yaml --stack-name ec2-workstation-state \
-  --parameter-overrides BucketName=<your-state-bucket>   # KMS の鍵で守るなら Encryption=SSE-KMS-CMK も
+  --template-file cloudformation/state-bucket.yaml --stack-name ec2-workstation-state
+# 名前を変えたいときだけ --parameter-overrides BucketName=<名前>。KMS の鍵で守るなら Encryption=SSE-KMS-CMK も並べる
+
+aws cloudformation describe-stacks --region ap-northeast-1 --stack-name ec2-workstation-state \
+  --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text
 ```
 
-出力 `BucketName` を `TF_STATE_BUCKET` に入れます。スタックを消しても、バケット（と SSE-KMS-CMK の鍵）は残ります。
+バケットの名前は、既定で `ec2-workstation-tfstate-<account-id>` です（S3 の全体で 1 つなので、アカウント ID で分けます）。出力 `BucketName` を `TF_STATE_BUCKET` に入れます。スタックを消しても、バケット（と SSE-KMS-CMK の鍵）は残ります。
 
 暗号化（パラメータ `Encryption`）:
 

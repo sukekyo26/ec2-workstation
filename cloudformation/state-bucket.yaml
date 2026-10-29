@@ -6,10 +6,15 @@ Description: >-
 Parameters:
   BucketName:
     Type: String
+    Default: ""
     # No dots: the S3 backend uses virtual-hosted URLs, and a dot in the name breaks the TLS certificate match
-    AllowedPattern: ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
-    ConstraintDescription: 3 to 63 lowercase letters, digits and hyphens, starting and ending with a letter or digit
-    Description: Name of the state bucket (unique across all of S3). Put it in TF_STATE_BUCKET
+    AllowedPattern: ^$|^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$
+    ConstraintDescription: >-
+      empty (ec2-workstation-tfstate-<account-id>), or 3 to 63 lowercase letters, digits and hyphens, starting and
+      ending with a letter or digit
+    Description: >-
+      Name of the state bucket (unique across all of S3). Empty for ec2-workstation-tfstate-<account-id>.
+      Put output BucketName in TF_STATE_BUCKET
   Encryption:
     Type: String
     Default: SSE-S3
@@ -20,6 +25,7 @@ Parameters:
       Do not change it after choosing SSE-KMS-CMK (the existing objects stay encrypted with that key)
 
 Conditions:
+  HasBucketName: !Not [!Equals [!Ref BucketName, ""]]
   UseCmk: !Equals [!Ref Encryption, SSE-KMS-CMK]
   UseAwsManagedKey: !Equals [!Ref Encryption, SSE-KMS-AWS-MANAGED]
   UseKms: !Or [!Condition UseCmk, !Condition UseAwsManagedKey]
@@ -41,7 +47,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      Description: !Sub OpenTofu state in s3://${BucketName}
+      Description: !Sub OpenTofu state of the stack ${AWS::StackName}
       EnableKeyRotation: true
       KeyPolicy:
         Version: "2012-10-17"
@@ -58,7 +64,7 @@ Resources:
     DeletionPolicy: Retain
     UpdateReplacePolicy: Retain
     Properties:
-      BucketName: !Ref BucketName
+      BucketName: !If [HasBucketName, !Ref BucketName, !Sub "ec2-workstation-tfstate-${AWS::AccountId}"]
       # LIMIT: no lifecycle removes the noncurrent versions, so the .tflock versions, the delete markers and the old
       # state versions (with the private keys) stay. Add NoncurrentVersionExpiration when they pile up or must go
       VersioningConfiguration:
