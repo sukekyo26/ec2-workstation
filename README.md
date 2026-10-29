@@ -199,13 +199,13 @@ flowchart TB
 
 - AMI が同じでも、user-data（[user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl)）が変わった `apply` ではインスタンスが作り直されます（cloud-init は同じインスタンスでは user-data を走らせ直さないため）。user-data は gzip して渡すので、`tofu plan` やコンソールでは中身が読めません。何が変わったかは git の差分で確かめてください
 - 作り直しの流れ: 旧インスタンスを停止 → データボリュームをデタッチ → 旧インスタンス削除 → 新インスタンス作成 → データボリュームをアタッチ → user-data がマウント
-- 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは、workstations の plan（[4. デプロイ](#4-デプロイ) の「差分だけ見る」）で `aws_instance` が `-/+` になるかで確認できます
-- 新しい AMI が出ていれば、ユーザーの追加など**どの目的の `apply` でも全員のインスタンスが作り直されます**。作業中のメンバーがいるときは `tofu plan` で確認してから実行してください
+- 起動中のインスタンスも `apply` で停止されます。新しい AMI があるかは、その人の workstations の plan（[4. デプロイ](#4-デプロイ) の「差分だけ見る」）で `aws_instance` が `-/+` になるかで確認できます
+- 新しい AMI が出ていれば、`scripts/tofu-deploy.sh` は全員分を plan するので、ユーザーの追加など**どの目的の deploy でも全員のインスタンスが作り直されます**（端末なら、作り直す人の一覧を出して `yes` を待ちます）。自分の分だけを作り直すときは、[4. デプロイ](#4-デプロイ) の「1 人分だけ apply する」の手順を使います。state はユーザーごとに分かれているので、1 人分の apply はほかの人のインスタンスに触れません
 - インスタンス ID は作り直しのたびに変わります。接続スクリプトは Name タグでインスタンスを探すため、`setup-remote-ssh` のやり直しは不要です
 - ルートに入れたツールを残したい場合は [user-data.sh.tftpl](opentofu/modules/workstation/templates/user-data.sh.tftpl) に追加してください
 - `dataVolumeSize` を増やして `apply` すると、EBS ボリュームは作り直さずに大きくなります（in-place 更新）。ただし、ファイルシステムを広げる `resize2fs` は user-data の中にしか無いため、インスタンスを作り直すまではファイルシステムは広がりません。すぐ使う場合は、インスタンスに入って `sudo resize2fs "$(findmnt -n -o SOURCE /data)"` を実行してください（`findmnt -n -o SOURCE /data` がデータボリュームのデバイス名で、例: `/dev/nvme1n1`）
 - EBS ボリュームは後から小さくできません。`dataVolumeSize` を減らすと、`tofu plan` は in-place 更新として通りますが、`apply` で AWS が断って失敗します。初めは小さめにして、必要に応じて増やしてください
-- データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`./scripts/tofu-init.sh workstations` の後に `tofu -chdir=opentofu/stacks/workstations apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
+- データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`./scripts/tofu-init.sh workstations <username>` の後に `tofu -chdir=opentofu/stacks/workstations apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
 - SSM で接続できないとき（Amazon Linux と Debian では、SSM Agent を user-data で入れるため、その導入に失敗すると入れません）は、`aws ec2 get-console-output --instance-id <instance-id> --latest --output text` で user-data のログ（シリアルコンソールにも出しています）を読んで原因を確かめ、直してから作り直してください
 
 #### データボリュームを持たない環境から移る場合
@@ -258,6 +258,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 - state 保存用 S3 バケット（作成手順は [opentofu/README.md](opentofu/README.md)）
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
+- デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
 - デプロイする環境に bash・jq・OpenTofu・AWS CLI（`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` が使う）
 
 ---
@@ -342,7 +343,7 @@ cd ec2-workstation
 | `autoStopConfig.scheduledStopMinute` | ✅ | 定時停止時刻（分、0-59） |
 | `enableElasticIp` | ✅ | Elastic IP（固定パブリックIP）をデフォルトで有効にするか。ユーザー単位で上書き可能。 |
 | `users` | ✅ | ユーザー配列（1人以上必須） |
-| `users[].username` | ✅ | ユーザー名（小文字英数字、ハイフン、アンダースコア） |
+| `users[].username` | ✅ | ユーザー名（小文字英数字、ハイフン、アンダースコア）。`default` は使えない（OpenTofu の default の workspace と同じ名前になるため） |
 | `users[].displayName` | | 表示名 |
 | `users[].instanceConfig` | | ユーザー個別のインスタンス設定（`defaultInstanceConfig` を項目単位で上書き） |
 | `users[].enableElasticIp` | | ユーザー個別の Elastic IP 設定（プロジェクトレベルの `enableElasticIp` を上書き） |
@@ -377,7 +378,7 @@ aws configure
 
 ### 4. デプロイ
 
-state は 2 つに分かれています。network（VPC・サブネットなど、全員で使うもの）と、workstations（各ユーザーのインスタンスなど）です。`scripts/tofu-deploy.sh` が、network を plan → apply し、次に workstations を plan → apply します。どちらの段も、plan が失敗すればその段は apply しません。端末で実行したときは、変更のある段ごとに plan の要約（作る・変える・作り直す・消すの数と、作り直すアドレス）を出し、`yes` と打つまで apply しません。`yes` 以外なら何も apply せずに終わります（終了コード 1）。CI など端末でないときは確かめずに進みます。
+state は、network（VPC・サブネットなど、全員で使うもの）の 1 つと、ユーザーごとの workstations（その人のインスタンスなど）に分かれています。ユーザーごとの state は、`opentofu/stacks/workstations` の workspace（名前はユーザー名）です。`scripts/tofu-deploy.sh` が、network を plan → apply し、次に全員の workstations を plan → apply します。2 段目では、設定にいる全員の plan と、`workstation-config.json` から消えたユーザー（state だけが残っている人）の destroy の plan を先に取り、1 つでも失敗すれば誰も apply しません。全部通ったら apply し、消えたユーザーの state（workspace）を消します。端末で実行したときは、変更のある段ごとに plan の要約（作る・変える・作り直す・消すの数と、作り直すアドレス）を出し、`yes` と打つまで apply しません。`yes` 以外なら何も apply せずに終わります（終了コード 1）。CI など端末でないときは確かめずに進みます。
 
 ```bash
 # state バケット（作成手順は opentofu/README.md）
@@ -388,8 +389,13 @@ export TF_STATE_BUCKET=<your-state-bucket>
 
 # 差分だけ見る（apply しない）
 ./scripts/tofu-init.sh network && tofu -chdir=opentofu/stacks/network plan
-./scripts/tofu-init.sh workstations && tofu -chdir=opentofu/stacks/workstations plan
+./scripts/tofu-init.sh workstations <username> && tofu -chdir=opentofu/stacks/workstations plan
+
+# 1 人分だけ apply する（その人のインスタンスだけが作り直される。network は deploy で用意しておく）
+./scripts/tofu-init.sh workstations <username> && tofu -chdir=opentofu/stacks/workstations apply
 ```
+
+- `scripts/tofu-init.sh workstations <username>` は、その人の workspace を選びます（無ければ作る）。`workstation-config.json` にも state にも無い名前（打ち間違い）では止まります。設定にいない名前の workspace（default を含む）では、plan・apply が止まります
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
 - GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意して `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
@@ -406,6 +412,8 @@ state の置き場所（key）が変わったため、前の版で作った環�
 デプロイ完了後、インスタンスの Name タグ（`instance_name`）・インスタンスID・接続コマンドが出力されます。
 
 ```bash
+# 出力は、選んでいる workspace の 1 人分
+./scripts/tofu-init.sh workstations <username>
 tofu -chdir=opentofu/stacks/workstations output workstations
 ```
 
@@ -459,8 +467,8 @@ SessionManager経由でVS Code Remote-SSHを使用してEC2に接続できます
 インスタンス ID は AMI 更新のたびに変わるため、接続設定には Name タグ（例: `ec2-workstation-dev-developer1-instance`）を使います。
 
 ```bash
-./scripts/tofu-init.sh workstations
-tofu -chdir=opentofu/stacks/workstations output workstations   # 各ユーザーの instance_name
+./scripts/tofu-init.sh workstations <username>
+tofu -chdir=opentofu/stacks/workstations output workstations   # そのユーザーの instance_name
 ```
 
 #### 2. セットアップスクリプトを実行
@@ -519,14 +527,17 @@ VS Code接続前に手動で起動したい場合は、以下のスクリプト�
 ## 🗑️ インフラの削除
 
 ```bash
-# 全リソースを削除（workstations → network の順）
+# 全リソースを削除（state を持つ全員の workstations → network の順）
 ./scripts/tofu-destroy.sh
 
 # 特定ユーザーのみ削除する場合は workstation-config.json の users から
-# 該当ユーザーを削除して ./scripts/tofu-deploy.sh
+# 該当ユーザーを削除して ./scripts/tofu-deploy.sh（その人の state も消える）
 ```
 
-端末で実行したときは、workstations・network の段ごとに消すものの要約を出し、`yes` と打つまで消しません。前の版で作った環境が残っている（同じ名前の VPC があるのに state が空）ときは、何も消さずに止まります（前の版で `tofu destroy` してください）。GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
+- 設定から消したユーザーは、次の `scripts/tofu-deploy.sh` で自動で destroy されます（GitHub Actions の Deploy も同じ）。何もしなくても残りません。手元で 1 人分だけ apply する手順では消えません
+- `scripts/tofu-destroy.sh` は、設定ではなく、state を持つ全員（設定から消えた人も）を消します
+
+端末で実行したときは、workstations（全員分をまとめて 1 回）・network の段ごとに消すものの要約を出し、`yes` と打つまで消しません。前の版で作った環境が残っている（同じ名前の VPC があるのに state が空）ときは、何も消さずに止まります（前の版で `tofu destroy` してください）。GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
 
 > ⚠️ データボリュームは削除時に最終スナップショット（`final_snapshot`）を作成してから削除されます。復元が不要になったらスナップショットを手動で削除してください（残している間は課金されます）。ルートボリュームはスナップショットを残さず削除されます。
 
@@ -591,7 +602,7 @@ ec2-workstation/
 │   │   └── workstation/          # SG・IAM・EC2・キーペア・自動停止、user-data は templates/
 │   ├── stacks/
 │   │   ├── network/              # network の state のルート
-│   │   └── workstations/         # workstations の state のルート（VPC は Name タグで引く）
+│   │   └── workstations/         # ユーザーごとの state のルート（workspace = ユーザー。VPC は Name タグで引く）
 │   └── README.md                 # OpenTofu 利用ガイド
 ├── scripts/
 │   ├── tofu-init.sh              # stacks/<stack> の init（state の bucket・key を決める）
