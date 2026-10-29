@@ -695,14 +695,19 @@ ec2-workstation/
 │   ├── install/                  # 版を固定した道具を .tools/ に取る
 │   │   ├── install-jv.sh         # jv
 │   │   ├── install-shfmt.sh      # shfmt（開発用）
-│   │   └── install-tofu.sh・install-just.sh・install-shellcheck.sh・install-gitleaks.sh・install-pwsh.sh・install-psscriptanalyzer.sh  # CodePipeline の CodeBuild が使う道具
+│   │   ├── install-tofu.sh       # OpenTofu（CodePipeline の CodeBuild 用）
+│   │   ├── install-just.sh       # just（CodePipeline の CodeBuild 用）
+│   │   ├── install-shellcheck.sh # ShellCheck（CodePipeline の CodeBuild 用）
+│   │   ├── install-gitleaks.sh   # gitleaks（CodePipeline の CodeBuild 用）
+│   │   ├── install-pwsh.sh       # PowerShell 7（CodePipeline の CodeBuild 用）
+│   │   └── install-psscriptanalyzer.sh  # PSScriptAnalyzer（CodePipeline の CodeBuild 用）
 │   └── client/                   # 利用者の PC で動かすスクリプト
-│       ├── setup-remote-ssh.sh       # SSH設定スクリプト（Linux/Mac）
-│       ├── setup-remote-ssh.ps1      # SSH設定スクリプト（Windows）
-│       ├── start-ec2-and-wait.sh     # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
-│       ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
-│       ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
-│       └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
+│       ├── setup-remote-ssh.sh   # SSH設定スクリプト（Linux/Mac）
+│       ├── setup-remote-ssh.ps1  # SSH設定スクリプト（Windows）
+│       ├── start-ec2-and-wait.sh # EC2自動起動スクリプト（ProxyCommand用、Linux/Mac）
+│       ├── start-ec2-and-wait.ps1  # EC2自動起動スクリプト（ProxyCommand用、Windows）
+│       ├── start-ec2.sh          # EC2手動起動スクリプト（Linux/Mac）
+│       └── start-ec2.ps1         # EC2手動起動スクリプト（Windows）
 ├── schemas/                        # スキーマの書き間違いを断る、draft-07 の厳しいメタスキーマ（とその出典のライセンス）
 ├── workstation-config.json         # ユーザー・プロジェクト設定
 └── workstation-config.schema.json  # 設定ファイルのJSONスキーマ
