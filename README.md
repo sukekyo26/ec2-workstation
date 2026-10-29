@@ -322,7 +322,7 @@ cd ec2-workstation
 
 #### 設定項目
 
-設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、`scripts/validate-config.sh`（jv）で検証されます。CI・`just validate-config` のほか、`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` も tofu を呼ぶ前に検証し、違反があれば何もせずに止まります。jv は `./scripts/install-jv.sh` で入れます。
+設定の仕様は `workstation-config.schema.json` が唯一の定義です。**ユーザー個別のオーバーライド項目を除き全項目必須**で、`scripts/validate-config.sh`（jv）で検証されます。CI・`just validate-config` のほか、`scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` も tofu を呼ぶ前に検証し、違反があれば何もせずに止まります。jv は `./scripts/install-jv.sh` で入れます。スキーマを書き換えるときの書き間違い（`maximun` など draft-07 に無いキーワード）は jv が黙って無視するので、先にスキーマそのものを `schemas/draft-07-strict.json`（draft-07 のメタスキーマに `additionalProperties: false` を足した写し）で見て止めます。
 
 > ⚠️ `projectName` は全リソースの物理名のプレフィックスになるため、デプロイ後に変更すると既存リソースがすべて再作成されます。変更する場合は先に旧名のリソースを削除してください。
 
@@ -622,6 +622,7 @@ ec2-workstation/
 │   ├── start-ec2-and-wait.ps1    # EC2自動起動スクリプト（ProxyCommand用、Windows）
 │   ├── start-ec2.sh              # EC2手動起動スクリプト（Linux/Mac）
 │   └── start-ec2.ps1             # EC2手動起動スクリプト（Windows）
+├── schemas/                        # スキーマの書き間違いを断る、draft-07 の厳しいメタスキーマ（とその出典のライセンス）
 ├── workstation-config.json         # ユーザー・プロジェクト設定
 └── workstation-config.schema.json  # 設定ファイルのJSONスキーマ
 ```

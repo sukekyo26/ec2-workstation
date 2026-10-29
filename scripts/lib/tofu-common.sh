@@ -51,6 +51,9 @@ file_sha256() {
 }
 
 # workstation-config.json をスキーマで検証する。CI・just・tofu-deploy.sh・tofu-init.sh はここを通る。
+# jv は知らないキーワードを黙って無視する (書き間違えた決まりが効かない) ので、先にスキーマそのものを
+# schemas/draft-07-strict.json (draft-07 のメタスキーマに additionalProperties: false を足したもの) で見る。
+# LIMIT: 見るのは draft-07 に無いキーワードだけ。ajv の strict の残り (strictTypes・strictRequired など、型の書き方の矛盾) は見ない
 # jv はどの失敗でも rc=1 を返すので、出力で案内を分ける: スキーマを読めない・コンパイルできないときは "schema <file>: failed"
 # (スキーマがメタスキーマに違反するときも - at '...' の行が出るので、先に見る)、設定の違反は - at '...' の行、ほかは設定を読めない
 validate_config() {
@@ -59,6 +62,26 @@ validate_config() {
     if [ ! -x "$jv" ]; then
         die "jv $JV_VERSION is not installed at $jv. Install it with scripts/install-jv.sh"
     fi
+
+    out=$("$jv" "$REPO_ROOT/schemas/draft-07-strict.json" "$REPO_ROOT/workstation-config.schema.json" 2>&1) || rc=$?
+    case $rc in
+        0) ;;
+        1)
+            echo "$out" >&2
+            if grep -q "^schema .*: failed$" <<< "$out"; then
+                die "could not load schemas/draft-07-strict.json"
+            fi
+            if grep -q "additional properties .* not allowed" <<< "$out"; then
+                die "workstation-config.schema.json has a keyword that JSON Schema draft-07 does not know (a typo?). jv ignores such keywords, so the rule would not apply"
+            fi
+            die "could not load workstation-config.schema.json (a missing file, broken JSON, or a schema that breaks the JSON Schema rules)"
+            ;;
+        *)
+            echo "$out" >&2
+            die "jv failed with exit code $rc"
+            ;;
+    esac
+
     out=$("$jv" "$REPO_ROOT/workstation-config.schema.json" "$CONFIG_FILE" 2>&1) || rc=$?
     case $rc in
         0) log "workstation-config.json matches workstation-config.schema.json" ;;

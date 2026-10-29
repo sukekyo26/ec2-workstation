@@ -19,6 +19,7 @@ mkdir -p "$repo/opentofu/stacks/network" "$repo/opentofu/stacks/workstations" "$
 cp -R "$scripts_src" "$repo/scripts"
 echo '{"projectName": "testproj", "environment": "staging", "users": [{"username": "developer1"}, {"username": "developer2"}]}' > "$repo/workstation-config.json"
 cp "$scripts_src/../workstation-config.schema.json" "$repo/"
+cp -R "$scripts_src/../schemas" "$repo/schemas"
 
 cat > "$work/bin/tofu" << 'FAKE'
 #!/usr/bin/env bash
@@ -159,7 +160,8 @@ esac
 FAKE
 chmod +x "$work/bin/tofu" "$work/bin/aws"
 
-# 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。FAKE_JV で答えを変える (既定は通す)
+# 偽の jv は、スクリプトが探す写しの .tools/jv-<版>/jv に置く。答えは、スキーマを厳しいメタスキーマで見るときは FAKE_JV_META、
+# 設定を見るときは FAKE_JV で変える (どちらも既定は通す)
 jv=$(bash -c '. "$1/scripts/lib/tofu-common.sh"; jv_path' _ "$repo")
 mkdir -p "$(dirname "$jv")"
 cat > "$jv" << 'FAKE'
@@ -176,6 +178,16 @@ for a in "$@"; do
         exit 2
     fi
 done
+if [ "$1" = "$FAKE_REPO/schemas/draft-07-strict.json" ]; then
+    case "${FAKE_JV_META:-ok}" in
+        ok) echo "instance $2: ok" ;;
+        unknown-keyword)
+            printf '%s\n' "instance $2: failed" "- at '/properties/autoStopConfig/properties/cpuEvaluationMinutes': additional properties 'maximun' not allowed"
+            exit 1
+            ;;
+    esac
+    exit 0
+fi
 case "${FAKE_JV:-ok}" in
     ok) echo "instance $2: ok" ;;
     violation)
@@ -655,6 +667,13 @@ for case in "deploy tofu-deploy.sh" "init-network tofu-init.sh network" "init-us
     expect_log "$name-bad-schema" ""
     expect_err "$name-bad-schema" "could not load workstation-config.schema.json"
     expect_no_err "$name-bad-schema" "breaks the rules"
+
+    # スキーマの書き間違い (draft-07 に無いキーワード) は、設定を見る前に止める
+    # shellcheck disable=SC2086
+    run "$name-schema-typo" "$script" "" FAKE_JV_META=unknown-keyword $args
+    expect_rc "$name-schema-typo" 1
+    expect_log "$name-schema-typo" ""
+    expect_err "$name-schema-typo" "workstation-config.schema.json has a keyword that JSON Schema draft-07 does not know"
 
     # shellcheck disable=SC2086
     run "$name-jv-crash" "$script" "" FAKE_JV=crash $args
