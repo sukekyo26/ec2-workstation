@@ -14,7 +14,8 @@
 function ConvertTo-SshHostName {
     param([string]$Name)
     $lower = $Name.ToLowerInvariant()
-    if ($lower -cmatch '^[a-z]([a-z0-9_-]*[a-z0-9])?$') {
+    # \z, not $: in .NET, $ also matches before a final newline
+    if ($lower -cmatch '^[a-z]([a-z0-9_-]*[a-z0-9])?\z') {
         return $lower
     }
     return $null
