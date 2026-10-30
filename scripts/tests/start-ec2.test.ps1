@@ -74,6 +74,7 @@ $fakeLines = @(
     'exit /b 0',
     ':version',
     'if "%FAKE_VERSION_STDERR%"=="1" (>&2 echo aws-cli/1.0.0 fake& exit /b 0)',
+    'if "%FAKE_VERSION_EMPTY%"=="1" exit /b 0',
     'if not "%FAKE_VERSION_FAIL%"=="1" (echo aws-cli/2.0.0 fake& exit /b 0)',
     'echo fake aws: version stdout',
     '>&2 echo(',
@@ -140,7 +141,7 @@ function Invoke-Case {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR')) {
+    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY')) {
         $psi.EnvironmentVariables.Remove($key)
     }
     $psi.EnvironmentVariables['EC2WS_SSM_POLL_INTERVAL'] = '1'
@@ -440,6 +441,11 @@ $brokenPluginDir = Join-Path $work 'broken plugin'
 New-Item -ItemType Directory -Path $brokenPluginDir | Out-Null
 $brokenPlugin = Join-Path $brokenPluginDir 'session-manager-plugin.cmd'
 [IO.File]::WriteAllText($brokenPlugin, (@('@echo off', 'echo fake plugin: version stdout', '>&2 echo(', '>&2 echo fake plugin: broken', 'exit /b 4') -join "`r`n") + "`r`n", [Text.Encoding]::ASCII)
+# A session-manager-plugin.exe that is not an executable: it does not start at all (no exit code)
+$badExePluginDir = Join-Path $work 'bad exe plugin'
+New-Item -ItemType Directory -Path $badExePluginDir | Out-Null
+$badExePlugin = Join-Path $badExePluginDir 'session-manager-plugin.exe'
+[IO.File]::WriteAllText($badExePlugin, "not an executable`r`n", [Text.Encoding]::ASCII)
 $versionLog = Join-Path $work 'version-args.log'
 
 function Get-VersionFailedText {
@@ -453,13 +459,25 @@ function Get-VersionFailedText {
     )
 }
 
+# $Blocks: the error lines as they must appear; $Pattern instead when a line is not known in full (an exception's text)
 function Test-VersionFailed {
-    param([string]$Name, [hashtable]$Environment, [string[]]$Blocks)
+    param([string]$Name, [hashtable]$Environment, [string[]]$Blocks, [string]$Pattern)
     Remove-Item $versionLog -ErrorAction SilentlyContinue
     $before = Get-Snapshot
     $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', "ws-$Name", '-SshHost', $Name, '-Region', 'ap-northeast-1') -Environment ($Environment + @{ USERPROFILE = $profileDir; FAKE_STATE = 'ec2-user'; FAKE_ARGS_LOG = $versionLog })
-    Test-StopsWith -Label "setup $Name" -Result $result -Blocks $Blocks
     $output = Get-CaseOutput $result
+    if ($Pattern) {
+        Write-Case -Name "setup $Name" -Result $result
+        if ($result.TimedOut -or $result.ExitCode -ne 1 -or $output -notmatch $Pattern) {
+            Add-Failure "setup ${Name}: want rc=1 within 10s and lines matching '$Pattern', got: $output"
+        }
+    } else {
+        Test-StopsWith -Label "setup $Name" -Result $result -Blocks $Blocks
+    }
+    # The setup stops at its last prerequisite check, not inside the version check
+    if (-not ("`n$output`n").Contains("`nPlease install the missing prerequisites and try again.`n")) {
+        Add-Failure "setup ${Name}: want the line 'Please install the missing prerequisites and try again.'"
+    }
     # '- OK' only for PowerShell and the other tool
     if ($output -match 'RemoteException' -or [regex]::Matches($output, '(?m) - OK$').Count -ne 2) {
         Add-Failure "setup ${Name}: want no RemoteException and '- OK' only for PowerShell and the other tool, got: $output"
@@ -477,6 +495,8 @@ Test-VersionFailed -Name 'aws-version-fails' -Environment @{ PATH = "$pluginDir;
     -Blocks (Get-VersionFailedText -Label 'AWS CLI v2 (aws)' -Path $fakeAws -Code 3 -Output @('fake aws: version stdout', 'fake aws: version failed'))
 Test-VersionFailed -Name 'plugin-version-fails' -Environment @{ PATH = "$brokenPluginDir;$testPath" } `
     -Blocks (Get-VersionFailedText -Label 'Session Manager Plugin (session-manager-plugin)' -Path $brokenPlugin -Code 4 -Output @('fake plugin: version stdout', 'fake plugin: broken'))
+Test-VersionFailed -Name 'plugin-does-not-start' -Environment @{ PATH = "$badExePluginDir;$testPath" } `
+    -Pattern ("(?m)^Error: Session Manager Plugin \(session-manager-plugin\) failed to run: '" + [regex]::Escape($badExePlugin) + " --version' could not start\.\n(    \S.*\n)+  Reinstall it, or fix PATH so that a working one comes first\.$")
 
 # A tool that prints its version on stderr and exits 0 (AWS CLI v1 does) passes: only the exit code decides
 $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-gamma', '-SshHost', 'gamma', '-Region', 'ap-northeast-1') -Environment ($setupEnvironment + @{ FAKE_VERSION_STDERR = '1' })
@@ -484,6 +504,14 @@ Write-Case -Name 'setup version on stderr' -Result $result
 $output = Get-CaseOutput $result
 if ($result.TimedOut -or $result.ExitCode -ne 0 -or -not ("`n$output`n").Contains("`n  aws-cli/1.0.0 fake - OK`n") -or $output -match 'RemoteException') {
     Add-Failure "setup version on stderr: want rc=0, the line '  aws-cli/1.0.0 fake - OK' and no RemoteException, got: $output"
+}
+
+# A tool that prints nothing and exits 0 passes too (an empty version is not an error)
+$result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-delta', '-SshHost', 'delta', '-Region', 'ap-northeast-1') -Environment ($setupEnvironment + @{ FAKE_VERSION_EMPTY = '1' })
+Write-Case -Name 'setup empty version' -Result $result
+$output = Get-CaseOutput $result
+if ($result.TimedOut -or $result.ExitCode -ne 0 -or -not ("`n$output`n").Contains("`n   - OK`n")) {
+    Add-Failure "setup empty version: want rc=0 and the line '   - OK', got: $output"
 }
 
 } finally {

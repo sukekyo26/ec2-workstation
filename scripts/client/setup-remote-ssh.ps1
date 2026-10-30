@@ -22,21 +22,31 @@ function ConvertTo-SshHostName {
 }
 $hostNameRule = "Host name must start with a lowercase letter, end with a letter or number, and contain only lowercase letters, numbers, hyphens, and underscores."
 
-# Runs <Path> --version. Returns its output on one line ('' when there is none) when it exits 0; otherwise prints the
-# error with all of the output and returns $null. Only the exit code decides: 5.1 turns stderr lines into ErrorRecords
-# even on success (AWS CLI v1 prints its version on stderr)
+# Runs <Path> --version. Returns its output on one line ('' when there is none) when it exits 0; otherwise (or when it
+# does not start) prints the error with all of the output and returns $null. Only the exit code decides: 5.1 turns
+# stderr lines into ErrorRecords even on success (AWS CLI v1 prints its version on stderr)
 function Get-ToolVersion {
     param([string]$Label, [string]$Path)
-    $output = @(& $Path --version 2>&1 | ForEach-Object {
-            if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
-                if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
-            } else {
-                "$_"
-            }
-        } | Where-Object { $_.Trim() })
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Error: $Label failed to run: '$Path --version' exited with code $LASTEXITCODE." -ForegroundColor Red
+    $failure = $null
+    try {
+        $output = @(& $Path --version 2>&1 | ForEach-Object {
+                if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                    # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
+                    if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+                } else {
+                    "$_"
+                }
+            } | Where-Object { $_.Trim() })
+        if ($LASTEXITCODE -ne 0) {
+            $failure = "exited with code $LASTEXITCODE"
+        }
+    } catch {
+        # Not a valid executable for this OS, blocked by policy, ...: $LASTEXITCODE still holds the previous command's code
+        $output = @($_.Exception.Message -split "`r?`n" | Where-Object { $_.Trim() })
+        $failure = 'could not start'
+    }
+    if ($failure) {
+        Write-Host "Error: $Label failed to run: '$Path --version' $failure." -ForegroundColor Red
         foreach ($line in $output) {
             Write-Host "    $line" -ForegroundColor Yellow
         }

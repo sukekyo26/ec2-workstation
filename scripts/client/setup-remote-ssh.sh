@@ -14,13 +14,13 @@ CYAN='\033[0;36m'
 GRAY='\033[0;37m'
 NC='\033[0m' # No Color
 
-# $1: 表示名, $2: コマンド。--version が 0 なら出力を TOOL_VERSION に入れて 0、0 以外なら出力を全部付けた誤りの文を出して 1
+# $1: 表示名, $2: コマンド。--version が 0 なら出力を TOOL_VERSION に入れて 0、0 以外なら出力 (空白だけの行は除く) を付けた誤りの文を出して 1
 tool_version() {
     local label=$1 command=$2 rc=0
     TOOL_VERSION=$("$command" --version 2>&1) || rc=$?
     if [ "$rc" -ne 0 ]; then
         echo -e "${RED}Error: ${label} failed to run: '$(command -v "$command") --version' exited with code ${rc}.${NC}"
-        sed 's/^/    /' <<< "$TOOL_VERSION"
+        sed -e '/^[[:space:]]*$/d' -e 's/^/    /' <<< "$TOOL_VERSION"
         echo -e "${YELLOW}  Reinstall it, or fix PATH so that a working one comes first.${NC}"
         return 1
     fi

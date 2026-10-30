@@ -22,10 +22,13 @@ case "$*" in
     --version)
         if [ "${FAKE_VERSION_FAIL:-}" = 1 ]; then
             echo "fake aws: version stdout"
+            echo "" >&2
             echo "fake aws: version failed" >&2
             exit 3
         elif [ "${FAKE_VERSION_STDERR:-}" = 1 ]; then
             echo "aws-cli/1.0.0 fake" >&2
+        elif [ "${FAKE_VERSION_EMPTY:-}" = 1 ]; then
+            :
         else
             echo "aws-cli/2.0.0 fake"
         fi
@@ -45,6 +48,7 @@ cat > "$work/bin/session-manager-plugin" << 'FAKE'
 #!/usr/bin/env bash
 if [ "${FAKE_PLUGIN_FAIL:-}" = 1 ]; then
     echo "fake plugin: version stdout"
+    echo "" >&2
     echo "fake plugin: broken" >&2
     exit 4
 fi
@@ -154,6 +158,9 @@ version_failed() {
     if [[ $'\n'"$(plain_output "$name")"$'\n' != *$'\n'"$block"$'\n'* ]]; then
         fail "$name: want the lines '$block', got: $(plain_output "$name")"
     fi
+    if ! plain_output "$name" | grep -qx 'Please install the missing prerequisites and try again.'; then
+        fail "$name: want the line 'Please install the missing prerequisites and try again.'"
+    fi
     # - OK は残りの 2 つ (Bash ともう 1 つの道具) だけ
     if [ "$(plain_output "$name" | grep -c ' - OK$')" -ne 2 ]; then
         fail "$name: want '- OK' only for Bash and the other tool, got: $(plain_output "$name" | grep ' - OK$')"
@@ -172,6 +179,12 @@ FAKE_PLUGIN_FAIL=1 version_failed plugin-version-fails 'Session Manager Plugin (
 FAKE_VERSION_STDERR=1 setup version-on-stderr $'ws-gamma\ngamma\nap-northeast-1\n'
 if ! plain_output version-on-stderr | grep -qx '  aws-cli/1.0.0 fake - OK'; then
     fail "version-on-stderr: want the line '  aws-cli/1.0.0 fake - OK', got: $(head -5 "$work/version-on-stderr.out")"
+fi
+
+# 6. 何も出さずに 0 を返す道具も通る (空の版を誤りにしない)
+FAKE_VERSION_EMPTY=1 setup version-empty $'ws-delta\ndelta\nap-northeast-1\n'
+if ! plain_output version-empty | grep -qx '   - OK'; then
+    fail "version-empty: want the line '   - OK', got: $(head -5 "$work/version-empty.out")"
 fi
 
 if [ "$failures" -ne 0 ]; then
