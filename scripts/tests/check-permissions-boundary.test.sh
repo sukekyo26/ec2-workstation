@@ -140,11 +140,86 @@ must_grep inline-policy 'inline_policy {}' "$dir/opentofu/modules/workstation/au
 expect inline-policy "$dir" 1 \
     "Error: opentofu/modules/workstation/autostop.tf:$line: inline_policy of aws_iam_role is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)"
 
+# インスタンスのロールの、秘密鍵 (/ec2/keypair/*) の値を読む道を拒む Deny
+iam=opentofu/modules/workstation/iam.tf
+deny_keypair="Error: $iam: no Deny statement of ssm:GetParameter, ssm:GetParameters and ssm:GetParameterHistory on arn:*:ssm:*:*:parameter\${local.keypair_parameter_prefix}*"
+deny_bypath="Error: $iam: no Deny statement of ssm:GetParametersByPath on *"
+
+dir=$(copy deny-removed)
+sed -i '/^resource "aws_iam_role_policy" "deny_keypair_read" {$/,/^}$/d' "$dir/$iam"
+if grep -q 'resource "aws_iam_role_policy" "deny_keypair_read"' "$dir/$iam"; then
+    fail "deny-removed: the edit did not apply (aws_iam_role_policy.deny_keypair_read is still there)"
+fi
+expect deny-removed "$dir" 1 \
+    "Error: $iam: the keypair Deny (data.aws_iam_policy_document.deny_keypair_read) is not attached to aws_iam_role.instance"
+
+# Allow にすると、Deny でなくなるうえ、boundary に無い Action を許すことになる
+dir=$(copy deny-to-allow)
+sed -i '0,/effect    = "Deny"/s//effect    = "Allow"/' "$dir/$iam"
+must_grep deny-to-allow 'effect    = "Allow"' "$dir/$iam"
+expect deny-to-allow "$dir" 1 "$(
+    echo "Error: $iam: ssm:GetParameterHistory is not in $boundary"
+    echo "$deny_keypair"
+)"
+
+dir=$(copy prefix-shifted)
+sed -i 's|parameter${local.keypair_parameter_prefix}\*|parameter/ec2/keypairs/*|' "$dir/$iam"
+must_grep prefix-shifted 'parameter/ec2/keypairs/\*' "$dir/$iam"
+expect prefix-shifted "$dir" 1 "$deny_keypair"
+
+# 値が同じでも、local を使わずに書くと、片方だけ変えたときに Deny が黙って外れる
+dir=$(copy prefix-literal)
+sed -i 's|parameter${local.keypair_parameter_prefix}\*|parameter/ec2/keypair/*|' "$dir/$iam"
+must_grep prefix-literal 'parameter/ec2/keypair/\*' "$dir/$iam"
+expect prefix-literal "$dir" 1 "$deny_keypair"
+
+dir=$(copy name-literal)
+sed -i 's|"${local.keypair_parameter_prefix}${aws_key_pair.this.key_pair_id}"|"/ec2/keypair/${aws_key_pair.this.key_pair_id}"|' "$dir/opentofu/modules/workstation/keypair.tf"
+must_grep name-literal '"/ec2/keypair/${aws_key_pair' "$dir/opentofu/modules/workstation/keypair.tf"
+expect name-literal "$dir" 1 \
+    "Error: opentofu/modules/workstation/keypair.tf: the name of aws_ssm_parameter does not start with \${local.keypair_parameter_prefix}"
+
+dir=$(copy local-changed)
+sed -i 's|keypair_parameter_prefix = "/ec2/keypair/"|keypair_parameter_prefix = "/ec2/keys/"|' "$dir/opentofu/modules/workstation/main.tf"
+must_grep local-changed 'keypair_parameter_prefix = "/ec2/keys/"' "$dir/opentofu/modules/workstation/main.tf"
+expect local-changed "$dir" 1 \
+    "Error: opentofu/modules/workstation/main.tf: local.keypair_parameter_prefix is not \"/ec2/keypair/\""
+
+dir=$(copy action-reduced)
+sed -i 's/, "ssm:GetParameterHistory"\]/]/' "$dir/$iam"
+if grep -q 'ssm:GetParameterHistory' "$dir/$iam"; then
+    fail "action-reduced: the edit did not apply (ssm:GetParameterHistory is still in $iam)"
+fi
+expect action-reduced "$dir" 1 "$deny_keypair"
+
+# パスで引くと、IAM はパスの ARN で評価しうるので、keypair の ARN に絞った Deny では止まらない
+dir=$(copy bypath-narrowed)
+sed -i '/"ssm:GetParametersByPath"/{n;s|resources = \["\*"\]|resources = ["arn:*:ssm:*:*:parameter${local.keypair_parameter_prefix}*"]|}' "$dir/$iam"
+if [ "$(grep -c 'parameter${local.keypair_parameter_prefix}\*' "$dir/$iam")" != 2 ]; then
+    fail "bypath-narrowed: the edit did not apply (want the keypair ARN in both statements)"
+fi
+expect bypath-narrowed "$dir" 1 "$deny_bypath"
+
+dir=$(copy other-role)
+sed -i '/^resource "aws_iam_role_policy" "deny_keypair_read" {$/,/^}$/s/role   = aws_iam_role\.instance\.id/role   = aws_iam_role.scheduler.id/' "$dir/$iam"
+must_grep other-role 'role   = aws_iam_role.scheduler.id' "$dir/$iam"
+expect other-role "$dir" 1 \
+    "Error: $iam: the keypair Deny (data.aws_iam_policy_document.deny_keypair_read) is not attached to aws_iam_role.instance"
+
+# Deny の Action は、boundary に要る Action に数えない
+dir=$(copy deny-not-counted)
+sed -i 's/actions   = \["ssm:GetParametersByPath"\]/actions   = ["ssm:GetParametersByPath", "ssm:DeleteParameter"]/' "$dir/$iam"
+must_grep deny-not-counted '"ssm:DeleteParameter"' "$dir/$iam"
+expect deny-not-counted "$dir" 0
+
 # actions の書き方が変わって 1 つも読めないときは、黙って通らずに落ちる
 dir=$(copy unreadable)
 sed -i -E 's/^([[:space:]]*)actions([[:space:]]*=)/\1action_list\2/' "$dir"/opentofu/modules/*/*.tf
-expect unreadable "$dir" 1 \
-    "Error: no action found in the aws_iam_policy_document blocks of opentofu/modules"
+expect unreadable "$dir" 1 "$(
+    echo "Error: no action found in the aws_iam_policy_document blocks of opentofu/modules"
+    echo "$deny_keypair"
+    echo "$deny_bypath"
+)"
 
 # boundary の Action を 1 行に 1 つで書かないと (引用符つきも)、読めないことを先に言い、モジュールの Action も全部挙げる
 dir=$(copy quoted)
