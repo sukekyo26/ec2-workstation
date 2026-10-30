@@ -32,7 +32,6 @@ resource "aws_iam_role_policy_attachment" "ssm_core" {
 }
 
 # インスタンスの中では秘密鍵 (自分のものも) を使わないので、値を読む道を全部拒む (scripts/check-permissions-boundary.sh が確かめる)
-# LIMIT: AmazonSSMManagedInstanceCore の新しい版が、値を読む別の Action を許したら、ここにも足す
 data "aws_iam_policy_document" "deny_keypair_read" {
   statement {
     effect    = "Deny"
