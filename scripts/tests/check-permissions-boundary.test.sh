@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/check-permissions-boundary.sh を、リポジトリの写しを 1 か所ずつ壊して確かめる。
 # - 写しは一時ディレクトリに、検査が読むファイル (boundary・codepipeline.yaml・opentofu/modules) とスクリプトを置く
-# - 壊した写しでは終了コード 1 で、Error の行がちょうど 1 つ、文の全体が期待どおりであること
+# - 壊した写しでは終了コード 1 で、Error の行が文の全体で期待どおりであること (1 つ落ちても残りを続ける)
 #
 #   scripts/tests/check-permissions-boundary.test.sh
 set -euo pipefail
@@ -26,18 +26,18 @@ copy() {
     echo "$dir"
 }
 
-# expect <名前> <写し> <rc> [Error の行]: 検査の終了コードと、stderr の Error の行 (無いか、ちょうどこの 1 つ)
+# expect <名前> <写し> <rc> [Error の行]: 検査の終了コードと、stderr の Error の行 (無いか、ちょうどこれら)
 expect() {
     local name=$1 dir=$2 want_rc=$3 want_line=${4:-} rc=0 errors
     bash "$dir/scripts/check-permissions-boundary.sh" > "$work/$name.out" 2> "$work/$name.err" || rc=$?
     if [ "$rc" != "$want_rc" ]; then
         fail "$name: exit code $rc, want $want_rc"
-        sed 's/^/    /' "$work/$name.err" >&2
+        sed 's/^/    /' "$work/$name.err" >&2 || true
     fi
     errors=$(grep '^Error: ' "$work/$name.err" || true)
     if [ "$errors" != "$want_line" ]; then
         fail "$name: Error lines differ (- want, + got)"
-        diff <(printf '%s\n' "$want_line") <(printf '%s\n' "$errors") | sed 's/^/    /' >&2
+        diff <(printf '%s\n' "$want_line") <(printf '%s\n' "$errors") | sed 's/^/    /' >&2 || true
     fi
 }
 
@@ -71,6 +71,23 @@ sed -i 's/policy = data\.aws_iam_policy_document\.session_logs_write\.json/polic
 line=$(grep -n 'policy = jsonencode' "$dir/opentofu/modules/workstation/iam.tf" | cut -d: -f1)
 expect inline-jsonencode "$dir" 1 \
     "Error: opentofu/modules/workstation/iam.tf:$line: the policy of aws_iam_role_policy is not data.aws_iam_policy_document.<name>.json (the check reads Actions only from policy documents)"
+
+# actions の書き方が変わって 1 つも読めないときは、黙って通らずに落ちる
+dir=$(copy unreadable)
+sed -i -E 's/^([[:space:]]*)actions([[:space:]]*=)/\1action_list\2/' "$dir"/opentofu/modules/*/*.tf
+expect unreadable "$dir" 1 \
+    "Error: no action found in the aws_iam_policy_document blocks of opentofu/modules"
+
+# boundary の Action を 1 行に 1 つで書かないと (引用符つきも)、読めないことを先に言い、モジュールの Action も全部挙げる
+dir=$(copy quoted)
+sed -i -E 's/^([[:space:]]*- )([a-z0-9-]+:[A-Za-z0-9*]+)[[:space:]]*$/\1"\2"/' "$dir/$boundary"
+expect quoted "$dir" 1 "$(
+    echo "Error: no action found in $boundary (one per line: - <service>:<action>)"
+    for a in network/main.tf:logs:CreateLogStream network/main.tf:logs:PutLogEvents workstation/autostop.tf:ec2:StopInstances \
+        workstation/iam.tf:logs:CreateLogStream workstation/iam.tf:logs:PutLogEvents; do
+        echo "Error: opentofu/modules/${a%%:*}: ${a#*:} is not in $boundary"
+    done
+)"
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures check(s) failed" >&2
