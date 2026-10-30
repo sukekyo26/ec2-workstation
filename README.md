@@ -254,7 +254,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
 
 | ツール | バージョン | インストール |
 |--------|-----------|-------------|
-| OpenTofu | 1.10+ | [インストールガイド](https://opentofu.org/docs/intro/install/) |
+| OpenTofu | `scripts/lib/tools.sh` の `TOFU_VERSION`（CI・GitHub Actions の Deploy/Destroy・CodePipeline が使う版）。1.10 以上なら動く（`versions.tf` の `required_version`） | `./scripts/install/install-tofu.sh`（`.tools/tofu-<版>/tofu` に取る。手元のスクリプトは PATH の `tofu` を使うので、`.tools/tofu-<版>` を PATH に足す）。[インストールガイド](https://opentofu.org/docs/intro/install/) で入れたものでも動く |
 | jv（設定の検証） | v6.0.3（`scripts/lib/tools.sh` の `JV_VERSION`） | `./scripts/install/install-jv.sh`（`.tools/jv-<版>/jv` に取る。curl・tar と sha256sum か shasum が要る）。スクリプトは `.tools/jv-<版>/jv` だけを使い、PATH にある jv や自分で入れた jv は使わないので、必ずこれで入れる |
 
 ### AWS環境
@@ -419,7 +419,7 @@ export TF_STATE_BUCKET=<your-state-bucket>
 - `scripts/tofu-deploy.sh`・`scripts/tofu-init.sh` は、`workstation-config.json` がスキーマに合わなければ止まります。手で直す道（設定から消えた人の workspace を選んで `tofu destroy` する、1 人分を `-replace` で作り直す、など）も同じなので、直したい人と関係の無い違反でも、先に設定の違反を直してください。`scripts/tofu-destroy.sh`（全部を消す）は検証しません
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
-- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・OpenTofu・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
+- GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install/install-tofu.sh` で `scripts/lib/tools.sh` の `TOFU_VERSION` の OpenTofu を入れて `.tools/tofu-<版>` を PATH の先頭に足し（CodePipeline の buildspec と GitHub Actions の `.github/actions/install-tofu` と同じ）、`scripts/install/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
 - VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
@@ -721,7 +721,7 @@ ec2-workstation/
 │   ├── install/                  # 版を固定した道具を .tools/ に取る
 │   │   ├── install-jv.sh         # jv
 │   │   ├── install-shfmt.sh      # shfmt（開発用）
-│   │   ├── install-tofu.sh       # OpenTofu（CodePipeline の CodeBuild 用）
+│   │   ├── install-tofu.sh       # OpenTofu（CodePipeline の CodeBuild と GitHub Actions 用）
 │   │   ├── install-just.sh       # just（CodePipeline の CodeBuild 用）
 │   │   ├── install-shellcheck.sh # ShellCheck（CodePipeline の CodeBuild 用）
 │   │   ├── install-gitleaks.sh   # gitleaks（CodePipeline の CodeBuild 用）

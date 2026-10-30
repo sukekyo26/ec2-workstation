@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # 版と sha256 を固定して GitHub のリリースから取る道具 (jv・shfmt・tofu・just・shellcheck・gitleaks) の表と、取る・確かめる・置くの流れ。
-# scripts/install/install-*.sh・scripts/format-shell.sh と、scripts/lib/tofu-common.sh が読む。
+# scripts/install/install-*.sh・scripts/format-shell.sh と、scripts/lib/tofu-common.sh・.github/actions/install-tofu が読む。
 # 版を上げるときは、その道具の版と 4 つの sha256 (GitHub のリリースの添付ファイルの digest) を一緒に変える
 
 # shellcheck source=scripts/lib/base.sh

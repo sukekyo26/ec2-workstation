@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# CodePipeline の CodeBuild で使う OpenTofu (github.com/opentofu/opentofu) を、GitHub のリリースから
+# CodePipeline の CodeBuild と GitHub Actions (.github/actions/install-tofu) で使う OpenTofu (github.com/opentofu/opentofu) を、GitHub のリリースから
 # <リポジトリ>/.tools/tofu-<版>/tofu に取る。sha256 が合わなければ置かずに止まる。既にあれば何もしない (--force で取り直す)。
 # 版と sha256 は scripts/lib/tools.sh にある。要るもの: curl・tar と sha256sum か shasum
 #

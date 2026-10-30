@@ -1,0 +1,25 @@
+name: Install OpenTofu
+description: >-
+  Install the OpenTofu of scripts/lib/tools.sh (TOFU_VERSION) with its sha256, the same way as the CodeBuild
+  buildspecs, and put its directory first on PATH. Run actions/checkout before this.
+runs:
+  using: composite
+  steps:
+    - name: Install OpenTofu
+      shell: bash
+      run: |
+        scripts/install/install-tofu.sh
+        # Only the tofu directory, first on PATH; scripts/lib/tools.sh decides where it is
+        bash -c '. scripts/lib/tools.sh && dirname "$(tool_path tofu "$TOFU_VERSION")"' >> "$GITHUB_PATH"
+
+    # A lost or wrong GITHUB_PATH line would otherwise pass with whatever tofu the runner has
+    - name: Check the OpenTofu version
+      shell: bash
+      run: |
+        . scripts/lib/tools.sh
+        got=$(tofu version -json | jq -r .terraform_version)
+        if [ "$got" != "${TOFU_VERSION#v}" ]; then
+          echo "::error::tofu on PATH is $got, not ${TOFU_VERSION#v} of scripts/lib/tools.sh"
+          exit 1
+        fi
+        tofu version
