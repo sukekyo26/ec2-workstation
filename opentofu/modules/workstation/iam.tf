@@ -25,13 +25,13 @@ resource "aws_iam_role" "instance" {
   }
 }
 
-# LIMIT: 管理ポリシーを足したら、その Action と名前の Sid を cloudformation/permissions-boundary.yaml にも足す (scripts/check-permissions-boundary.sh が CI で見る。Resource の広さは見ない)
+# LIMIT: 管理ポリシーを足したら、その Action と名前の Sid を cloudformation/permissions-boundary.yaml にも足す (opentofu/stacks/workstations/tests/boundary.tftest.hcl が CI で見る。Resource の広さは見ない)
 resource "aws_iam_role_policy_attachment" "ssm_core" {
   role       = aws_iam_role.instance.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
-# インスタンスの中では秘密鍵 (自分のものも) を使わないので、値を読む道を全部拒む (scripts/check-permissions-boundary.sh が確かめる)
+# インスタンスの中では秘密鍵 (自分のものも) を使わないので、値を読む道を全部拒む (opentofu/stacks/workstations/tests/boundary.tftest.hcl が確かめる)
 data "aws_iam_policy_document" "deny_keypair_read" {
   statement {
     effect    = "Deny"

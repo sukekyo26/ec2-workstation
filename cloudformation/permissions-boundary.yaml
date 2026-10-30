@@ -14,8 +14,8 @@ Parameters:
 
 Resources:
   # LIMIT: the union of the module roles' permissions (instance, scheduler, flow logs), not one boundary per role.
-  # When a module policy gets an action, add it here too (scripts/check-permissions-boundary.sh checks the actions in CI,
-  # not the resources). One action per line: the check reads lines
+  # When a module policy gets an action, add it here too (opentofu/stacks/workstations/tests/boundary.tftest.hcl checks
+  # the actions in CI, not the resources)
   # The region is *: the apply role's WritePolicy already limits where roles are made. A region here that differs from
   # awsRegion would let the apply pass and silently stop the auto stop and the logs
   PermissionsBoundary:
@@ -28,7 +28,7 @@ Resources:
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the check reads it).
+          # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the test reads it).
           # LIMIT: when AWS adds actions to that policy in a new version, add them here
           # LIMIT: when that policy adds an action that reads parameter values, also add it to the keypair Deny in opentofu/modules/workstation/iam.tf
           - Sid: AmazonSSMManagedInstanceCore

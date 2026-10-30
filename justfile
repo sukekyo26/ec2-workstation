@@ -3,7 +3,7 @@ default:
     @just --list
 
 # ローカル CI: GitHub Actions と同等のチェックを一括実行
-ci: validate-config check-os-images check-user-data-size check-permissions-boundary tofu-check scripts-test shellcheck shfmt-check pwsh-check gitleaks-scan
+ci: validate-config check-os-images check-user-data-size tofu-check scripts-test shellcheck shfmt-check pwsh-check gitleaks-scan
 
 # workstation-config を JSON Schema で検証（jv は scripts/install/install-jv.sh で入れる）
 validate-config:
@@ -23,11 +23,7 @@ check-user-data-size:
     echo "user-data (gzip+base64): $size bytes"
     [ "$size" -lt 16384 ]
 
-# permissions boundary がモジュールのロールの Action を全部含み、名前が 3 か所でそろうか（CI と同じ）
-check-permissions-boundary:
-    scripts/check-permissions-boundary.sh
-
-# OpenTofu のフォーマットチェックと validate
+# OpenTofu のフォーマットチェックと validate と tofu test（permissions boundary とモジュールのロールの照合。AWS には出ない）
 tofu-check:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -35,16 +31,16 @@ tofu-check:
     for stack in opentofu/stacks/*/; do
         tofu -chdir="$stack" init -backend=false
         tofu -chdir="$stack" validate
+        tofu -chdir="$stack" test
     done
 
-# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、道具の取り方を偽の curl で、format-shell.sh を偽の shfmt で、start-ec2 の 2 本と setup-remote-ssh.sh を偽の aws で、check-permissions-boundary.sh を壊した写しで確かめる（CI と同じ）
+# デプロイ・削除のスクリプトの順番と止まり方を偽の tofu で、道具の取り方を偽の curl で、format-shell.sh を偽の shfmt で、start-ec2 の 2 本と setup-remote-ssh.sh を偽の aws で確かめる（CI と同じ）
 scripts-test:
     scripts/tests/tofu-deploy.test.sh
     scripts/tests/install-tools.test.sh
     scripts/tests/format-shell.test.sh
     scripts/tests/start-ec2.test.sh
     scripts/tests/setup-remote-ssh.test.sh
-    scripts/tests/check-permissions-boundary.test.sh
     scripts/tests/data-volume-fs.test.sh
     scripts/tests/fstab-entry.test.sh
 
