@@ -446,9 +446,10 @@ function Get-VersionFailedText {
     param([string]$Label, [string]$Path, [int]$Code, [string[]]$Output)
     $head = "Error: $Label failed to run: '$Path --version' exited with code $Code."
     $tail = '  Reinstall it, or fix PATH so that a working one comes first.'
+    # Each -join in parentheses: a bare ', ' after "`n" would make the separator an array
     return @(
-        (@($head) + ($Output | ForEach-Object { "    $_" }) + $tail) -join "`n",
-        (@($head) + ($Output[1..0] | ForEach-Object { "    $_" }) + $tail) -join "`n"
+        ((@($head) + ($Output | ForEach-Object { "    $_" }) + $tail) -join "`n"),
+        ((@($head) + ($Output[1..0] | ForEach-Object { "    $_" }) + $tail) -join "`n")
     )
 }
 
