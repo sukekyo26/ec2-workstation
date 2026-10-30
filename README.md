@@ -260,12 +260,12 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
 - state 保存用 S3 バケット（[cloudformation/state-bucket.yaml](cloudformation/state-bucket.yaml) で作る。手順は [opentofu/README.md](opentofu/README.md)）。暗号化に `SSE-KMS-CMK` を選んだときは、state を読み書きする主体に、その鍵（出力 `StateKmsKeyArn`）の `kms:Decrypt`・`kms:GenerateDataKey`。デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）、`scripts/tofu-destroy.sh` を回す主体、`tofu output workstations` で `instance_name` を引く利用者（接続の設定の前）のどれも state を読みます
-- モジュールが作る IAM のロールの permissions boundary（[cloudformation/permissions-boundary.yaml](cloudformation/permissions-boundary.yaml) で作る。名前は `<projectName>-<environment>-permissions-boundary`）。無いまま deploy すると、ロールを作る所で止まります。`ProjectName`・`Environment` は `workstation-config.json` の `projectName`・`environment`（CodePipeline のスタックと同じ値）にそろえます
+- モジュールが作る IAM のロールの permissions boundary（[cloudformation/permissions-boundary.yaml](cloudformation/permissions-boundary.yaml) で作る。名前は `<projectName>-<environment>-permissions-boundary`）。無いまま deploy すると、ロールを作る・変える所で止まります。`ProjectName`・`Environment` は `workstation-config.json` の `projectName`・`environment`（CodePipeline のスタックと同じ値）にそろえます。スタック名にも `<projectName>-<environment>` を入れます（同じアカウントで environment ごとに 1 つ。同じスタック名で別の environment を deploy すると、前の boundary が置き換わります）
 
   ```bash
   aws cloudformation deploy \
     --template-file cloudformation/permissions-boundary.yaml \
-    --stack-name ec2-workstation-permissions-boundary \
+    --stack-name <projectName>-<environment>-permissions-boundary \
     --capabilities CAPABILITY_NAMED_IAM \
     --parameter-overrides ProjectName=<projectName> Environment=<environment>
   ```
