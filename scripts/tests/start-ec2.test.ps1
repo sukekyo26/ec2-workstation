@@ -429,15 +429,19 @@ if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run th
     Add-Failure "setup alpha: the last message does not name the script or say how to update it"
 }
 
-# alpha's private key: the fake's key, no inherited access and full control for the user alone, and no temporary file left
+# alpha's private key: the fake's key and no temporary file left. Its ACL inherits nothing, gives the user full control,
+# and names no one else but SYSTEM and Administrators (what OpenSSH accepts; a new file in a folder without inheritable
+# entries, like the runner's temp folder, gets them from the process's default ACL)
 $alphaKey = Join-Path $sshDir 'ec2_secret_key_alpha.pem'
 if ("$(Get-FileText $alphaKey)".Trim() -ne 'FAKE PRIVATE KEY') {
     Add-Failure "setup alpha: want $alphaKey with FAKE PRIVATE KEY, got: $(Get-FileText $alphaKey)"
 } else {
     $acl = Get-Acl -LiteralPath $alphaKey
     $rules = @($acl.Access)
-    if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IdentityReference.Value -notlike "*\$env:USERNAME" -or $rules[0].FileSystemRights -ne 'FullControl') {
-        Add-Failure "setup alpha: want $alphaKey with no inherited access and FullControl for $env:USERNAME alone, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
+    $userRules = @($rules | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' })
+    $others = @($rules | Where-Object { $_.IdentityReference.Value -notlike "*\$env:USERNAME" -and $_.IdentityReference.Value -notin @('NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators') })
+    if (-not $acl.AreAccessRulesProtected -or @($rules | Where-Object { $_.IsInherited }).Count -ne 0 -or $userRules.Count -eq 0 -or $others.Count -ne 0) {
+        Add-Failure "setup alpha: want $alphaKey with no inherited access, FullControl for $env:USERNAME and no one else but SYSTEM and Administrators, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
     }
 }
 if (@(Get-ChildItem -Force -LiteralPath $sshDir -Filter '.*.tmp').Count -ne 0) {
