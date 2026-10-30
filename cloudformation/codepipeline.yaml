@@ -426,14 +426,11 @@ Resources:
               - cloudwatch:DescribeAlarms
               - ssm:DescribeParameters
             Resource: "*"
+          # All the reads of the roles and instance profiles under the prefix, not a list of what the provider calls today
           - Effect: Allow
             Action:
-              - iam:GetRole
-              - iam:GetRolePolicy
-              - iam:ListRolePolicies
-              - iam:ListAttachedRolePolicies
-              - iam:ListInstanceProfilesForRole
-              - iam:GetInstanceProfile
+              - iam:Get*
+              - iam:List*
             Resource:
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-${Environment}-*
@@ -466,12 +463,18 @@ Resources:
   # Writes, only after the approval. Names are scoped to <projectName>-<environment>- where the API allows it.
   # The roles under that prefix can be made and changed only with the permissions boundary of
   # cloudformation/permissions-boundary.yaml, so a role the apply role makes is no stronger than the modules' roles.
+  # IAM on the roles and instance profiles under the prefix is iam:* and the Deny statements below keep it inside the
+  # boundary: a list of what the provider calls misses actions (iam:UpdateRoleDescription was missing).
   # LIMIT: what is left open, for a change of design (an SCP, or naming the roles one by one):
   # - The trust policy has no condition key: a role with the boundary can still trust another account
+  # - A new IAM action on roles or instance profiles comes with iam:* here (and with iam:Get*/List* in ReadPolicy, so to
+  #   the plan role too). The boundary does not limit the trust policy or the session settings: a new action that
+  #   changes those works on roles without the boundary (old ones, or of an environment the prefix also matches) until
+  #   it is added to the Deny statements
   # - iam:PassRole and iam:AddRoleToInstanceProfile have no boundary key: a role under the prefix without the boundary
   #   (made by hand, left from before the boundary, or of an environment the prefix also matches, like dev and dev-x)
   #   can still go to an instance
-  # - The provider updates assume_role_policy and max_session_duration before permissions_boundary: an apply that adds the
+  # - The provider updates assume_role_policy, description and max_session_duration before permissions_boundary: an apply that adds the
   #   boundary to an old role and changes those in the same run is denied before the boundary is set
   WritePolicy:
     Type: AWS::IAM::ManagedPolicy
@@ -534,51 +537,20 @@ Resources:
             Resource: "*"
             Condition:
               StringEquals: { aws:RequestedRegion: !Ref DeployRegion }
-          # Making and changing a role under the prefix needs the boundary
+          # Everything on the roles and instance profiles under the prefix. The Deny statements below are the limit
           - Effect: Allow
-            Action:
-              - iam:CreateRole
-              - iam:UpdateRole
-              - iam:UpdateAssumeRolePolicy
-              - iam:PutRolePolicy
-              - iam:PutRolePermissionsBoundary
-            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
-            Condition:
-              StringEquals:
-                iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
-          # The only managed policy the modules attach
-          - Effect: Allow
-            Action: iam:AttachRolePolicy
-            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
-            Condition:
-              ArnEquals: { iam:PolicyARN: !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
-              StringEquals:
-                iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
-          # Deleting widens nothing, so a role without the boundary (made before it, of a user removed from the config) can
-          # still be destroyed. The tags and the instance profiles have no boundary key
-          - Effect: Allow
-            Action:
-              - iam:DeleteRole
-              - iam:DeleteRolePolicy
-              - iam:DetachRolePolicy
-              - iam:TagRole
-              - iam:UntagRole
-              - iam:ListRoleTags
-              - iam:CreateInstanceProfile
-              - iam:DeleteInstanceProfile
-              - iam:AddRoleToInstanceProfile
-              - iam:RemoveRoleFromInstanceProfile
-              - iam:TagInstanceProfile
-              - iam:UntagInstanceProfile
+            Action: iam:*
             Resource:
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-${Environment}-*
-          # Kept even if a later statement allows IAM without a condition. StringNotEquals is also true when the request has
-          # no boundary (the key is absent), so a role without the boundary or with another one is denied
+          # Making and changing a role needs the boundary. StringNotEquals is also true when the request has no boundary
+          # (the key is absent), so a role without the boundary or with another one is denied. Deleting widens nothing,
+          # so a role without the boundary (made before it, of a user removed from the config) can still be destroyed
           - Effect: Deny
             Action:
               - iam:CreateRole
               - iam:UpdateRole
+              - iam:UpdateRoleDescription
               - iam:UpdateAssumeRolePolicy
               - iam:PutRolePolicy
               - iam:AttachRolePolicy
@@ -587,6 +559,32 @@ Resources:
             Condition:
               StringNotEquals:
                 iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
+          # The only managed policy the modules attach
+          - Effect: Deny
+            Action: iam:AttachRolePolicy
+            Resource: "*"
+            Condition:
+              ArnNotEquals: { iam:PolicyARN: !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
+          # The services the module roles go to
+          - Effect: Deny
+            Action: iam:PassRole
+            Resource: "*"
+            Condition:
+              StringNotEquals:
+                iam:PassedToService:
+                  - ec2.amazonaws.com
+                  - scheduler.amazonaws.com
+                  - vpc-flow-logs.amazonaws.com
+          # Service-linked roles live under role/aws-service-role/, which role/<prefix>-* can match for some names (aws and
+          # service). Whatever the names, only the events one below can be made, and none can be changed or deleted
+          - Effect: Deny
+            NotAction: iam:CreateServiceLinkedRole
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/aws-service-role/*
+          - Effect: Deny
+            Action: iam:CreateServiceLinkedRole
+            Resource: "*"
+            Condition:
+              StringNotEquals: { iam:AWSServiceName: events.amazonaws.com }
           - Effect: Deny
             Action: iam:DeleteRolePermissionsBoundary
             Resource: "*"
@@ -597,15 +595,6 @@ Resources:
               - iam:DeletePolicyVersion
               - iam:SetDefaultPolicyVersion
             Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
-          - Effect: Allow
-            Action: iam:PassRole
-            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
-            Condition:
-              StringEquals:
-                iam:PassedToService:
-                  - ec2.amazonaws.com
-                  - scheduler.amazonaws.com
-                  - vpc-flow-logs.amazonaws.com
           - Effect: Allow
             Action:
               - logs:CreateLogGroup
