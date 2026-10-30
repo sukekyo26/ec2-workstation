@@ -485,14 +485,20 @@ if ((Get-FileText $betaScript) -ne $betaBefore -or (Get-FileText $oldShared) -ne
 function Get-Snapshot {
     return @(Get-ChildItem -Recurse -File $profileDir | Sort-Object FullName | ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
 }
+# The entries of Get-Snapshot that differ from $Before (added, removed or changed), for the failure message
+function Get-SnapshotChange {
+    param([string[]]$Before)
+    return (@(Compare-Object -ReferenceObject $Before -DifferenceObject (Get-Snapshot) | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join '; ')
+}
 foreach ($badHost in @('..\x', "alpha`n")) {
     $before = Get-Snapshot
     $result = Invoke-Setup -Name 'bad-host' -SshHost $badHost -WantExitCode 1
     if ($result.Stderr -notlike '*is not a valid host name*') {
         Add-Failure "setup bad-host '$badHost': want 'is not a valid host name', got: $($result.Stderr)"
     }
-    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-        Add-Failure "setup bad-host '$badHost': files were written or changed"
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "setup bad-host '$badHost': files were written or changed: $change"
     }
 }
 
@@ -532,8 +538,9 @@ Test-StopsWith -Label 'start-ec2 without aws or arguments' -Result (Invoke-Case 
 $before = Get-Snapshot
 $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-noaws', '-SshHost', 'noaws', '-Region', 'ap-northeast-1') -Environment @{ USERPROFILE = $profileDir; PATH = "$pluginDir;$noAwsPath" }
 Test-StopsWith -Label 'setup without aws' -Result $result -Blocks $awsMissing
-if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-    Add-Failure 'setup without aws: files were written or changed'
+$change = Get-SnapshotChange $before
+if ($change) {
+    Add-Failure "setup without aws: files were written or changed: $change"
 }
 
 # A tool whose --version fails stops the setup before it touches AWS, with the tool's path, exit code and all of its
@@ -588,8 +595,9 @@ function Test-VersionFailed {
     if (($calls -join '|') -ne '--version') {
         Add-Failure "setup ${Name}: want the fake aws to receive only --version, got: $($calls -join ' | ')"
     }
-    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-        Add-Failure "setup ${Name}: files were written or changed"
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "setup ${Name}: files were written or changed: $change"
     }
 }
 
@@ -662,8 +670,9 @@ foreach ($case in @(
     if ($result.Stderr -match 'char:\d|aws login') {
         Add-Failure "${label}: want no script position and no login guidance, got: $($result.Stderr)"
     }
-    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-        Add-Failure "${label}: files under USERPROFILE were written or changed"
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "${label}: files under USERPROFILE were written or changed: $change"
     }
 }
 if ("$(Get-FileText $zetaKey)" -ne "OLD KEY`r`n") {

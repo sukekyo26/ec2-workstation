@@ -219,6 +219,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
+      - name: Probe (temporary)
+        shell: powershell
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/probe-tmp.ps1
+
       - name: Parse and analyze scripts/**/*.ps1
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
@@ -234,6 +238,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Probe (temporary)
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/tests/probe-tmp.ps1
 
       - name: Parse and analyze scripts/**/*.ps1
         shell: pwsh
