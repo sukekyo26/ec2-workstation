@@ -64,7 +64,15 @@ function Invoke-AwsCli {
     )
     # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw し、$LASTEXITCODE を見る所に届かない
     $ErrorActionPreference = 'Continue'
-    $all = & $awsCli @Arguments 2>&1
+    try {
+        # パイプに通して受ける (pwsh 7 は、変数に直に受けると、起動しないときの理由が "StandardOutputEncoding is only supported…" になる)
+        $all = @(& $awsCli @Arguments 2>&1 | ForEach-Object { $_ })
+    } catch [System.Management.Automation.ApplicationFailedException] {
+        # aws が起動しない (別の OS 向けの exe・ポリシーで止められたなど)。いちばん内の例外が OS の理由だけを持つ (外の文はスクリプトの位置を足す)。
+        # 型を ApplicationFailedException のままにして、呼ぶ所がログインの案内を付けないようにする (上に aws の文が無い)
+        $reason = @($_.Exception.GetBaseException().Message -split "`r?`n" | Where-Object { $_.Trim() }) -join ' '
+        throw [System.Management.Automation.ApplicationFailedException]::new("${Description}: '$awsCli' could not start: $reason")
+    }
     $exitCode = $LASTEXITCODE
     $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object {
             # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
@@ -106,6 +114,9 @@ function Wait-SSMAgentReady {
                 'ssm', 'describe-instance-information', '--region', $Region,
                 '--filters', "Key=InstanceIds,Values=$InstanceId",
                 '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
+        } catch [System.Management.Automation.ApplicationFailedException] {
+            # 起動しない aws は、待っても直らないので数え直さずに止まる
+            throw
         } catch {
             $failures++
             if ($failures -ge $MaxFailures) {
@@ -149,6 +160,9 @@ try {
             'ec2', 'describe-instances', '--region', $Region,
             '--filters', "Name=tag:Name,Values=$InstanceName", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
             '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
+    } catch [System.Management.Automation.ApplicationFailedException] {
+        # aws が起動しない: 上に aws の文が無いので、案内を付けない
+        throw
     } catch {
         # 資格情報の切れでも起きるので、条件つきの案内を付ける
         throw "$_`n$awsLoginHint"
@@ -165,6 +179,8 @@ try {
         $state = Invoke-AwsCli -Description "Failed to get instance state" -Arguments @(
             'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
             '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
+    } catch [System.Management.Automation.ApplicationFailedException] {
+        throw
     } catch {
         throw "$_`n$awsLoginHint"
     }

@@ -175,14 +175,15 @@ SECRET_KEY_PATH="$SSH_CONFIG_DIR/$SECRET_KEY"
 # ============================================
 echo ""
 echo -e "${CYAN}Retrieving private key from Parameter Store...${NC}"
-aws ssm get-parameter --region "$REGION" --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text > "$SECRET_KEY_PATH"
+# 同じディレクトリの一時のファイル (mktemp は 600 で作る) に書き、取れたら置き換える。前の鍵を空にせず、ほかの利用者に読める間も作らない
+KEY_TMP=$(mktemp "$SSH_CONFIG_DIR/.$SECRET_KEY.XXXXXX")
+trap 'rm -f "$KEY_TMP"' EXIT
+if ! aws ssm get-parameter --region "$REGION" --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text > "$KEY_TMP"; then
+    echo -e "${RED}Error: Failed to get the private key from Parameter Store (the aws error is above)${NC}" >&2
+    exit 1
+fi
+mv "$KEY_TMP" "$SECRET_KEY_PATH"
 echo -e "${GREEN}Created/Updated: $SECRET_KEY_PATH${NC}"
-
-# ============================================
-# Set file permissions for private key
-# ============================================
-echo -e "${CYAN}Setting file permissions...${NC}"
-chmod 600 "$SECRET_KEY_PATH"
 
 # ============================================
 # Copy auto-start script to .ssh directory

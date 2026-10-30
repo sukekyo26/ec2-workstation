@@ -212,17 +212,29 @@ jobs:
           additional_files: ".sh.tftpl"
 
   powershell:
-    name: PowerShell 5.1
-    # Windows PowerShell 5.1 is what the SSH ProxyCommand runs; pwsh 7 accepts syntax that 5.1 rejects
+    # The job names stay "PowerShell 5.1" and "PowerShell 7" (the required checks use them).
+    # Windows PowerShell 5.1 is what the SSH ProxyCommand runs; pwsh 7 accepts syntax that 5.1 rejects. Users may also
+    # run start-ec2.ps1 and the setup from PowerShell 7, so both must pass
+    name: PowerShell ${{ matrix.version }}
     runs-on: windows-latest
+    # The steps run the matrix's PowerShell from cmd: shell does not take expressions, and a step in pwsh would pass its
+    # PSModulePath on to Windows PowerShell 5.1
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "5.1"
+            shell: powershell
+          - version: "7"
+            shell: pwsh
     steps:
       - name: Checkout
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Parse and analyze scripts/**/*.ps1
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
+        shell: cmd
+        run: ${{ matrix.shell }} -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
 
       - name: Test start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake aws
-        shell: powershell
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1
+        shell: cmd
+        run: ${{ matrix.shell }} -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1

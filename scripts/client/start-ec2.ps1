@@ -52,9 +52,17 @@ function Invoke-AwsCli {
         [string]$Description,
         [string[]]$Arguments
     )
-    # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw する (成功のときの警告でも止まる)
+    # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw し、$LASTEXITCODE を見る所に届かない
     $ErrorActionPreference = 'Continue'
-    $all = & $awsCli @Arguments 2>&1
+    try {
+        # パイプに通して受ける (pwsh 7 は、変数に直に受けると、起動しないときの理由が "StandardOutputEncoding is only supported…" になる)
+        $all = @(& $awsCli @Arguments 2>&1 | ForEach-Object { $_ })
+    } catch [System.Management.Automation.ApplicationFailedException] {
+        # aws が起動しない (別の OS 向けの exe・ポリシーで止められたなど)。いちばん内の例外が OS の理由だけを持つ (外の文はスクリプトの位置を足す)。
+        # 型を ApplicationFailedException のままにして、呼ぶ所がログインの案内を付けないようにする (上に aws の文が無い)
+        $reason = @($_.Exception.GetBaseException().Message -split "`r?`n" | Where-Object { $_.Trim() }) -join ' '
+        throw [System.Management.Automation.ApplicationFailedException]::new("${Description}: '$awsCli' could not start: $reason")
+    }
     $exitCode = $LASTEXITCODE
     $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object {
             # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
@@ -96,6 +104,9 @@ function Wait-SSMAgentReady {
                 'ssm', 'describe-instance-information', '--region', $Region,
                 '--filters', "Key=InstanceIds,Values=$InstanceId",
                 '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
+        } catch [System.Management.Automation.ApplicationFailedException] {
+            # 起動しない aws は、待っても直らないので数え直さずに止まる
+            throw
         } catch {
             $failures++
             if ($failures -ge $MaxFailures) {

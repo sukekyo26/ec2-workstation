@@ -37,7 +37,13 @@ case "$*" in
     "ec2 describe-instances --instance-ids "*LoginUser*) echo ec2-user ;;
     "ec2 describe-instances --instance-ids "*KeyName*) echo fake-key ;;
     "ec2 describe-key-pairs "*) echo key-0123456789abcdef0 ;;
-    "ssm get-parameter "*) echo "FAKE PRIVATE KEY" ;;
+    "ssm get-parameter "*)
+        if [ "${FAKE_PARAM_FAIL:-}" = 1 ]; then
+            echo "fake aws: get-parameter failed" >&2
+            exit 1
+        fi
+        echo "FAKE PRIVATE KEY"
+        ;;
     *)
         echo "fake aws: unexpected call: $*" >&2
         exit 2
@@ -138,6 +144,31 @@ if ! cmp -s "$work/beta-before" "$beta_script" || [ "$(proxy_of beta)" != "$beta
 fi
 if [ "$(cat "$ssh_dir/start-ec2-and-wait.sh")" != "old shared script" ]; then
     fail "alpha-again: the old shared start-ec2-and-wait.sh changed"
+fi
+
+# 秘密鍵は 600 で、一時のファイル (.<鍵の名前>.*) を残さない
+alpha_key="$ssh_dir/ec2_secret_key_alpha.pem"
+if [ "$(cat "$alpha_key")" != "FAKE PRIVATE KEY" ] || [ -z "$(find "$alpha_key" -perm 600)" ]; then
+    fail "alpha-again: want $alpha_key with FAKE PRIVATE KEY and mode 600"
+fi
+if [ -n "$(find "$ssh_dir" -name '.ec2_secret_key_*')" ]; then
+    fail "alpha-again: temporary key files are left: $(find "$ssh_dir" -name '.ec2_secret_key_*')"
+fi
+
+# 秘密鍵が取れなければ、前の setup の鍵を中身もモードも残して rc=1 で止まる
+zeta_key="$ssh_dir/ec2_secret_key_zeta.pem"
+echo "OLD KEY" > "$zeta_key"
+chmod 600 "$zeta_key"
+FAKE_PARAM_FAIL=1 setup zeta-key-fails $'ws-zeta\nzeta\nap-northeast-1\n' 1
+if [ "$(cat "$zeta_key")" != "OLD KEY" ] || [ -z "$(find "$zeta_key" -perm 600)" ]; then
+    fail "zeta-key-fails: the previous key changed: $(cat "$zeta_key")"
+fi
+if [ -n "$(find "$ssh_dir" -name '.ec2_secret_key_*')" ]; then
+    fail "zeta-key-fails: temporary key files are left: $(find "$ssh_dir" -name '.ec2_secret_key_*')"
+fi
+if ! sed 's/\x1b\[[0-9;]*m//g' "$work/zeta-key-fails.out" | grep -qx 'Error: Failed to get the private key from Parameter Store (the aws error is above)' ||
+    ! grep -qx 'fake aws: get-parameter failed' "$work/zeta-key-fails.out"; then
+    fail "zeta-key-fails: want the aws error and the line 'Error: Failed to get the private key from Parameter Store (the aws error is above)': $(tail -3 "$work/zeta-key-fails.out")"
 fi
 
 # 4. --version が失敗した道具は、パスと終了コードと出力 (stdout と stderr) を見せて rc=1 で止まる。AWS に触らず、HOME に何も書かない

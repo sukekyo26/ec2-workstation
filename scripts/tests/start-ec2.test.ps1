@@ -9,12 +9,52 @@
     script at once: each run is killed after 10 seconds (EC2WS_SSM_POLL_INTERVAL=1 shortens the wait between SSM checks).
     setup-remote-ssh.ps1 runs with USERPROFILE in the temp directory; its ProxyCommand must not load the user's profile
     (the output would go into the SSH channel).
-    Windows only (the fake is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
+    The check of Wait-SSMAgentReady with an aws that does not start runs on any OS; the rest is Windows only (the fake
+    is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
 #>
 $ErrorActionPreference = 'Stop'
 
+# An aws that does not start fails the same way on every call: Wait-SSMAgentReady of both start-ec2 scripts stops at the
+# first one, without retrying and without the login hint. The function runs alone with Invoke-AwsCli replaced (the fake aws
+# cannot stop starting halfway), so this part runs on any OS
+$ssmFailures = 0
+foreach ($name in @('start-ec2.ps1', 'start-ec2-and-wait.ps1')) {
+    $path = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'client') $name
+    $definition = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null).Find({
+            param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-SSMAgentReady' }, $true)
+    $outcome = & {
+        param([string]$Definition)
+        $state = @{ Calls = 0 }
+        # Read by the start-ec2-and-wait.ps1 version of the function
+        Set-Variable -Name awsLoginHint -Value 'HINT'
+        function Write-ScriptLog { param([string]$Message) $null = $Message }
+        function Invoke-AwsCli {
+            param([string]$Description, [string[]]$Arguments)
+            $null = $Arguments
+            $state.Calls++
+            throw [System.Management.Automation.ApplicationFailedException]::new("${Description}: 'aws.exe' could not start: reason")
+        }
+        . ([scriptblock]::Create($Definition))
+        try {
+            Wait-SSMAgentReady -InstanceId 'i-1' -Region 'ap-northeast-1' -RetryIntervalSeconds 0
+            return "returned after $($state.Calls) call(s)"
+        } catch {
+            return "$_ (after $($state.Calls) call(s))"
+        }
+    } $definition.Extent.Text
+    $want = "Failed to check the SSM Agent of i-1: 'aws.exe' could not start: reason (after 1 call(s))"
+    Write-Output "$name SSM, aws does not start: $outcome"
+    if ($outcome -cne $want) {
+        Write-Output "FAIL: $name SSM, aws does not start: want '$want'"
+        $ssmFailures++
+    }
+}
+
 if ($env:OS -ne 'Windows_NT') {
-    Write-Output 'skip start-ec2.test.ps1: the fake aws is a .cmd and runs only on Windows'
+    if ($ssmFailures -ne 0) {
+        exit 1
+    }
+    Write-Output 'skip the rest of start-ec2.test.ps1: the fake aws is a .cmd and runs only on Windows'
     exit 0
 }
 
@@ -36,8 +76,12 @@ $fakeLines = @(
     'if "%~2"=="wait" set "what=wait-%~3"',
     'if "%~2"=="describe-instances" if "%~3"=="--region" set "what=lookup"',
     'if "%~2"=="describe-instances" if "%~3"=="--instance-ids" set "what=state"',
+    'if not "%what%"=="state" goto :notkeyname',
+    'echo(%*| findstr /l /c:".KeyName" >nul',
+    'if not errorlevel 1 set "what=keyname"',
+    ':notkeyname',
     'set known=',
-    'for %%w in (lookup state start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session describe-key-pairs get-parameter) do if "%what%"=="%%w" set known=1',
+    'for %%w in (lookup state keyname start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session describe-key-pairs get-parameter) do if "%what%"=="%%w" set known=1',
     'if not defined known (',
     '    >&2 echo fake aws: unexpected call: %what%',
     '    exit /b 2',
@@ -73,6 +117,8 @@ $fakeLines = @(
     'if "%what%"=="lookup" if not defined FAKE_LOOKUP_IDS set "FAKE_LOOKUP_IDS=i-0123456789abcdef0"',
     'if "%what%"=="lookup" echo %FAKE_LOOKUP_IDS%',
     'if "%what%"=="state" echo %FAKE_STATE%',
+    'if "%what%"=="keyname" if defined FAKE_KEYNAME echo %FAKE_KEYNAME%',
+    'if "%what%"=="keyname" if not defined FAKE_KEYNAME echo ws-keypair',
     'if "%what%"=="start-instances" (',
     '    echo {',
     '    echo     "StartingInstances": []',
@@ -122,7 +168,7 @@ $clientDir = Join-Path $root 'scripts\client'
 $waitScript = Join-Path $clientDir 'start-ec2-and-wait.ps1'
 $startScript = Join-Path $clientDir 'start-ec2.ps1'
 $powershell = (Get-Process -Id $PID).Path
-$failures = 0
+$failures = $ssmFailures
 
 function Add-Failure {
     param([string]$Message)
@@ -152,7 +198,7 @@ function Invoke-Case {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY', 'FAKE_LOOKUP_IDS', 'FAKE_SESSION_STDERR')) {
+    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY', 'FAKE_LOOKUP_IDS', 'FAKE_SESSION_STDERR', 'FAKE_KEYNAME')) {
         $psi.EnvironmentVariables.Remove($key)
     }
     $psi.EnvironmentVariables['EC2WS_SSM_POLL_INTERVAL'] = '1'
@@ -424,6 +470,28 @@ if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run th
     Add-Failure "setup alpha: the last message does not name the script or say how to update it"
 }
 
+# alpha's private key: the fake's key and no temporary file left. Its ACL inherits nothing, gives the user full control,
+# and names no one else but SYSTEM and Administrators (what OpenSSH accepts; a new file in a folder without inheritable
+# entries, like the runner's temp folder, gets them from the process's default ACL)
+$alphaKey = Join-Path $sshDir 'ec2_secret_key_alpha.pem'
+if ("$(Get-FileText $alphaKey)".Trim() -ne 'FAKE PRIVATE KEY') {
+    Add-Failure "setup alpha: want $alphaKey with FAKE PRIVATE KEY, got: $(Get-FileText $alphaKey)"
+} else {
+    $acl = Get-Acl -LiteralPath $alphaKey
+    $rules = @($acl.Access)
+    # Compared by SID: S-1-5-18 is SYSTEM, S-1-5-32-544 is Administrators
+    $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $sids = @($rules | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })
+    $userRules = @(0..($rules.Count - 1) | Where-Object { $sids[$_] -eq $userSid -and $rules[$_].FileSystemRights -eq 'FullControl' })
+    $others = @($sids | Where-Object { $_ -notin @($userSid, 'S-1-5-18', 'S-1-5-32-544') })
+    if (-not $acl.AreAccessRulesProtected -or @($rules | Where-Object { $_.IsInherited }).Count -ne 0 -or $userRules.Count -eq 0 -or $others.Count -ne 0) {
+        Add-Failure "setup alpha: want $alphaKey with no inherited access, FullControl for the user ($userSid) and no one else but SYSTEM and Administrators, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
+    }
+}
+if (@(Get-ChildItem -Force -LiteralPath $sshDir -Filter '.*.tmp').Count -ne 0) {
+    Add-Failure "setup alpha: temporary files are left in $sshDir"
+}
+
 # 2. beta: alpha's script (an older version, marked) and the content of its Host block stay; so does the shared script
 [IO.File]::AppendAllText($alphaScript, "# older alpha`r`n")
 $alphaBefore = Get-FileText $alphaScript
@@ -458,8 +526,16 @@ if ((Get-FileText $betaScript) -ne $betaBefore -or (Get-FileText $oldShared) -ne
 # 4. A bad -SshHost stops before anything is written or changed (..\x would name a file outside ~/.ssh, and a final
 # newline would go into the file name and the Host line)
 # Only USERPROFILE, where the setup writes: the fake's call log under $work changes on every run
+# pwsh 7 keeps its own startup cache under USERPROFILE (AppData\Local\Microsoft\PowerShell\StartupProfileData-*) and
+# rewrites it on every start; that is not the setup's doing
 function Get-Snapshot {
-    return @(Get-ChildItem -Recurse -File $profileDir | Sort-Object FullName | ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
+    return @(Get-ChildItem -Recurse -File $profileDir | Where-Object { $_.Name -notlike 'StartupProfileData-*' } | Sort-Object FullName |
+            ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
+}
+# The entries of Get-Snapshot that differ from $Before (added, removed or changed), for the failure message
+function Get-SnapshotChange {
+    param([string[]]$Before)
+    return (@(Compare-Object -ReferenceObject $Before -DifferenceObject (Get-Snapshot) | ForEach-Object { "$($_.SideIndicator) $($_.InputObject)" }) -join '; ')
 }
 foreach ($badHost in @('..\x', "alpha`n")) {
     $before = Get-Snapshot
@@ -467,8 +543,9 @@ foreach ($badHost in @('..\x', "alpha`n")) {
     if ($result.Stderr -notlike '*is not a valid host name*') {
         Add-Failure "setup bad-host '$badHost': want 'is not a valid host name', got: $($result.Stderr)"
     }
-    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-        Add-Failure "setup bad-host '$badHost': files were written or changed"
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "setup bad-host '$badHost': files were written or changed: $change"
     }
 }
 
@@ -508,8 +585,9 @@ Test-StopsWith -Label 'start-ec2 without aws or arguments' -Result (Invoke-Case 
 $before = Get-Snapshot
 $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-noaws', '-SshHost', 'noaws', '-Region', 'ap-northeast-1') -Environment @{ USERPROFILE = $profileDir; PATH = "$pluginDir;$noAwsPath" }
 Test-StopsWith -Label 'setup without aws' -Result $result -Blocks $awsMissing
-if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-    Add-Failure 'setup without aws: files were written or changed'
+$change = Get-SnapshotChange $before
+if ($change) {
+    Add-Failure "setup without aws: files were written or changed: $change"
 }
 
 # A tool whose --version fails stops the setup before it touches AWS, with the tool's path, exit code and all of its
@@ -564,8 +642,9 @@ function Test-VersionFailed {
     if (($calls -join '|') -ne '--version') {
         Add-Failure "setup ${Name}: want the fake aws to receive only --version, got: $($calls -join ' | ')"
     }
-    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
-        Add-Failure "setup ${Name}: files were written or changed"
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "setup ${Name}: files were written or changed: $change"
     }
 }
 
@@ -590,6 +669,70 @@ Write-Case -Name 'setup empty version' -Result $result
 $output = Get-CaseOutput $result
 if ($result.TimedOut -or $result.ExitCode -ne 0 -or -not ("`n$output`n").Contains("`n   - OK`n")) {
     Add-Failure "setup empty version: want rc=0 and the line '   - OK', got: $output"
+}
+
+# An aws.exe that is not an executable, first on PATH: Get-Command finds it (an Application) but it does not start.
+# The script stops with one line that has the OS's reason and no script position; the ProxyCommand adds no login hint
+# (there is no AWS error above) and its stdout stays empty
+$badExeAwsDir = Join-Path $work 'bad exe aws'
+New-Item -ItemType Directory -Path $badExeAwsDir | Out-Null
+$badExeAws = Join-Path $badExeAwsDir 'aws.exe'
+[IO.File]::WriteAllText($badExeAws, "not an executable`r`n", [Text.Encoding]::ASCII)
+$badExePattern = '^Error: Failed to look up instance: ' + [regex]::Escape("'$badExeAws'") + ' could not start: \S.*$'
+foreach ($case in @(@{ Name = 'start-ec2-and-wait'; Script = $waitScript; Arguments = $waitArgs }, @{ Name = 'start-ec2'; Script = $startScript; Arguments = $startArgs })) {
+    $label = "$($case.Name) aws does not start"
+    $result = Invoke-Case -Script $case.Script -Arguments $case.Arguments -Environment @{ FAKE_STATE = 'running'; PATH = "$badExeAwsDir;$testPath" }
+    Write-Case -Name $label -Result $result
+    $output = Get-CaseOutput $result
+    $errorLines = @($output -split "`n" | Where-Object { $_ -like 'Error:*' })
+    if ($result.TimedOut -or $result.ExitCode -ne 1 -or $errorLines.Count -ne 1 -or $errorLines[0] -notmatch $badExePattern) {
+        Add-Failure "${label}: want rc=1 within 10s and one line matching '$badExePattern', got: $output"
+    }
+    if ($output -match 'char:\d|~~~~|(?m)^At ' -or $output.Contains($awsLoginHint)) {
+        Add-Failure "${label}: want no script position and no login hint, got: $output"
+    }
+    if ($case.Name -eq 'start-ec2-and-wait' -and -not $result.TimedOut -and $result.Stdout.Count -ne 0) {
+        Add-Failure "${label}: want empty stdout, got: $($result.Stdout -join ' | ')"
+    }
+}
+
+# A failed aws call in the setup stops it with the reason as aws wrote it, on stderr and without a login hint. Nothing
+# under USERPROFILE is written or changed: the private key of an earlier setup of the host stays as it was
+$zetaKey = Join-Path $sshDir 'ec2_secret_key_zeta.pem'
+[IO.File]::WriteAllText($zetaKey, "OLD KEY`r`n", [Text.Encoding]::ASCII)
+# The checks of what aws returned (one instance, a LoginUser tag, a key pair) stop the same way, with one line
+foreach ($case in @(
+        @{ Name = 'lookup fails'; Environment = @{ FAKE_FAIL = 'lookup' }; Line = 'Error: Failed to look up instance: fake aws: lookup failed' },
+        @{ Name = 'state fails'; Environment = @{ FAKE_FAIL = 'state' }; Line = "Error: Failed to read the LoginUser tag of ${id}: fake aws: state failed" },
+        @{ Name = 'keyname fails'; Environment = @{ FAKE_FAIL = 'keyname' }; Line = "Error: Failed to read the key pair name of ${id}: fake aws: keyname failed" },
+        @{ Name = 'describe-key-pairs fails'; Environment = @{ FAKE_FAIL = 'describe-key-pairs' }; Line = 'Error: Failed to get the key pair ID of ws-keypair: fake aws: describe-key-pairs failed' },
+        @{ Name = 'get-parameter fails'; Environment = @{ FAKE_FAIL = 'get-parameter' }; Line = 'Error: Failed to get the private key from Parameter Store: fake aws: get-parameter failed' },
+        @{ Name = 'two instances'; Environment = @{ FAKE_LOOKUP_IDS = 'i-1 i-2' }
+            Line = "Error: Expected exactly one instance tagged Name=ws-zeta in ap-northeast-1, found 2: i-1 i-2. Check the instance_name in 'tofu output workstations'." },
+        @{ Name = 'no LoginUser tag'; Environment = @{ FAKE_STATE = 'None' }; Line = "Error: Instance $id has no LoginUser tag. Run 'tofu apply' to update the instance tags." },
+        @{ Name = 'no key pair'; Environment = @{ FAKE_KEYNAME = 'None' }; Line = "Error: No key pair is associated with instance $id" })) {
+    $label = "setup $($case.Name)"
+    $environment = $setupEnvironment.Clone()
+    foreach ($key in $case.Environment.Keys) {
+        $environment[$key] = $case.Environment[$key]
+    }
+    $before = Get-Snapshot
+    $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-zeta', '-SshHost', 'zeta', '-Region', 'ap-northeast-1') -Environment $environment
+    Write-Case -Name $label -Result $result
+    if ($result.TimedOut -or $result.ExitCode -ne 1) {
+        Add-Failure "${label}: want rc=1 within 10s, got: $(Get-CaseOutput $result)"
+    }
+    Test-ErrorLine -Label $label -Text $result.Stderr -Line $case.Line -WantHint $false
+    if ($result.Stderr -match 'char:\d|CategoryInfo|Error: Error:|aws login') {
+        Add-Failure "${label}: want no script position, no CategoryInfo and no login guidance, got: $($result.Stderr)"
+    }
+    $change = Get-SnapshotChange $before
+    if ($change) {
+        Add-Failure "${label}: files under USERPROFILE were written or changed: $change"
+    }
+}
+if ("$(Get-FileText $zetaKey)" -ne "OLD KEY`r`n") {
+    Add-Failure "setup fails: the earlier private key of zeta changed: $(Get-FileText $zetaKey)"
 }
 
 } finally {
