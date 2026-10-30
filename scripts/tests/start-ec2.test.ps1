@@ -56,11 +56,22 @@ $fakeLines = @(
     ':nosequence',
     'if not "%FAKE_FAIL%"=="%what%" goto :succeed',
     ':fail',
+    '>&2 echo(',
     '>&2 echo fake aws: %what% failed',
     'exit /b 1',
     ':succeed',
-    'if "%FAKE_WARN%"=="1" >&2 echo fake aws: warning from %what%',
-    'if "%what%"=="lookup" echo i-0123456789abcdef0',
+    'if not "%FAKE_WARN%"=="1" goto :nowarn',
+    'if "%what%"=="start-session" goto :nowarn',
+    '>&2 echo(',
+    '>&2 echo fake aws: warning from %what%',
+    ':nowarn',
+    'if not "%what%"=="start-session" goto :nosession',
+    'if not "%FAKE_SESSION_STDERR%"=="1" goto :nosession',
+    '>&2 echo(',
+    '>&2 echo fake aws: session warning',
+    ':nosession',
+    'if "%what%"=="lookup" if not defined FAKE_LOOKUP_IDS set "FAKE_LOOKUP_IDS=i-0123456789abcdef0"',
+    'if "%what%"=="lookup" echo %FAKE_LOOKUP_IDS%',
     'if "%what%"=="state" echo %FAKE_STATE%',
     'if "%what%"=="start-instances" (',
     '    echo {',
@@ -141,7 +152,7 @@ function Invoke-Case {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY')) {
+    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY', 'FAKE_LOOKUP_IDS', 'FAKE_SESSION_STDERR')) {
         $psi.EnvironmentVariables.Remove($key)
     }
     $psi.EnvironmentVariables['EC2WS_SSM_POLL_INTERVAL'] = '1'
@@ -212,6 +223,42 @@ if ($null -eq (Get-FileText $argsLog)) {
     }
 }
 
+$awsLoginHint = "  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again."
+
+# Warnings on stderr (each after an empty line from the fake) come out as their own lines, with no blank line and no
+# RemoteException; the fake warns on the lookup, the state and the SSM check
+function Test-WarningLine {
+    param([string]$Label, [hashtable]$Result)
+    $lines = @(($Result.Stderr -replace "`r`n", "`n").TrimEnd("`n") -split "`n")
+    foreach ($what in @('lookup', 'state', 'describe-instance-information')) {
+        if ($lines -notcontains "fake aws: warning from $what") {
+            Add-Failure "${Label}: want the line 'fake aws: warning from $what' on stderr, got: $($Result.Stderr)"
+        }
+    }
+    if (@($lines | Where-Object { -not $_.Trim() }).Count -ne 0 -or $Result.Stderr -match 'RemoteException') {
+        Add-Failure "${Label}: want no blank line and no RemoteException on stderr, got: $($Result.Stderr)"
+    }
+}
+
+# $Line is a whole line of $Text; with $WantHint the hint is the very next line, otherwise there is no hint at all.
+# Never the old banner, never RemoteException
+function Test-ErrorLine {
+    param([string]$Label, [string]$Text, [string]$Line, [bool]$WantHint)
+    $lines = @(($Text -replace "`r`n", "`n") -split "`n")
+    $at = [array]::IndexOf($lines, $Line)
+    if ($at -lt 0) {
+        Add-Failure "${Label}: want the line '$Line', got: $Text"
+    } elseif ($WantHint -and ($at + 1 -ge $lines.Count -or $lines[$at + 1] -ne $awsLoginHint)) {
+        Add-Failure "${Label}: want the hint right after '$Line', got: $Text"
+    }
+    if (-not $WantHint -and $lines -contains $awsLoginHint) {
+        Add-Failure "${Label}: want no hint, got: $Text"
+    }
+    if ($Text -match 'ERROR: AWS authentication failed|RemoteException') {
+        Add-Failure "${Label}: want no banner and no RemoteException, got: $Text"
+    }
+}
+
 # Success: the ProxyCommand's stdout is the session alone, also when aws prints a warning on stderr
 foreach ($case in @(
         @{ Name = 'stopped' },
@@ -230,6 +277,9 @@ foreach ($case in @(
     if ($result.TimedOut -or $result.ExitCode -ne 0 -or ($result.Stdout -join "`n") -ne 'SSH-2.0-fake') {
         Add-Failure "${label}: want rc=0 and stdout 'SSH-2.0-fake' alone"
     }
+    if ($case.Warn) {
+        Test-WarningLine -Label $label -Result $result
+    }
 
     $label = "start-ec2 $($case.Name)" + $(if ($case.Warn) { ' with warnings' } else { '' })
     $result = Invoke-Case -Script $startScript -Arguments $startArgs -Environment $environment
@@ -237,23 +287,37 @@ foreach ($case in @(
     if ($result.TimedOut -or $result.ExitCode -ne 0 -or ($result.Stdout -join "`n") -notmatch 'EC2 instance is ready') {
         Add-Failure "${label}: want rc=0 and the ready message"
     }
+    if ($case.Warn) {
+        Test-WarningLine -Label $label -Result $result
+    }
 }
 
-# A failed aws call stops the script at once with the reason; the ProxyCommand's stdout stays empty
+# The session's stderr goes straight through (not converted): no ErrorRecord text from 5.1 around it
+$result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment @{ FAKE_STATE = 'running'; FAKE_SESSION_STDERR = '1' }
+Write-Case -Name 'start-ec2-and-wait session stderr' -Result $result
+if ($result.TimedOut -or $result.ExitCode -ne 0 -or ($result.Stdout -join "`n") -ne 'SSH-2.0-fake' -or
+    @($result.Stderr -split "`r?`n") -notcontains 'fake aws: session warning' -or $result.Stderr -match 'RemoteException|NativeCommandError|CategoryInfo') {
+    Add-Failure "start-ec2-and-wait session stderr: want rc=0, stdout 'SSH-2.0-fake' alone and the line 'fake aws: session warning' as is, got stderr: $($result.Stderr)"
+}
+
+# A failed aws call stops the script at once with the reason as aws wrote it (the fake's empty stderr line dropped);
+# the ProxyCommand's stdout stays empty. Lines from the fake: 'fake aws: <what> failed'
+$id = 'i-0123456789abcdef0'
 foreach ($case in @(
-        @{ State = 'running'; Fail = 'lookup' },
-        @{ State = 'running'; Fail = 'state' },
-        @{ State = 'stopped'; Fail = 'start-instances' },
-        @{ State = 'stopped'; Fail = 'wait-instance-running' },
-        @{ State = 'stopping'; Fail = 'wait-instance-stopped' },
-        @{ State = 'stopping'; Fail = 'start-instances' },
-        @{ State = 'stopping'; Fail = 'wait-instance-running' },
-        @{ State = 'pending'; Fail = 'wait-instance-running' },
-        @{ State = 'running'; Fail = 'describe-instance-information' })) {
+        @{ State = 'running'; Fail = 'lookup'; Line = 'Error: Failed to look up instance: fake aws: lookup failed' },
+        @{ State = 'running'; Fail = 'state'; Line = 'Error: Failed to get instance state: fake aws: state failed' },
+        @{ State = 'stopped'; Fail = 'start-instances'; Line = "Error: Failed to start instance ${id}: fake aws: start-instances failed" },
+        @{ State = 'stopped'; Fail = 'wait-instance-running'; Line = "Error: Failed while waiting for instance $id to be running: fake aws: wait-instance-running failed" },
+        @{ State = 'stopping'; Fail = 'wait-instance-stopped'; Line = "Error: Failed while waiting for instance $id to be stopped: fake aws: wait-instance-stopped failed" },
+        @{ State = 'stopping'; Fail = 'start-instances'; Line = "Error: Failed to start instance ${id}: fake aws: start-instances failed" },
+        @{ State = 'stopping'; Fail = 'wait-instance-running'; Line = "Error: Failed while waiting for instance $id to be running: fake aws: wait-instance-running failed" },
+        @{ State = 'pending'; Fail = 'wait-instance-running'; Line = "Error: Failed while waiting for instance $id to be running: fake aws: wait-instance-running failed" },
+        @{ State = 'running'; Fail = 'describe-instance-information'; Line = "Error: Failed to check the SSM Agent of ${id}: fake aws: describe-instance-information failed (3 times in a row)" })) {
     $environment = @{ FAKE_STATE = $case.State; FAKE_FAIL = $case.Fail }
     $reason = "fake aws: $($case.Fail) failed"
-    # The lookup, the state, and the SSM check (failing 3 times in a row) can fail on expired credentials
-    $wantAuth = $case.Fail -in @('lookup', 'state', 'describe-instance-information')
+    # The lookup, the state, and the SSM check (failing 3 times in a row) can fail on expired credentials, so the
+    # ProxyCommand adds the conditional hint after the error
+    $wantHint = $case.Fail -in @('lookup', 'state', 'describe-instance-information')
 
     $label = "start-ec2-and-wait $($case.State), $($case.Fail) fails"
     $result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment $environment
@@ -261,9 +325,7 @@ foreach ($case in @(
     if ($result.TimedOut -or $result.ExitCode -ne 1 -or $result.Stdout.Count -ne 0 -or $result.Stderr -notmatch [regex]::Escape($reason)) {
         Add-Failure "${label}: want rc=1 within 10s, empty stdout, and '$reason' on stderr"
     }
-    if ($wantAuth -and -not $result.TimedOut -and $result.Stderr -notmatch 'aws login') {
-        Add-Failure "${label}: want the authentication guidance (aws login) on stderr"
-    }
+    Test-ErrorLine -Label $label -Text $result.Stderr -Line $case.Line -WantHint $wantHint
 
     $label = "start-ec2 $($case.State), $($case.Fail) fails"
     $result = Invoke-Case -Script $startScript -Arguments $startArgs -Environment $environment
@@ -271,6 +333,21 @@ foreach ($case in @(
     if ($result.TimedOut -or $result.ExitCode -ne 1 -or (($result.Stdout -join "`n") + $result.Stderr) -notmatch [regex]::Escape($reason)) {
         Add-Failure "${label}: want rc=1 within 10s and '$reason'"
     }
+    Test-ErrorLine -Label $label -Text ((($result.Stdout -join "`n") + "`n" + $result.Stderr)) -Line $case.Line -WantHint $false
+}
+
+# Stops that are not aws failures never add the hint
+foreach ($case in @(
+        @{ Name = 'two instances'; Environment = @{ FAKE_STATE = 'running'; FAKE_LOOKUP_IDS = 'i-1 i-2' }
+            Line = "Error: Expected exactly one instance tagged Name=ws in ap-northeast-1, found 2: i-1 i-2. Check the instance_name in 'tofu output workstations' and re-run setup-remote-ssh if it changed." },
+        @{ Name = 'unexpected state'; Environment = @{ FAKE_STATE = 'shutting-down' }; Line = 'Error: Unexpected instance state: shutting-down' })) {
+    $label = "start-ec2-and-wait $($case.Name)"
+    $result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment $case.Environment
+    Write-Case -Name $label -Result $result
+    if ($result.TimedOut -or $result.ExitCode -ne 1) {
+        Add-Failure "${label}: want rc=1 within 10s"
+    }
+    Test-ErrorLine -Label $label -Text $result.Stderr -Line $case.Line -WantHint $false
 }
 
 # The SSM check retries until 3 failures in a row, and an answer in between starts the count again:
