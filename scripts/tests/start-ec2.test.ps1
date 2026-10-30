@@ -111,6 +111,16 @@ function Add-Failure {
     $script:failures++
 }
 
+# The text of a file the scripts or the fake should have written, or $null when it is missing: a missing file is a
+# failed check, not a throw that stops the remaining cases
+function Get-FileText {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    return [IO.File]::ReadAllText($Path)
+}
+
 # Run a script in a child powershell.exe with the given environment, killing it (and the fake aws under it) after 10 seconds.
 # The output is read asynchronously: a synchronous ReadToEnd() before WaitForExit would block the timeout, and after a
 # kill the grandchild cmd.exe may keep the pipes open, so a killed run does not wait for the reads.
@@ -179,14 +189,18 @@ Write-Output ("fake aws: one call took {0:N2}s" -f $seconds)
 # How the arguments reach the fake (the --filters and --query values must arrive whole)
 $argsLog = Join-Path $work 'args.log'
 $null = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment @{ FAKE_STATE = 'running'; FAKE_ARGS_LOG = $argsLog }
-Write-Output 'fake aws: arguments as received'
-Get-Content $argsLog | ForEach-Object { Write-Output "    $_" }
-foreach ($want in @('--filters Name=tag:Name,Values=ws Name=instance-state-name,Values=pending,running,stopping,stopped',
-        '--query Reservations[].Instances[].InstanceId',
-        '--query Reservations[0].Instances[0].State.Name',
-        '--query InstanceInformationList[0].PingStatus')) {
-    if (-not (Select-String -Path $argsLog -SimpleMatch -Quiet -Pattern $want)) {
-        Add-Failure "arguments: the fake did not receive '$want'"
+if ($null -eq (Get-FileText $argsLog)) {
+    Add-Failure 'arguments: the fake was not called'
+} else {
+    Write-Output 'fake aws: arguments as received'
+    Get-Content $argsLog | ForEach-Object { Write-Output "    $_" }
+    foreach ($want in @('--filters Name=tag:Name,Values=ws Name=instance-state-name,Values=pending,running,stopping,stopped',
+            '--query Reservations[].Instances[].InstanceId',
+            '--query Reservations[0].Instances[0].State.Name',
+            '--query InstanceInformationList[0].PingStatus')) {
+        if (-not (Select-String -Path $argsLog -SimpleMatch -Quiet -Pattern $want)) {
+            Add-Failure "arguments: the fake did not receive '$want'"
+        }
     }
 }
 
@@ -299,7 +313,7 @@ function Invoke-Setup {
 # of the config into LF, so the blocks are compared without CR
 function Get-HostBlock {
     param([string]$SshHost)
-    $config = [IO.File]::ReadAllText((Join-Path $sshDir 'config')) -replace "`r`n", "`n"
+    $config = "$(Get-FileText (Join-Path $sshDir 'config'))" -replace "`r`n", "`n"
     # The comma keeps a one-block result an array (a bare return unrolls it to a string, and [0] would be its first character)
     return ,@([regex]::Matches($config, "(?m)^Host $SshHost\n(?:   .+\n)*") | ForEach-Object { $_.Value })
 }
@@ -314,7 +328,7 @@ $result = Invoke-Setup -Name 'alpha' -SshHost 'Alpha'
 $alphaScript = Get-ProxyScript 'alpha'
 $wantProxy = "   ProxyCommand powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($alphaScript -replace '\\', '/')`" %h ap-northeast-1 %p"
 $alphaBlock = Get-HostBlock 'alpha'
-if (-not (Test-Path $alphaScript) -or [IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+if ((Get-FileText $alphaScript) -ne $newVersion) {
     Add-Failure "setup alpha: $alphaScript is not a copy of start-ec2-and-wait.ps1"
 }
 if ($alphaBlock.Count -ne 1 -or ($alphaBlock[0] -split "`n") -notcontains $wantProxy -or ($alphaBlock[0] -split "`n") -notcontains '   User ec2-user') {
@@ -327,32 +341,32 @@ if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run th
 
 # 2. beta: alpha's script (an older version, marked) and the content of its Host block stay; so does the shared script
 [IO.File]::AppendAllText($alphaScript, "# older alpha`r`n")
-$alphaBefore = [IO.File]::ReadAllText($alphaScript)
+$alphaBefore = Get-FileText $alphaScript
 $null = Invoke-Setup -Name 'beta' -SshHost 'beta'
 $betaScript = Get-ProxyScript 'beta'
 if (-not (Test-Path $betaScript) -or @(Get-HostBlock 'beta').Count -ne 1 -or (Get-HostBlock 'beta')[0] -notlike "*$($betaScript -replace '\\', '/')*") {
     Add-Failure "setup beta: want Host beta running $betaScript"
 }
-if ([IO.File]::ReadAllText($alphaScript) -ne $alphaBefore) {
+if ((Get-FileText $alphaScript) -ne $alphaBefore) {
     Add-Failure "setup beta: changed $alphaScript"
 }
 if (((Get-HostBlock 'alpha') -join '') -ne ($alphaBlock -join '')) {
     Add-Failure "setup beta: changed Host alpha: $(Get-HostBlock 'alpha')"
 }
-if ([IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+if ((Get-FileText $oldShared) -ne "old shared script`n") {
     Add-Failure 'setup beta: changed the shared start-ec2-and-wait.ps1'
 }
 
 # 3. alpha again: only alpha's script becomes the new version, and there is one Host alpha
-$betaBefore = [IO.File]::ReadAllText($betaScript)
+$betaBefore = Get-FileText $betaScript
 $null = Invoke-Setup -Name 'alpha-again' -SshHost 'alpha'
-if ([IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+if ((Get-FileText $alphaScript) -ne $newVersion) {
     Add-Failure "setup alpha-again: $alphaScript is not the new version"
 }
 if (@(Get-HostBlock 'alpha').Count -ne 1) {
     Add-Failure "setup alpha-again: want one Host alpha, got $(@(Get-HostBlock 'alpha').Count)"
 }
-if ([IO.File]::ReadAllText($betaScript) -ne $betaBefore -or [IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+if ((Get-FileText $betaScript) -ne $betaBefore -or (Get-FileText $oldShared) -ne "old shared script`n") {
     Add-Failure 'setup alpha-again: changed beta or the shared script'
 }
 
