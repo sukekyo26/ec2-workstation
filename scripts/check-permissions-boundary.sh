@@ -6,6 +6,7 @@
 # 1 行に 1 つ、信頼ポリシーの policy_document の名前は _assume で終わる、ブロックは行の頭の resource "..." と } で区切る)。
 # 外れた書き方は、読めた集合が空になるか、下の作りの検査で落ちる。ただし policy_document の actions を変数や concat で
 # 書くと読み落とす。そう書く必要が出たら、HCL を読む道具で作り直す
+# LIMIT: Deny は、決まった 1 つ (インスタンスのロールの、秘密鍵の値を読む道を拒む Deny) だけを形で確かめる。Deny の意味 (AWS の評価) は確かめない
 #
 #   scripts/check-permissions-boundary.sh
 set -euo pipefail
@@ -27,21 +28,33 @@ fail() {
 boundary_actions=$(sed -nE 's/^[[:space:]]*- ([a-z0-9-]+:[A-Za-z0-9*]+)[[:space:]]*$/\1/p' "$boundary" | sort -u)
 [ -n "$boundary_actions" ] || fail "no action found in $boundary (one per line: - <service>:<action>)"
 
-# "<ファイル> <Action>": 信頼ポリシー (_assume) 以外の policy_document の actions = [...] の中の "<svc>:<Action>"
-module_actions=$(awk '
+# "<ファイル>\t<文書>\t<effect>\t<actions>\t<resources>" (actions と resources は空白区切り): 信頼ポリシー (_assume) 以外の
+# policy_document の statement ごと。statement は tofu fmt の形 (2 つの空白の "statement {" から "}" まで) で区切る
+statements=$(awk '
+    function add(list, v) { return list == "" ? v : list " " v }
     /^data "aws_iam_policy_document" "/ { split($0, f, "\""); doc = f[4]; next }
-    /^[^[:space:]]/ { doc = ""; in_actions = 0 }
-    doc != "" && doc !~ /_assume$/ {
-        if ($0 ~ /^[[:space:]]*actions[[:space:]]*=/) in_actions = 1
-        if (in_actions) {
+    /^[^[:space:]]/ { doc = "" }
+    doc == "" || doc ~ /_assume$/ { next }
+    /^  statement[[:space:]]*\{/ { in_stmt = 1; effect = "Allow"; acts = ""; res = ""; field = ""; next }
+    in_stmt && /^  \}/ { print FILENAME "\t" doc "\t" effect "\t" acts "\t" res; in_stmt = 0; next }
+    in_stmt {
+        if ($0 ~ /^[[:space:]]*effect[[:space:]]*=[[:space:]]*"Deny"/) effect = "Deny"
+        if ($0 ~ /^[[:space:]]*actions[[:space:]]*=/) field = "actions"
+        else if ($0 ~ /^[[:space:]]*resources[[:space:]]*=/) field = "resources"
+        if (field != "") {
             s = $0
-            while (match(s, /"[a-z0-9-]+:[A-Za-z0-9*]+"/)) {
-                print FILENAME, substr(s, RSTART + 1, RLENGTH - 2)
+            pat = field == "actions" ? "\"[a-z0-9-]+:[A-Za-z0-9*]+\"" : "\"[^\"]*\""
+            while (match(s, pat)) {
+                v = substr(s, RSTART + 1, RLENGTH - 2)
+                if (field == "actions") acts = add(acts, v)
+                else res = add(res, v)
                 s = substr(s, RSTART + RLENGTH)
             }
-            if ($0 ~ /\]/) in_actions = 0
+            if ($0 ~ /\]/) field = ""
         }
     }' "${modules[@]}")
+# "<ファイル> <Action>": Deny でない statement の Action (Deny の Action は、boundary が許す要が無い)
+module_actions=$(awk -F '\t' '$3 != "Deny" { n = split($4, a, " "); for (i = 1; i <= n; i++) print $1, a[i] }' <<< "$statements")
 [ -n "$module_actions" ] || fail "no action found in the aws_iam_policy_document blocks of opentofu/modules"
 while read -r file action; do
     [ -n "$action" ] || continue
@@ -55,12 +68,13 @@ done <<< "$module_actions"
 structure=$(awk '
     function out(kind, detail) { print kind "\t" FILENAME "\t" FNR "\t" detail }
     /^resource "/ {
-        split($0, f, "\""); type = f[2]; name = f[4]; start = FNR; has_boundary = 0
+        split($0, f, "\""); type = f[2]; name = f[4]; start = FNR; has_boundary = 0; role = ""; pdoc = ""
         if (type ~ /^aws_iam_/ && type !~ /^aws_iam_(role|role_policy|role_policy_attachment|instance_profile)$/) out("unread", "resource \"" type "\"")
         next
     }
     /^}/ {
         if (type == "aws_iam_role" && !has_boundary) print "noboundary\t" FILENAME "\t" start "\t" name
+        if (type == "aws_iam_role_policy") print "rolepolicy\t" FILENAME "\t" start "\t" role " " pdoc
         type = ""
         next
     }
@@ -68,10 +82,16 @@ structure=$(awk '
     type == "aws_iam_role" && /^[[:space:]]*permissions_boundary[[:space:]]*=/ { has_boundary = 1 }
     type == "aws_iam_role" && /^[[:space:]]*inline_policy[[:space:]]*\{/ { out("unread", "inline_policy of aws_iam_role") }
     type == "aws_iam_role" && /^[[:space:]]*managed_policy_arns[[:space:]]*=/ { out("unread", "managed_policy_arns of aws_iam_role") }
+    type == "aws_iam_role_policy" && /^[[:space:]]*role[[:space:]]*=/ {
+        role = $0
+        sub(/^[^=]*=[[:space:]]*/, "", role)
+        sub(/\.id[[:space:]]*$/, "", role)
+    }
     type == "aws_iam_role_policy" && /^[[:space:]]*policy[[:space:]]*=/ {
         if (match($0, /data\.aws_iam_policy_document\.[A-Za-z0-9_-]+\.json[[:space:]]*$/)) {
             doc = substr($0, RSTART + 29)
             sub(/\.json[[:space:]]*$/, "", doc)
+            pdoc = doc
             if (doc ~ /_assume$/) out("assume", doc)
         } else {
             out("policy", "")
@@ -87,8 +107,10 @@ structure=$(awk '
             out("arn", "")
         }
     }' "${modules[@]}")
+role_policies=""
 while IFS=$'\t' read -r kind file line detail; do
     case $kind in
+        rolepolicy) role_policies+="$detail"$'\n' ;;
         noboundary) fail "$file:$line: aws_iam_role.$detail has no permissions_boundary" ;;
         unread) fail "$file:$line: $detail is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)" ;;
         policy) fail "$file:$line: the policy of aws_iam_role_policy is not data.aws_iam_policy_document.<name>.json (the check reads Actions only from policy documents)" ;;
@@ -101,6 +123,39 @@ while IFS=$'\t' read -r kind file line detail; do
             ;;
     esac
 done <<< "$structure"
+
+# インスタンスのロールは、秘密鍵 (keypair.tf の SSM パラメータ) の値を読む道を全部拒む。接頭辞は local の 1 か所に書く
+workstation=opentofu/modules/workstation
+keypair_prefix=/ec2/keypair/
+keypair_arn='arn:*:ssm:*:*:parameter${local.keypair_parameter_prefix}*'
+keypair_actions="ssm:GetParameter ssm:GetParameters ssm:GetParameterHistory"
+keypair_actions_text="ssm:GetParameter, ssm:GetParameters and ssm:GetParameterHistory"
+grep -qE "^[[:space:]]*keypair_parameter_prefix[[:space:]]*=[[:space:]]*\"$keypair_prefix\"[[:space:]]*\$" "$workstation/main.tf" ||
+    fail "$workstation/main.tf: local.keypair_parameter_prefix is not \"$keypair_prefix\""
+awk '/^resource "aws_ssm_parameter" "private_key"/,/^}/' "$workstation/keypair.tf" |
+    grep -qE '^[[:space:]]*name[[:space:]]*=[[:space:]]*"\$\{local\.keypair_parameter_prefix\}' ||
+    fail "$workstation/keypair.tf: the name of aws_ssm_parameter does not start with \${local.keypair_parameter_prefix}"
+# deny_doc <resources> <Action>...: その resources だけで、Action を全部持つ Deny の statement の文書の名前
+deny_doc() {
+    local resources=$1
+    shift
+    awk -F '\t' -v res="$resources" -v want="$*" '
+        $3 == "Deny" && $5 == res {
+            n = split(want, w, " "); ok = 1
+            for (i = 1; i <= n; i++) if ((" " $4 " ") !~ (" " w[i] " ")) ok = 0
+            if (ok) { print $2; exit }
+        }' <<< "$statements"
+}
+# shellcheck disable=SC2086 # Action は空白で分ける
+keypair_doc=$(deny_doc "$keypair_arn" $keypair_actions)
+bypath_doc=$(deny_doc "*" ssm:GetParametersByPath)
+[ -n "$keypair_doc" ] ||
+    fail "$workstation/iam.tf: no Deny statement of $keypair_actions_text on $keypair_arn"
+[ -n "$bypath_doc" ] || fail "$workstation/iam.tf: no Deny statement of ssm:GetParametersByPath on *"
+for doc in $(printf '%s\n' "$keypair_doc" "$bypath_doc" | sort -u); do
+    grep -qxF "aws_iam_role.instance $doc" <<< "$role_policies" ||
+        fail "$workstation/iam.tf: the keypair Deny (data.aws_iam_policy_document.$doc) is not attached to aws_iam_role.instance"
+done
 
 # 名前: テンプレートの ManagedPolicyName、codepipeline.yaml の条件の ARN (全部の出現)、config の permissions_boundary_name
 names() {
