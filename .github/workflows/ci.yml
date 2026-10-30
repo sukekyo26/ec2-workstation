@@ -74,6 +74,9 @@ jobs:
       - name: Check os enum matches os-images.json
         run: diff <(jq -S '.definitions.os.enum | sort' workstation-config.schema.json) <(jq -S 'keys | sort' opentofu/modules/workstation/os-images.json)
 
+      - name: Check the permissions boundary covers the module roles and its name matches
+        run: scripts/check-permissions-boundary.sh
+
   opentofu:
     name: OpenTofu Format & Validate
     runs-on: ubuntu-latest
@@ -117,6 +120,9 @@ jobs:
 
       - name: Test setup-remote-ssh.sh with a fake aws
         run: scripts/tests/setup-remote-ssh.test.sh
+
+      - name: Test check-permissions-boundary.sh with broken copies
+        run: scripts/tests/check-permissions-boundary.test.sh
 
   shell-format:
     name: Shell format
