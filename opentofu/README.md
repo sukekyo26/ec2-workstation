@@ -22,7 +22,7 @@ aws cloudformation describe-stacks --region ap-northeast-1 --stack-name ec2-work
   --query "Stacks[0].Outputs[?OutputKey=='BucketName'].OutputValue" --output text
 ```
 
-バケットの名前は、既定で `ec2-workstation-tfstate-<account-id>` です（S3 の全体で 1 つなので、アカウント ID で分けます）。出力 `BucketName` を `TF_STATE_BUCKET` に入れます。スタックを消しても、バケット（と SSE-KMS-CMK の鍵）は残ります。
+バケットの名前は、既定で `ec2-workstation-tofu-state-<account-id>` です（S3 の全体で 1 つなので、アカウント ID で分けます）。出力 `BucketName` を `TF_STATE_BUCKET` に入れます。スタックを消しても、バケット（と SSE-KMS-CMK の鍵）は残ります。
 
 暗号化（パラメータ `Encryption`）:
 

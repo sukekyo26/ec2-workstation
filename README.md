@@ -431,7 +431,7 @@ GitHub を使わず、AWS の中だけで deploy したいときは、このリ�
 作り方:
 
 ```bash
-# 0. state のバケットを作る（cloudformation/state-bucket.yaml。既定の名前は ec2-workstation-tfstate-<account-id>。手順は opentofu/README.md）
+# 0. state のバケットを作る（cloudformation/state-bucket.yaml。既定の名前は ec2-workstation-tofu-state-<account-id>。手順は opentofu/README.md）
 
 # 1. スタックを作る（CodeCommit のリポジトリも一緒にできる。スタックを消してもリポジトリは残る）
 aws cloudformation deploy \
