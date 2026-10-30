@@ -74,7 +74,7 @@ function Invoke-AwsCli {
     if ($exitCode -ne 0) {
         throw "${Description}: $($stderr -join ' ')"
     }
-    foreach ($line in $stderr) {
+    foreach ($line in @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })) {
         Write-Stderr $line
     }
     return $stdout
@@ -109,7 +109,8 @@ function Wait-SSMAgentReady {
         } catch {
             $failures++
             if ($failures -ge $MaxFailures) {
-                throw "$_ ($MaxFailures times in a row)`n$awsLoginHint"
+                Write-Stderr $awsLoginHint
+                throw "$_ ($MaxFailures times in a row)"
             }
             Write-ScriptLog "Failed to check the SSM Agent (attempt $i/$MaxRetries, failure $failures/$MaxFailures), retrying: $_"
             Start-Sleep -Seconds $RetryIntervalSeconds
@@ -166,6 +167,7 @@ try {
             'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
             '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
     } catch {
+        Write-Stderr "ERROR: AWS authentication failed"
         throw "$_`n$awsLoginHint"
     }
 
