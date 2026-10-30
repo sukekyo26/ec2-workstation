@@ -56,7 +56,10 @@ function Invoke-AwsCli {
     $ErrorActionPreference = 'Continue'
     $all = & $awsCli @Arguments 2>&1
     $exitCode = $LASTEXITCODE
-    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object {
+            # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
+            if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+        } | Where-Object { $_.Trim() })
     $stdout = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
     if ($exitCode -ne 0) {
         throw "${Description}: $($stderr -join ' ')"

@@ -35,6 +35,7 @@ if [ "$what" = describe-instance-information ] && [ -n "${FAKE_SSM_SEQUENCE:-}" 
     answer=$(cut -d, -f"$n" <<< "$FAKE_SSM_SEQUENCE,")
     case "${answer:-Online}" in
         fail)
+            echo "" >&2
             echo "fake aws: $what failed" >&2
             exit 1
             ;;
@@ -45,14 +46,16 @@ if [ "$what" = describe-instance-information ] && [ -n "${FAKE_SSM_SEQUENCE:-}" 
     esac
 fi
 if [ "${FAKE_FAIL:-}" = "$what" ]; then
+    echo "" >&2
     echo "fake aws: $what failed" >&2
     exit 1
 fi
 if [ "${FAKE_WARN:-}" = 1 ]; then
+    echo "" >&2
     echo "fake aws: warning from $what" >&2
 fi
 case "$what" in
-    lookup) echo i-0123456789abcdef0 ;;
+    lookup) echo "${FAKE_LOOKUP_IDS:-i-0123456789abcdef0}" ;;
     state) echo "$FAKE_STATE" ;;
     start-instances) printf '%s\n' '{' '    "StartingInstances": []' '}' ;;
     describe-instance-information) echo Online ;;
@@ -76,13 +79,40 @@ run() {
         start-ec2-and-wait.sh) args=(ws ap-northeast-1 22) ;;
         start-ec2.sh) args=(ws ap-northeast-1) ;;
     esac
-    env -u FAKE_STATE -u FAKE_FAIL -u FAKE_SSM_SEQUENCE -u FAKE_COUNTER -u FAKE_WARN EC2WS_SSM_POLL_INTERVAL=1 "$@" timeout 10 "$scripts_dir/$script" "${args[@]}" \
+    env -u FAKE_STATE -u FAKE_FAIL -u FAKE_SSM_SEQUENCE -u FAKE_COUNTER -u FAKE_WARN -u FAKE_LOOKUP_IDS EC2WS_SSM_POLL_INTERVAL=1 "$@" timeout 10 "$scripts_dir/$script" "${args[@]}" \
         < /dev/null > "$work/out/$name.out" 2> "$work/out/$name.err" || rc=$?
     echo "$rc" > "$work/out/$name.rc"
 }
 
 rc_of() {
     cat "$work/out/$1.rc"
+}
+
+hint="  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again."
+# <name> の stderr の行から log の時刻を取り除く
+plain_err() {
+    sed -E 's/^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}\] //' "$work/out/$1.err"
+}
+# error_lines <name> <want_hint (1/0)> <行>...: <行> が (時刻を除いて) 続けて行の全体であり、want_hint=1 ならその直後が案内の行、
+# 0 なら案内の行がどこにも無い。案内は時刻を付けずに出すので、時刻を取り除く前の行でも比べる。どちらでも前の枠の見出しは無い
+error_lines() {
+    local name=$1 want_hint=$2 block next
+    shift 2
+    block=$(printf '%s\n' "$@")
+    if [[ $'\n'"$(plain_err "$name")"$'\n' != *$'\n'"$block"$'\n'* ]]; then
+        fail "$name: want the lines '$block', got: $(plain_err "$name")"
+        return
+    fi
+    next=$(plain_err "$name" | grep -xF -A1 -- "${!#}" | sed -n 2p)
+    if [ "$want_hint" = 1 ] && { [ "$next" != "$hint" ] || ! grep -qxF -- "$hint" "$work/out/$name.err"; }; then
+        fail "$name: want the hint right after '${!#}', without a time, got: $(grep -F -- "${hint# }" "$work/out/$name.err")"
+    fi
+    if [ "$want_hint" = 0 ] && { plain_err "$name" | grep -qxF -- "$hint" || grep -qF -- "${hint#  }" "$work/out/$name.err"; }; then
+        fail "$name: want no hint"
+    fi
+    if grep -qF 'ERROR: AWS authentication failed' "$work/out/$name.err"; then
+        fail "$name: want no banner 'ERROR: AWS authentication failed'"
+    fi
 }
 
 for state in stopped stopping pending running; do
@@ -111,13 +141,14 @@ for c in running:lookup running:state stopped:start-instances stopped:wait-insta
     if [ "$(rc_of "$name")" != 1 ] || [ -s "$work/out/$name.out" ] || ! grep -qF "$reason" "$work/out/$name.err"; then
         fail "$name: want rc=1 within 10s, empty stdout, and '$reason' on stderr, got rc=$(rc_of "$name") stdout: $(cat "$work/out/$name.out")"
     fi
-    # lookup・state・SSM の問い合わせ (続けて 3 回) の失敗は、認証の切れでも起きるので案内を出す
+    # lookup・state・SSM の問い合わせ (続けて 3 回) の失敗は、資格情報の切れでも起きるので条件つきの案内を付ける
+    id=i-0123456789abcdef0
     case "$failing" in
-        lookup | state | describe-instance-information)
-            if ! grep -qF "aws login" "$work/out/$name.err"; then
-                fail "$name: want the authentication guidance (aws login) on stderr"
-            fi
-            ;;
+        lookup) error_lines "$name" 1 "Error: Failed to look up instance (the aws error is above)" ;;
+        state) error_lines "$name" 1 "Error: Failed to get instance state (the aws error is above)" ;;
+        start-instances) error_lines "$name" 0 "Error: Failed to start instance $id (the aws error is above)" ;;
+        wait-instance-*) error_lines "$name" 0 "Error: Failed while waiting for instance $id to be ${failing#wait-instance-} (the aws error is above)" ;;
+        describe-instance-information) error_lines "$name" 1 "Error: Failed to check the SSM Agent of $id 3 times in a row (the aws error is above)" ;;
     esac
 
     name="start-$state-$failing"
@@ -126,6 +157,19 @@ for c in running:lookup running:state stopped:start-instances stopped:wait-insta
         fail "$name: want rc=1 within 10s and '$reason', got rc=$(rc_of "$name")"
     fi
 done
+
+# aws の失敗でない止まり方では、案内を付けない
+run wait-two-instances start-ec2-and-wait.sh FAKE_STATE=running "FAKE_LOOKUP_IDS=i-1 i-2"
+if [ "$(rc_of wait-two-instances)" != 1 ]; then
+    fail "wait-two-instances: want rc=1, got rc=$(rc_of wait-two-instances)"
+fi
+error_lines wait-two-instances 0 "Error: Expected exactly one instance tagged Name=ws in ap-northeast-1, found 2: i-1 i-2" \
+    "Check the instance_name in 'tofu output workstations' and re-run setup-remote-ssh if it changed."
+run wait-unexpected-state start-ec2-and-wait.sh FAKE_STATE=shutting-down
+if [ "$(rc_of wait-unexpected-state)" != 1 ]; then
+    fail "wait-unexpected-state: want rc=1, got rc=$(rc_of wait-unexpected-state)"
+fi
+error_lines wait-unexpected-state 0 "Error: Unexpected instance state: shutting-down"
 
 # SSM の問い合わせの失敗は、続けて 3 回になるまで問い合わせ直す。成功を 1 回挟めば数え直すので、
 # 失敗・失敗・成功 (まだ Online でない)・失敗・失敗・Online でつながる
