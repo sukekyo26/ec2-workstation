@@ -72,6 +72,61 @@ line=$(grep -n 'policy = jsonencode' "$dir/opentofu/modules/workstation/iam.tf" 
 expect inline-jsonencode "$dir" 1 \
     "Error: opentofu/modules/workstation/iam.tf:$line: the policy of aws_iam_role_policy is not data.aws_iam_policy_document.<name>.json (the check reads Actions only from policy documents)"
 
+# 名前は、3 か所のどれか 1 つがずれても落ちる
+dir=$(copy renamed-config)
+sed -i 's/-permissions-boundary"/-permissions-boundary2"/' "$dir/opentofu/modules/config/main.tf"
+expect renamed-config "$dir" 1 \
+    "Error: the permissions boundary names differ: $boundary 'permissions-boundary', cloudformation/codepipeline.yaml 'permissions-boundary', opentofu/modules/config/main.tf 'permissions-boundary2'"
+
+dir=$(copy renamed-template)
+sed -i 's/^\([[:space:]]*ManagedPolicyName: .*-permissions-boundary\)$/\12/' "$dir/$boundary"
+expect renamed-template "$dir" 1 \
+    "Error: the permissions boundary names differ: $boundary 'permissions-boundary2', cloudformation/codepipeline.yaml 'permissions-boundary', opentofu/modules/config/main.tf 'permissions-boundary'"
+
+dir=$(copy renamed-one)
+sed -i '0,/-permissions-boundary$/s//-permissions-boundary2/' "$dir/cloudformation/codepipeline.yaml"
+expect renamed-one "$dir" 1 \
+    "Error: the permissions boundary names differ: $boundary 'permissions-boundary', cloudformation/codepipeline.yaml 'permissions-boundary permissions-boundary2', opentofu/modules/config/main.tf 'permissions-boundary'"
+
+# boundary の無いロール
+dir=$(copy no-boundary)
+sed -i '/^[[:space:]]*permissions_boundary[[:space:]]*=/d' "$dir/opentofu/modules/workstation/autostop.tf"
+line=$(grep -n '^resource "aws_iam_role" "scheduler"' "$dir/opentofu/modules/workstation/autostop.tf" | cut -d: -f1)
+expect no-boundary "$dir" 1 \
+    "Error: opentofu/modules/workstation/autostop.tf:$line: aws_iam_role.scheduler has no permissions_boundary"
+
+# 読めない管理ポリシーの ARN (パス付き)
+dir=$(copy managed-path)
+sed -i 's|policy/AmazonSSMManagedInstanceCore"|policy/service-role/AmazonSSMManagedInstanceCore"|' "$dir/opentofu/modules/workstation/iam.tf"
+line=$(grep -n 'policy/service-role/' "$dir/opentofu/modules/workstation/iam.tf" | cut -d: -f1)
+expect managed-path "$dir" 1 \
+    "Error: opentofu/modules/workstation/iam.tf:$line: the policy_arn of aws_iam_role_policy_attachment is not \"arn:aws:iam::aws:policy/<name>\" (the check cannot read it)"
+
+# 検査が読まない付け方: 信頼ポリシーの文書を指す aws_iam_role_policy、aws_iam_policy、managed_policy_arns
+dir=$(copy policy-assume)
+sed -i 's/policy = data\.aws_iam_policy_document\.session_logs_write\.json/policy = data.aws_iam_policy_document.instance_assume.json/' "$dir/opentofu/modules/workstation/iam.tf"
+line=$(grep -n 'policy = data.aws_iam_policy_document.instance_assume.json' "$dir/opentofu/modules/workstation/iam.tf" | cut -d: -f1)
+expect policy-assume "$dir" 1 \
+    "Error: opentofu/modules/workstation/iam.tf:$line: the policy of aws_iam_role_policy is data.aws_iam_policy_document.instance_assume, which the check skips as a trust policy (*_assume)"
+
+dir=$(copy iam-policy)
+printf '\nresource "aws_iam_policy" "extra" {\n  policy = "{}"\n}\n' >> "$dir/opentofu/modules/workstation/iam.tf"
+line=$(grep -n '^resource "aws_iam_policy" "extra"' "$dir/opentofu/modules/workstation/iam.tf" | cut -d: -f1)
+expect iam-policy "$dir" 1 \
+    "Error: opentofu/modules/workstation/iam.tf:$line: resource \"aws_iam_policy\" is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)"
+
+dir=$(copy managed-policy-arns)
+sed -i 's/^\([[:space:]]*permissions_boundary = local.permissions_boundary_arn\)$/\1\n  managed_policy_arns  = []/' "$dir/opentofu/modules/workstation/autostop.tf"
+line=$(grep -n 'managed_policy_arns' "$dir/opentofu/modules/workstation/autostop.tf" | cut -d: -f1)
+expect managed-policy-arns "$dir" 1 \
+    "Error: opentofu/modules/workstation/autostop.tf:$line: managed_policy_arns of aws_iam_role is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)"
+
+dir=$(copy inline-policy)
+sed -i 's/^\([[:space:]]*permissions_boundary = local.permissions_boundary_arn\)$/\1\n  inline_policy {}/' "$dir/opentofu/modules/workstation/autostop.tf"
+line=$(grep -n 'inline_policy {}' "$dir/opentofu/modules/workstation/autostop.tf" | cut -d: -f1)
+expect inline-policy "$dir" 1 \
+    "Error: opentofu/modules/workstation/autostop.tf:$line: inline_policy of aws_iam_role is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)"
+
 # actions の書き方が変わって 1 つも読めないときは、黙って通らずに落ちる
 dir=$(copy unreadable)
 sed -i -E 's/^([[:space:]]*)actions([[:space:]]*=)/\1action_list\2/' "$dir"/opentofu/modules/*/*.tf
