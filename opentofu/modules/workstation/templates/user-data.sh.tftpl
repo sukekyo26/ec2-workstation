@@ -140,7 +140,7 @@ prepare_data_fs() {
         exit 1
     fi
     if [ $((status & ~3)) -ne 0 ]; then
-        echo "ERROR: e2fsck left errors on data volume $DATA_VOLUME_ID (exit $status). Run 'sudo e2fsck -f $device' on the instance, then recreate it:" >&2
+        echo "ERROR: e2fsck could not leave data volume $DATA_VOLUME_ID clean (exit $status; its output is above). Fix what it reports on the instance (for example with 'sudo e2fsck -f $device'), then recreate it:" >&2
         print_recreate_hint
         exit 1
     fi
@@ -153,7 +153,13 @@ prepare_data_fs() {
     features=$(echo "$header" | sed -n 's/^Filesystem features:[[:space:]]*//p')
     # 1.47 の mke2fs が既定で付ける orphan_file は、1.46 (AL2023) の e2fsck・resize2fs が断る
     case " $features " in
-        *" orphan_file "*) tune2fs -O ^orphan_file "$device" ;;
+        *" orphan_file "*)
+            if ! tune2fs -O ^orphan_file "$device"; then
+                echo "ERROR: tune2fs could not remove orphan_file from data volume $DATA_VOLUME_ID (its message is above). Inspect it with 'sudo tune2fs -l $device', then recreate the instance:" >&2
+                print_recreate_hint
+                exit 1
+            fi
+            ;;
     esac
 }
 DATA_MOUNT=/data
