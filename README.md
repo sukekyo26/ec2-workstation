@@ -210,6 +210,13 @@ flowchart TB
 - EBS ボリュームは後から小さくできません。`dataVolumeSize` を減らすと、`tofu plan` は in-place 更新として通りますが、`apply` で AWS が断って失敗します。初めは小さめにして、必要に応じて増やしてください
 - データボリュームがアタッチされないまま起動した場合、`~/work` は書き込み禁止になります（ルートボリュームに書いて次の作り直しで失うのを防ぐため）。`/var/log/user-data.log` の案内に従い、`./scripts/tofu-init.sh workstations <username>` の後に `tofu -chdir=opentofu/stacks/workstations apply -replace='module.workstation["<username>"].aws_instance.this'` でインスタンスを作り直してください
 - SSM で接続できないとき（Amazon Linux と Debian では、SSM Agent を user-data で入れるため、その導入に失敗すると入れません）は、`aws ec2 get-console-output --instance-id <instance-id> --latest --output text` で user-data のログ（シリアルコンソールにも出しています）を読んで原因を確かめ、直してから作り直してください
+- user-data が走らなかったとき（`/var/log/user-data.log` が無い）は、インスタンスに入って次のように手で走らせられます。user-data はテンプレートを展開した形（`data_volume_id` などの値が埋まった形）で IMDS に残っているので、gzip を戻せばそのまま使えます。一度走り切った後の再実行は想定していません（SELinux が有効な Amazon Linux では `semanage fcontext -a` が既存の定義で失敗するなど）
+
+  ```bash
+  TOKEN=$(curl -fsS -X PUT http://169.254.169.254/latest/api/token -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+  curl -fsS -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/user-data | gunzip > ~/user-data.sh
+  sudo bash ~/user-data.sh
+  ```
 
 #### データボリュームを持たない環境から移る場合
 
