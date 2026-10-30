@@ -127,6 +127,9 @@ jobs:
       - name: Test the data volume preparation in user-data with fake e2fsprogs
         run: scripts/tests/data-volume-fs.test.sh
 
+      - name: Test the fstab entries in user-data with the real findmnt
+        run: scripts/tests/fstab-entry.test.sh
+
   shell-format:
     name: Shell format
     runs-on: ubuntu-latest
