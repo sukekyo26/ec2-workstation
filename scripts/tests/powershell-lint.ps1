@@ -2,8 +2,8 @@
 .SYNOPSIS
     Checks scripts/**/*.ps1 with the PowerShell parser and PSScriptAnalyzer.
 .DESCRIPTION
-    CI runs this on Windows PowerShell 5.1, the version the SSH ProxyCommand uses.
-    A run on a local pwsh 7 is only a hint: its parser accepts syntax that 5.1 rejects.
+    CI runs this on Windows PowerShell 5.1 (the version the SSH ProxyCommand uses) and on PowerShell 7; both must pass.
+    A run on a local pwsh 7 alone is not enough: its parser accepts syntax that 5.1 rejects.
     Saved with a BOM like the other scripts; also kept ASCII only so that 5.1 still reads it if the BOM is lost.
 #>
 $ErrorActionPreference = 'Stop'
@@ -69,8 +69,9 @@ foreach ($name in @('start-ec2.ps1', 'start-ec2-and-wait.ps1', 'setup-remote-ssh
     }
 }
 foreach ($key in $sharedNames) {
-    $texts = @($sharedTexts[$key] | Where-Object { $_ } | ForEach-Object { ($_ -split "`n", 2)[1] } | Sort-Object -Unique -CaseSensitive)
-    if ($texts.Count -gt 1) {
+    # -cne against the first copy: in 5.1, Sort-Object -Unique ignores -CaseSensitive
+    $texts = @($sharedTexts[$key] | Where-Object { $_ } | ForEach-Object { ($_ -split "`n", 2)[1] })
+    if (@($texts | Where-Object { $_ -cne $texts[0] }).Count -gt 0) {
         $owners = @($sharedTexts[$key] | Where-Object { $_ } | ForEach-Object { ($_ -split "`n", 2)[0] })
         Write-Output ("scripts/client SharedAwsHelpers {0} differs between {1}" -f $key, ($owners -join ', '))
         $problems++
