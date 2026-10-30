@@ -104,6 +104,9 @@ function Wait-SSMAgentReady {
                 'ssm', 'describe-instance-information', '--region', $Region,
                 '--filters', "Key=InstanceIds,Values=$InstanceId",
                 '--query', 'InstanceInformationList[0].PingStatus', '--output', 'text')
+        } catch [System.Management.Automation.ApplicationFailedException] {
+            # 起動しない aws は、待っても直らないので数え直さずに止まる
+            throw
         } catch {
             $failures++
             if ($failures -ge $MaxFailures) {

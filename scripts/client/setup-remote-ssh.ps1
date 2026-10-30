@@ -233,8 +233,7 @@ try {
 
     $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
     if ($instanceIdList.Count -ne 1) {
-        Write-Error "Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
-        exit 1
+        throw "Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
     }
     $INSTANCE_ID = $instanceIdList[0]
 
@@ -243,16 +242,14 @@ try {
         'ec2', 'describe-instances', '--instance-ids', $INSTANCE_ID, '--region', $REGION,
         '--query', "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]", '--output', 'text'))"
     if ($SSH_USER -eq "None" -or [string]::IsNullOrEmpty($SSH_USER)) {
-        Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
-        exit 1
+        throw "Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
     }
     $KEY_NAME = "$(Invoke-AwsCli -Description "Failed to read the key pair name of $INSTANCE_ID" -Arguments @(
         'ec2', 'describe-instances', '--instance-ids', $INSTANCE_ID, '--region', $REGION,
         '--query', 'Reservations[0].Instances[0].KeyName', '--output', 'text'))"
 
     if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {
-        Write-Error "Error: No key pair is associated with instance $INSTANCE_ID"
-        exit 1
+        throw "No key pair is associated with instance $INSTANCE_ID"
     }
 
     Write-Host "Key name: $KEY_NAME" -ForegroundColor Green
@@ -286,7 +283,9 @@ $SECRET_KEY_PATH = "$SSH_CONFIG_DIR\$SECRET_KEY"
 $keyTemp = Join-Path $SSH_CONFIG_DIR ".$SECRET_KEY.$([guid]::NewGuid()).tmp"
 try {
     New-Item -ItemType File -Path $keyTemp -ErrorAction Stop | Out-Null
-    foreach ($icaclsArguments in @(@('/inheritance:r'), @('/grant', "$($env:USERNAME):F"))) {
+    # The user by SID: a name can be ambiguous (a local and a domain account) or not resolvable (Azure AD, Microsoft accounts)
+    $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    foreach ($icaclsArguments in @(@('/inheritance:r'), @('/grant', "*${userSid}:F"))) {
         $icaclsOutput = & icacls $keyTemp @icaclsArguments 2>&1
         if ($LASTEXITCODE -ne 0) {
             throw "icacls $($icaclsArguments -join ' ') exited with code ${LASTEXITCODE}: $($icaclsOutput -join ' ')"
