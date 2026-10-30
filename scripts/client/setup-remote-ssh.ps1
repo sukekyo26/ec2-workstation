@@ -76,7 +76,7 @@ function Invoke-AwsCli {
         [string]$Description,
         [string[]]$Arguments
     )
-    # windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw し、$LASTEXITCODE を見る所に届かない
+    # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw し、$LASTEXITCODE を見る所に届かない
     $ErrorActionPreference = 'Continue'
     try {
         # パイプに通して受ける (pwsh 7 は、変数に直に受けると、起動しないときの理由が "StandardOutputEncoding is only supported…" になる)
