@@ -90,7 +90,7 @@ psmodules_path() {
     echo "$REPO_ROOT/.tools/psmodules"
 }
 
-# tools_path: 全部の道具の置き場所のディレクトリを : でつなぐ (CodeBuild の buildspec と .github/actions/install-tofu が PATH の先頭に足す)
+# tools_path: 全部の道具の置き場所のディレクトリを : でつなぐ (CodeBuild の buildspec が PATH の先頭に足す)
 tools_path() {
     local name dirs=()
     for name in jv shfmt tofu just shellcheck gitleaks pwsh; do

@@ -1,7 +1,7 @@
 name: Install OpenTofu
 description: >-
-  Install the OpenTofu of scripts/lib/tools.sh (TOFU_VERSION) with its sha256 and put it first on PATH,
-  the same as the CodeBuild buildspecs. Run actions/checkout before this.
+  Install the OpenTofu of scripts/lib/tools.sh (TOFU_VERSION) with its sha256, the same way as the CodeBuild
+  buildspecs, and put its directory first on PATH. Run actions/checkout before this.
 runs:
   using: composite
   steps:
@@ -9,8 +9,8 @@ runs:
       shell: bash
       run: |
         scripts/install/install-tofu.sh
-        # The buildspecs put the same directories first on PATH; GITHUB_PATH takes one directory per line
-        bash -c '. scripts/lib/tools.sh && tools_path' | tr : '\n' >> "$GITHUB_PATH"
+        # Only the tofu directory, first on PATH; scripts/lib/tools.sh decides where it is
+        bash -c '. scripts/lib/tools.sh && dirname "$(tool_path tofu "$TOFU_VERSION")"' >> "$GITHUB_PATH"
 
     # A lost or wrong GITHUB_PATH line would otherwise pass with whatever tofu the runner has
     - name: Check the OpenTofu version
