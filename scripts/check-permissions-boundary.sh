@@ -7,6 +7,8 @@
 # 外れた書き方は、読めた集合が空になるか、下の作りの検査で落ちる。ただし policy_document の actions を変数や concat で
 # 書くと読み落とす。そう書く必要が出たら、HCL を読む道具で作り直す
 # LIMIT: Deny は、決まった 1 つ (インスタンスのロールの、秘密鍵の値を読む道を拒む Deny) だけを形で確かめる。Deny の意味 (AWS の評価) は確かめない
+# LIMIT: policy_document の statement は、2 つの空白の "statement {" から 2 つの空白の "}" までで区切る (statement の中に
+# condition {} などを 2 つの空白で入れ子にすると誤る)。resources の値は二重引用符で切る (補間の中に " があると誤る)。どちらも今のモジュールには無い形
 #
 #   scripts/check-permissions-boundary.sh
 set -euo pipefail
@@ -74,7 +76,7 @@ structure=$(awk '
     }
     /^}/ {
         if (type == "aws_iam_role" && !has_boundary) print "noboundary\t" FILENAME "\t" start "\t" name
-        if (type == "aws_iam_role_policy") print "rolepolicy\t" FILENAME "\t" start "\t" role " " pdoc
+        if (type == "aws_iam_role_policy") print "rolepolicy\t" FILENAME "\t" start "\t" FILENAME " " role " " pdoc
         type = ""
         next
     }
@@ -85,7 +87,7 @@ structure=$(awk '
     type == "aws_iam_role_policy" && /^[[:space:]]*role[[:space:]]*=/ {
         role = $0
         sub(/^[^=]*=[[:space:]]*/, "", role)
-        sub(/\.id[[:space:]]*$/, "", role)
+        sub(/\.(id|name)[[:space:]]*$/, "", role)
     }
     type == "aws_iam_role_policy" && /^[[:space:]]*policy[[:space:]]*=/ {
         if (match($0, /data\.aws_iam_policy_document\.[A-Za-z0-9_-]+\.json[[:space:]]*$/)) {
@@ -128,33 +130,52 @@ done <<< "$structure"
 workstation=opentofu/modules/workstation
 keypair_prefix=/ec2/keypair/
 keypair_arn='arn:*:ssm:*:*:parameter${local.keypair_parameter_prefix}*'
-keypair_actions="ssm:GetParameter ssm:GetParameters ssm:GetParameterHistory"
-keypair_actions_text="ssm:GetParameter, ssm:GetParameters and ssm:GetParameterHistory"
+keypair_actions=(ssm:GetParameter ssm:GetParameters ssm:GetParameterHistory)
+keypair_actions_text="${keypair_actions[*]:0:${#keypair_actions[@]}-1}"
+keypair_actions_text="${keypair_actions_text// /, } and ${keypair_actions[-1]}"
 grep -qE "^[[:space:]]*keypair_parameter_prefix[[:space:]]*=[[:space:]]*\"$keypair_prefix\"[[:space:]]*\$" "$workstation/main.tf" ||
     fail "$workstation/main.tf: local.keypair_parameter_prefix is not \"$keypair_prefix\""
 awk '/^resource "aws_ssm_parameter" "private_key"/,/^}/' "$workstation/keypair.tf" |
     grep -qE '^[[:space:]]*name[[:space:]]*=[[:space:]]*"\$\{local\.keypair_parameter_prefix\}' ||
     fail "$workstation/keypair.tf: the name of aws_ssm_parameter does not start with \${local.keypair_parameter_prefix}"
-# deny_doc <resources> <Action>...: その resources だけで、Action を全部持つ Deny の statement の文書の名前
-deny_doc() {
+# deny_docs <resources> <Action>...: workstation モジュールの中で、その resources だけで Action を全部 (語で) 持つ Deny の statement の文書の名前
+deny_docs() {
     local resources=$1
     shift
-    awk -F '\t' -v res="$resources" -v want="$*" '
-        $3 == "Deny" && $5 == res {
+    awk -F '\t' -v dir="$workstation/" -v res="$resources" -v want="$*" '
+        index($1, dir) == 1 && $3 == "Deny" && $5 == res {
             n = split(want, w, " "); ok = 1
-            for (i = 1; i <= n; i++) if ((" " $4 " ") !~ (" " w[i] " ")) ok = 0
-            if (ok) { print $2; exit }
-        }' <<< "$statements"
+            for (i = 1; i <= n; i++) if (!index(" " $4 " ", " " w[i] " ")) ok = 0
+            if (ok) print $2
+        }' <<< "$statements" | sort -u
 }
-# shellcheck disable=SC2086 # Action は空白で分ける
-keypair_doc=$(deny_doc "$keypair_arn" $keypair_actions)
-bypath_doc=$(deny_doc "*" ssm:GetParametersByPath)
-[ -n "$keypair_doc" ] ||
-    fail "$workstation/iam.tf: no Deny statement of $keypair_actions_text on $keypair_arn"
-[ -n "$bypath_doc" ] || fail "$workstation/iam.tf: no Deny statement of ssm:GetParametersByPath on *"
-for doc in $(printf '%s\n' "$keypair_doc" "$bypath_doc" | sort -u); do
-    grep -qxF "aws_iam_role.instance $doc" <<< "$role_policies" ||
-        fail "$workstation/iam.tf: the keypair Deny (data.aws_iam_policy_document.$doc) is not attached to aws_iam_role.instance"
+# attached_doc <文書の名前>...: そのうち、workstation モジュールの aws_iam_role_policy でインスタンスのロールに付いているもの
+attached_doc() {
+    local doc
+    for doc in "$@"; do
+        if grep -qE "^$workstation/[^ ]+ aws_iam_role\.instance $doc\$" <<< "$role_policies"; then
+            echo "$doc"
+            return
+        fi
+    done
+}
+unattached=""
+for kind in keypair bypath; do
+    if [ "$kind" = keypair ]; then
+        mapfile -t docs < <(deny_docs "$keypair_arn" "${keypair_actions[@]}")
+        missing="no Deny statement of $keypair_actions_text on $keypair_arn"
+    else
+        mapfile -t docs < <(deny_docs "*" ssm:GetParametersByPath)
+        missing="no Deny statement of ssm:GetParametersByPath on *"
+    fi
+    if [ "${#docs[@]}" = 0 ]; then
+        fail "$workstation/iam.tf: $missing"
+    elif [ -z "$(attached_doc "${docs[@]}")" ]; then
+        unattached+="${docs[0]}"$'\n'
+    fi
+done
+for doc in $(sort -u <<< "$unattached"); do
+    fail "$workstation/iam.tf: the keypair Deny (data.aws_iam_policy_document.$doc) is not attached to aws_iam_role.instance"
 done
 
 # 名前: テンプレートの ManagedPolicyName、codepipeline.yaml の条件の ARN (全部の出現)、config の permissions_boundary_name
