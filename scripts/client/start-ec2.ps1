@@ -22,6 +22,12 @@ $ErrorActionPreference = "Stop"
 
 # AWS CLI path
 $awsCli = (Get-Command aws -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+if (-not $awsCli) {
+    Write-Host "Error: AWS CLI v2 (aws) is not installed or not in PATH." -ForegroundColor Red
+    Write-Host "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" -ForegroundColor Yellow
+    Write-Host "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded." -ForegroundColor Yellow
+    exit 1
+}
 
 # aws の警告を stderr に UTF-8 (BOM なし) で書く (日本語の Windows の既定の cp932 にしない)
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -148,12 +154,6 @@ try {
         $Region = if ([string]::IsNullOrWhiteSpace($answer)) { "ap-northeast-1" } else { $answer }
     }
 
-if (-not $awsCli) {
-    Write-Host "Error: AWS CLI v2 (aws) is not installed or not in PATH." -ForegroundColor Red
-    Write-Host "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" -ForegroundColor Yellow
-    Write-Host "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded." -ForegroundColor Yellow
-    exit 1
-}
     Write-ScriptLog "Checking EC2 instance state..."
 
     # Name タグからインスタンス ID を引く (AMI 更新のたびにインスタンスが作り直されて ID が変わるため)

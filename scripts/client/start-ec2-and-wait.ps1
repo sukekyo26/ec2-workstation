@@ -26,7 +26,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 # AWS CLI path
-$awsCli = (Get-Command aws -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+$awsCli = (Get-Command aws -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Path
 
 # stderr writer for ProxyCommand environment (UTF8 without BOM)
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
