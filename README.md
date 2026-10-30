@@ -706,6 +706,7 @@ ec2-workstation/
 │   ├── stacks/
 │   │   ├── network/              # network の state のルート
 │   │   └── workstations/         # ユーザーごとの state のルート（workspace = ユーザー。VPC は Name タグで引く）
+│   │       └── tests/            # tofu test: モジュールのロールとポリシーを permissions boundary と照らす（AWS には出ない）
 │   └── README.md                 # OpenTofu 利用ガイド
 ├── cloudformation/               # state のバケット（state-bucket.yaml）と、CodePipeline で deploy するテンプレートと buildspec（AWS だけで deploy する場合）
 ├── scripts/
@@ -744,7 +745,7 @@ ec2-workstation/
 ## 🧪 テスト
 
 ```bash
-# GitHub Actions の CI と同じチェックを一括実行（OpenTofu の fmt・validate、デプロイのスクリプトのテストなど）
+# GitHub Actions の CI と同じチェックを一括実行（OpenTofu の fmt・validate・test、デプロイのスクリプトのテストなど）
 just ci
 ```
 

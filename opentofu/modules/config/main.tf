@@ -21,7 +21,7 @@ output "resource_prefix" {
 }
 
 # モジュールが作る IAM のロールの permissions boundary の名前 (cloudformation/permissions-boundary.yaml が作る)。
-# 同じ名前を cloudformation/codepipeline.yaml の条件も使う (scripts/check-permissions-boundary.sh がそろうことを見る)
+# 同じ名前を cloudformation/codepipeline.yaml の条件も使う (opentofu/stacks/workstations/tests/boundary.tftest.hcl がそろうことを見る)
 output "permissions_boundary_name" {
   description = "Name of the permissions boundary policy of the module roles"
   value       = "${local.resource_prefix}-permissions-boundary"

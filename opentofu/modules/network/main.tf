@@ -94,7 +94,7 @@ resource "aws_iam_role" "flow_logs" {
   permissions_boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary_name}"
 }
 
-# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (scripts/check-permissions-boundary.sh が CI で見る。Resource の広さは見ない)
+# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (opentofu/stacks/workstations/tests/boundary.tftest.hcl が CI で見る。Resource の広さは見ない)
 data "aws_iam_policy_document" "flow_logs_write" {
   statement {
     effect = "Allow"

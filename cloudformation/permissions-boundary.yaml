@@ -14,19 +14,22 @@ Parameters:
 
 Resources:
   # LIMIT: the union of the module roles' permissions (instance, scheduler, flow logs), not one boundary per role.
-  # When a module policy gets an action, add it here too (scripts/check-permissions-boundary.sh checks the actions in CI,
-  # not the resources). One action per line: the check reads lines
+  # When a module policy gets an action, add it here too (opentofu/stacks/workstations/tests/boundary.tftest.hcl checks
+  # the actions in CI, not the resources). The test reads this file with yamldecode, which does not read the short-form
+  # tags (!Sub, !Ref): write the intrinsic functions in the long form (Fn::Sub:, Ref:)
   # The region is *: the apply role's WritePolicy already limits where roles are made. A region here that differs from
   # awsRegion would let the apply pass and silently stop the auto stop and the logs
   PermissionsBoundary:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub ${ProjectName}-${Environment}-permissions-boundary
-      Description: !Sub Upper limit of the IAM roles that OpenTofu makes for ${ProjectName}-${Environment}
+      ManagedPolicyName:
+        Fn::Sub: ${ProjectName}-${Environment}-permissions-boundary
+      Description:
+        Fn::Sub: Upper limit of the IAM roles that OpenTofu makes for ${ProjectName}-${Environment}
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
-          # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the check reads it).
+          # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the test reads it).
           # LIMIT: when AWS adds actions to that policy in a new version, add them here
           # LIMIT: when that policy adds an action that reads parameter values, also add it to the keypair Deny in opentofu/modules/workstation/iam.tf
           - Sid: AmazonSSMManagedInstanceCore
@@ -65,14 +68,16 @@ Resources:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource:
-              - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              - Fn::Sub: arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
           # The daily stop (scheduler role). LIMIT: any instance of the account in any region; the role's own policy names the one instance
           - Effect: Allow
             Action:
               - ec2:StopInstances
-            Resource: !Sub arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
 
 Outputs:
   PermissionsBoundaryArn:
     Description: The boundary's ARN (OpenTofu builds the same ARN from the name)
-    Value: !Ref PermissionsBoundary
+    Value:
+      Ref: PermissionsBoundary

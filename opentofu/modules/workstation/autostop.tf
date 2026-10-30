@@ -60,7 +60,7 @@ resource "aws_iam_role" "scheduler" {
   }
 }
 
-# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (scripts/check-permissions-boundary.sh が CI で見る。Resource の広さは見ない)
+# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (opentofu/stacks/workstations/tests/boundary.tftest.hcl が CI で見る。Resource の広さは見ない)
 data "aws_iam_policy_document" "scheduler_stop" {
   statement {
     effect    = "Allow"
