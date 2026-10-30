@@ -39,7 +39,7 @@ function Write-Stderr {
     $stderrWriter.WriteLine($Message)
 }
 
-# 下の try の外で止める (catch は認証の案内を出すが、aws が無いのは認証と関係ない)
+# 下の try の外で止める (catch は条件つきの認証の案内を付けるが、aws が無いのはそれと関係ない)
 if (-not $awsCli) {
     Write-Stderr "Error: AWS CLI v2 (aws) is not installed or not in PATH."
     Write-Stderr "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
@@ -52,22 +52,8 @@ function Write-ScriptLog {
     Write-Stderr "[$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')] $Message"
 }
 
-function Write-AwsAuthenticationError {
-    Write-Stderr ""
-    Write-Stderr "============================================"
-    Write-Stderr "ERROR: AWS authentication failed"
-    Write-Stderr "============================================"
-    Write-Stderr ""
-    Write-Stderr "Your AWS credentials may be expired or not configured."
-    Write-Stderr ""
-    Write-Stderr "Please run the following command to authenticate:"
-    Write-Stderr ""
-    Write-Stderr "    aws login"
-    Write-Stderr ""
-    Write-Stderr "Then try connecting again."
-    Write-Stderr "============================================"
-    Write-Stderr ""
-}
+# 名前の引き・状態の引き・SSM の問い合わせ (続けて 3 回) の失敗の文の後に付ける。理由は aws の文にしか無いので、言い切らない
+$awsLoginHint = "  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again."
 
 # aws を呼び、成功なら stdout の行だけを返す。失敗 (rc≠0) なら stderr の行を付けて throw する。
 # stdout は SSH の通信路なので、呼ぶ所は戻り値を必ず受けるか捨てる。成功のときの stderr の警告は stderr にそのまま流す
@@ -80,7 +66,10 @@ function Invoke-AwsCli {
     $ErrorActionPreference = 'Continue'
     $all = & $awsCli @Arguments 2>&1
     $exitCode = $LASTEXITCODE
-    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object {
+            # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
+            if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+        } | Where-Object { $_.Trim() })
     $stdout = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
     if ($exitCode -ne 0) {
         throw "${Description}: $($stderr -join ' ')"
@@ -120,8 +109,7 @@ function Wait-SSMAgentReady {
         } catch {
             $failures++
             if ($failures -ge $MaxFailures) {
-                Write-AwsAuthenticationError
-                throw "$_ ($MaxFailures times in a row)"
+                throw "$_ ($MaxFailures times in a row)`n$awsLoginHint"
             }
             Write-ScriptLog "Failed to check the SSM Agent (attempt $i/$MaxRetries, failure $failures/$MaxFailures), retrying: $_"
             Start-Sleep -Seconds $RetryIntervalSeconds
@@ -162,9 +150,8 @@ try {
             '--filters', "Name=tag:Name,Values=$InstanceName", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
             '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
     } catch {
-        # 認証エラーの可能性があるためメッセージを表示
-        Write-AwsAuthenticationError
-        throw
+        # 資格情報の切れでも起きるので、条件つきの案内を付ける
+        throw "$_`n$awsLoginHint"
     }
 
     $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
@@ -179,8 +166,7 @@ try {
             'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
             '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
     } catch {
-        Write-AwsAuthenticationError
-        throw
+        throw "$_`n$awsLoginHint"
     }
 
     Write-ScriptLog "Instance $InstanceId state: $state"

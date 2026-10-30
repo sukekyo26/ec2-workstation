@@ -21,22 +21,10 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" >&2
 }
 
-# AWS認証エラーメッセージを表示
-show_aws_authentication_error() {
-    echo "" >&2
-    echo "============================================" >&2
-    echo "ERROR: AWS authentication failed" >&2
-    echo "============================================" >&2
-    echo "" >&2
-    echo "Your AWS credentials may be expired or not configured." >&2
-    echo "" >&2
-    echo "Please run the following command to authenticate:" >&2
-    echo "" >&2
-    echo "    aws login" >&2
-    echo "" >&2
-    echo "Then try connecting again." >&2
-    echo "============================================" >&2
-    echo "" >&2
+# 名前の引き・状態の引き・SSM の問い合わせ (続けて 3 回) の失敗の文の後に付ける。理由は aws の文にしか無いので、言い切らない。
+# ps1 と同じ行にするため、log の時刻を付けない
+show_aws_login_hint() {
+    echo "  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again." >&2
 }
 
 # SSM Agentの接続状態を確認して待機する。問い合わせの一時的な失敗 (スロットリング・ネットワークの断) は待って問い合わせ直し、
@@ -73,8 +61,8 @@ wait_ssm_agent_ready() {
         else
             failures=$((failures + 1))
             if [ "$failures" -ge "$max_failures" ]; then
-                show_aws_authentication_error
                 log "Error: Failed to check the SSM Agent of $instance_id $max_failures times in a row (the aws error is above)"
+                show_aws_login_hint
                 return 1
             fi
             log "Failed to check the SSM Agent (attempt $i/$max_retries, failure $failures/$max_failures), retrying"
@@ -114,8 +102,8 @@ if ! INSTANCE_IDS=$(aws ec2 describe-instances \
     --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" \
     --query "Reservations[].Instances[].InstanceId" \
     --output text); then
-    show_aws_authentication_error
     log "Error: Failed to look up instance (the aws error is above)"
+    show_aws_login_hint
     exit 1
 fi
 
@@ -133,9 +121,9 @@ if ! STATE=$(aws ec2 describe-instances \
     --region "$REGION" \
     --query "Reservations[0].Instances[0].State.Name" \
     --output text); then
-    # 認証エラーの可能性があるためメッセージを表示
-    show_aws_authentication_error
+    # 資格情報の切れでも起きるので、条件つきの案内を付ける
     log "Error: Failed to get instance state (the aws error is above)"
+    show_aws_login_hint
     exit 1
 fi
 
