@@ -22,7 +22,7 @@ tool_version() {
         echo -e "${RED}Error: ${label} failed to run: '$(command -v "$command") --version' exited with code ${rc}.${NC}"
         sed -e '/^[[:space:]]*$/d' -e 's/^/    /' <<< "$TOOL_VERSION"
         echo -e "${YELLOW}  Reinstall it, or fix PATH so that a working one comes first.${NC}"
-        return 1
+        exit 1
     fi
 }
 
