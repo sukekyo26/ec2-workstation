@@ -35,7 +35,7 @@ function Get-ToolVersion {
                 "$_"
             }
         } | Where-Object { $_.Trim() })
-    if ($LASTEXITCODE -ne 0) {
+    if ($LASTEXITCODE -ne 0 -or @(& $Path --version 2>&1 | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] }).Count) {
         Write-Host "Error: $Label failed to run: '$Path --version' exited with code $LASTEXITCODE." -ForegroundColor Red
         foreach ($line in $output) {
             Write-Host "    $line" -ForegroundColor Yellow
@@ -80,7 +80,7 @@ if (-not $ssmPlugin) {
     Write-Host "  Note: After installation, you may need to restart PowerShell or add the plugin to PATH." -ForegroundColor Yellow
     $hasError = $true
 } else {
-    $ssmVersion = Get-ToolVersion -Label 'Session Manager Plugin (session-manager-plugin)' -Path $ssmPlugin
+    $ssmVersion = Get-ToolVersion -Label 'Session Manager Plugin (session-manager-plugin)' -Path 'session-manager-plugin'
     if ($null -eq $ssmVersion) {
         $hasError = $true
     } else {
