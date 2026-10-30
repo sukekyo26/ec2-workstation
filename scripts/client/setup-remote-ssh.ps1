@@ -22,6 +22,30 @@ function ConvertTo-SshHostName {
 }
 $hostNameRule = "Host name must start with a lowercase letter, end with a letter or number, and contain only lowercase letters, numbers, hyphens, and underscores."
 
+# Runs <Path> --version. Returns its output on one line ('' when there is none) when it exits 0; otherwise prints the
+# error with all of the output and returns $null. Only the exit code decides: 5.1 turns stderr lines into ErrorRecords
+# even on success (AWS CLI v1 prints its version on stderr)
+function Get-ToolVersion {
+    param([string]$Label, [string]$Path)
+    $output = @(& $Path --version 2>&1 | ForEach-Object {
+            if ($_ -is [System.Management.Automation.ErrorRecord]) {
+                # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
+                if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+            } else {
+                "$_"
+            }
+        } | Where-Object { $_.Trim() })
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Error: $Label failed to run: '$Path --version' exited with code $LASTEXITCODE." -ForegroundColor Red
+        foreach ($line in $output) {
+            Write-Host "    $line" -ForegroundColor Yellow
+        }
+        Write-Host "  Reinstall it, or fix PATH so that a working one comes first." -ForegroundColor Yellow
+        return $null
+    }
+    return ($output -join ' ')
+}
+
 # ============================================
 # Prerequisites Check
 # ============================================
@@ -40,19 +64,28 @@ if (-not $awsCli) {
     Write-Host "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded." -ForegroundColor Yellow
     $hasError = $true
 } else {
-    $awsVersion = & $awsCli --version 2>&1
-    Write-Host "  $awsVersion - OK" -ForegroundColor Green
+    $awsVersion = Get-ToolVersion -Label 'AWS CLI v2 (aws)' -Path $awsCli
+    if ($null -eq $awsVersion) {
+        $hasError = $true
+    } else {
+        Write-Host "  $awsVersion - OK" -ForegroundColor Green
+    }
 }
 
 # Check Session Manager Plugin (must be in PATH for AWS CLI to use it)
-try {
-    $ssmVersion = & session-manager-plugin --version 2>&1
-    Write-Host "  Session Manager Plugin $ssmVersion - OK" -ForegroundColor Green
-} catch {
+$ssmPlugin = (Get-Command session-manager-plugin -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+if (-not $ssmPlugin) {
     Write-Host "Error: Session Manager Plugin is not installed or not in PATH." -ForegroundColor Red
     Write-Host "  Download: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html" -ForegroundColor Yellow
     Write-Host "  Note: After installation, you may need to restart PowerShell or add the plugin to PATH." -ForegroundColor Yellow
     $hasError = $true
+} else {
+    $ssmVersion = Get-ToolVersion -Label 'Session Manager Plugin (session-manager-plugin)' -Path $ssmPlugin
+    if ($null -eq $ssmVersion) {
+        $hasError = $true
+    } else {
+        Write-Host "  Session Manager Plugin $ssmVersion - OK" -ForegroundColor Green
+    }
 }
 
 # Exit if any prerequisite is missing
