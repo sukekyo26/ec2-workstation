@@ -52,7 +52,7 @@ function Get-ToolVersion {
             Write-Host "    $line" -ForegroundColor Yellow
         }
         Write-Host "  Reinstall it, or fix PATH so that a working one comes first." -ForegroundColor Yellow
-        exit 1
+        return $null
     }
     return ($output -join ' ')
 }
@@ -76,7 +76,7 @@ if (-not $awsCli) {
     $hasError = $true
 } else {
     $awsVersion = Get-ToolVersion -Label 'AWS CLI v2 (aws)' -Path $awsCli
-    if (-not $awsVersion) {
+    if ($null -eq $awsVersion) {
         $hasError = $true
     } else {
         Write-Host "  $awsVersion - OK" -ForegroundColor Green
