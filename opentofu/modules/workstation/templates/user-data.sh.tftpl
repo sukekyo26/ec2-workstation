@@ -162,7 +162,38 @@ prepare_data_fs() {
             ;;
     esac
 }
+# fstab に <source> <target> <type> の行が無ければ足す。同じマウント先に別の行があれば、上書きせずに止める。
+# fstab の読み方 (コメント・空白・\040) は、mount と同じ libmount を使う findmnt に任せる
+# (scripts/tests/fstab-entry.test.sh が取り出して確かめる)
+ensure_fstab_entry() {
+    local source=$1 target=$2 type=$3 options=$4 pass=$5 entries line
+    # findmnt は「無い」も「読めない」も 1 を返し、無ければシェルが 127 を返す。どちらも「行が無い」と取り違えないよう先に確かめる
+    if ! command -v findmnt > /dev/null; then
+        echo "ERROR: findmnt (util-linux) is not installed, so the user-data cannot read $FSTAB. Install util-linux, then run the user-data again as the README describes." >&2
+        exit 1
+    fi
+    if [ ! -r "$FSTAB" ]; then
+        echo "ERROR: $FSTAB does not exist or cannot be read. Check it on the instance, then run the user-data again as the README describes." >&2
+        exit 1
+    fi
+    # 同じ行が後ろにあっても、前の別の行が mount と systemd に使われるので、引いた行をすべて比べる。
+    # 型は -t で比べない (libmount は先頭の no を否定と読み、-t none は none 以外の型すべてになる)
+    # LIMIT: -r の出力では空白が \x20 になるので、source に空白があると同じ行でも違うとして止まる。
+    # 今の user-data は空白の入ったパスを書かない。ホームのパスに空白が入るようになったら直す
+    if entries=$(findmnt --fstab --tab-file "$FSTAB" -n -r -o SOURCE,FSTYPE -M "$target"); then
+        while read -r line; do
+            if [ "$line" != "$source $type" ]; then
+                findmnt --fstab --tab-file "$FSTAB" -n -r -o SOURCE,TARGET,FSTYPE,OPTIONS -M "$target" >&2
+                echo "ERROR: $FSTAB already has the entry above for $target, which is not \"$source $target $type\". The user-data does not overwrite it: remove that line from $FSTAB on the instance, then run the user-data again as the README describes." >&2
+                exit 1
+            fi
+        done <<< "$entries"
+        return 0
+    fi
+    echo "$source $target $type $options 0 $pass" >> "$FSTAB"
+}
 DATA_MOUNT=/data
+FSTAB=/etc/fstab
 # 既定ユーザーは cloud-init が user-data より前に作る
 if ! DEFAULT_PASSWD=$(getent passwd "$DEFAULT_USER"); then
     echo "ERROR: login user '$DEFAULT_USER' does not exist. Fix login_user for this OS in opentofu/modules/workstation/os-images.json." >&2
@@ -228,9 +259,7 @@ fi
 DATA_UUID=$(blkid -o value -s UUID "$DATA_DEVICE")
 
 mkdir -p "$DATA_MOUNT"
-if ! grep -q "$DATA_UUID" /etc/fstab; then
-    echo "UUID=$DATA_UUID $DATA_MOUNT ext4 defaults,nofail 0 2" >> /etc/fstab
-fi
+ensure_fstab_entry "UUID=$DATA_UUID" "$DATA_MOUNT" ext4 defaults,nofail 2
 mountpoint -q "$DATA_MOUNT" || mount "$DATA_MOUNT"
 # ボリュームを拡張した場合に追従する (サイズが同じなら何もしない)
 resize2fs "$DATA_DEVICE"
@@ -262,9 +291,7 @@ for target in "$DEFAULT_HOME/work:work" /var/lib/docker:docker /var/lib/containe
     if [ "$mount_point" = "$DEFAULT_HOME/work" ] && ! mountpoint -q "$mount_point"; then
         chattr +i "$mount_point"
     fi
-    if ! grep -q " $mount_point none bind" /etc/fstab; then
-        echo "$source_dir $mount_point none bind,nofail,x-systemd.requires-mounts-for=$DATA_MOUNT 0 0" >> /etc/fstab
-    fi
+    ensure_fstab_entry "$source_dir" "$mount_point" none "bind,nofail,x-systemd.requires-mounts-for=$DATA_MOUNT" 0
     mountpoint -q "$mount_point" || mount "$mount_point"
 done
 chown "$DEFAULT_USER:$DEFAULT_USER" "$DEFAULT_HOME/work"
