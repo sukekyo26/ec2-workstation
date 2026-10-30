@@ -20,13 +20,14 @@ data "aws_ssm_parameter" "ami" {
 }
 
 resource "aws_instance" "this" {
-  ami                         = data.aws_ssm_parameter.ami.insecure_value
-  instance_type               = var.instance_type
-  subnet_id                   = var.subnet_id
-  vpc_security_group_ids      = [aws_security_group.this.id]
-  iam_instance_profile        = aws_iam_instance_profile.this.name
-  key_name                    = aws_key_pair.this.key_name
-  associate_public_ip_address = true
+  ami                    = data.aws_ssm_parameter.ami.insecure_value
+  instance_type          = var.instance_type
+  subnet_id              = var.subnet_id
+  vpc_security_group_ids = [aws_security_group.this.id]
+  iam_instance_profile   = aws_iam_instance_profile.this.name
+  key_name               = aws_key_pair.this.key_name
+  # associate_public_ip_address は書かない。停止中は自動の public IP が外れて false と読まれ、ForceNew のため作り直しの差分になる。
+  # public IP はサブネットの map_public_ip_on_launch で付く (modules/network/main.tf)
   # cloud-init は同じインスタンスでは user-data を走らせ直さないため、変わったら作り直して反映する
   user_data_replace_on_change = true
   # EC2 の user-data は base64 にする前で 16KB まで。cloud-init は gzip を見分けて展開するので、gzip して渡す
