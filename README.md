@@ -420,7 +420,7 @@ export TF_STATE_BUCKET=<your-state-bucket>
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
 - GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install/install-tofu.sh` で `scripts/lib/tools.sh` の `TOFU_VERSION` の OpenTofu を入れて `.tools/tofu-<版>` を PATH の先頭に足し（CodePipeline の buildspec と GitHub Actions の `.github/actions/install-tofu` と同じ）、`scripts/install/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
-- VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームはスナップショットが残ります）
+- VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームも消え、中のデータは取り戻せません。先に退避してください。「🗑️ インフラの削除」の注意を参照）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
 
@@ -642,7 +642,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\client\start-ec2.p
 
 端末で実行したときは、workstations（全員分をまとめて 1 回）・network の段ごとに消すものの要約を出し、`yes` と打つまで消しません。前の版で作った環境が残っている（同じ名前の VPC があるのに state が空）ときは、何も消さずに止まります（前の版で `tofu destroy` してください）。GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
 
-> ⚠️ データボリュームは削除時に最終スナップショット（`final_snapshot`）を作成してから削除されます。復元が不要になったらスナップショットを手動で削除してください（残している間は課金されます）。ルートボリュームはスナップショットを残さず削除されます。
+> ⚠️ ユーザーを設定から消したとき、`scripts/tofu-destroy.sh` で消したとき、VPC を作り直したときは、データボリュームも消えます。スナップショットは残さないので、中のデータ（`~/work`・Docker・`~/.gitconfig`）は取り戻せません。残したいものは、先に退避してください。ルートボリュームも、スナップショットを残さずに消えます。この版より前に作ったデータボリュームは、`final_snapshot` の更新（この版の後の最初の apply で出ます）が通るまで、消すときにスナップショットを取ります。残ったスナップショットは、手で消してください（gp2 のボリュームでは、この更新が通らないことがあります）。
 
 ---
 
