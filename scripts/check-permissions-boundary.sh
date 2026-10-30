@@ -3,8 +3,8 @@
 # boundary の名前がテンプレート・codepipeline.yaml・config の 3 か所でそろうことを確かめる。AWS には触らない。
 # boundary から漏れた権限は、apply は通るのに実行のときに黙って効かないため
 # LIMIT: Action だけを見て、Resource の広さは見ない。HCL・YAML を正しく読まず、決まった書き方に頼る (boundary の Action は
-# 1 行に 1 つ、信頼ポリシーの policy_document の名前は _assume で終わる、インラインのポリシーは policy_document から渡す)。
-# 外れた書き方は、読めた集合が空になるか、policy の形の検査で落ちる。ただし policy_document の actions を変数や concat で
+# 1 行に 1 つ、信頼ポリシーの policy_document の名前は _assume で終わる、ブロックは行の頭の resource "..." と } で区切る)。
+# 外れた書き方は、読めた集合が空になるか、下の作りの検査で落ちる。ただし policy_document の actions を変数や concat で
 # 書くと読み落とす。そう書く必要が出たら、HCL を読む道具で作り直す
 #
 #   scripts/check-permissions-boundary.sh
@@ -48,24 +48,59 @@ while read -r file action; do
     grep -qxF -- "$action" <<< "$boundary_actions" || fail "$file: $action is not in $boundary"
 done <<< "$module_actions"
 
-# インラインのポリシーは policy_document から渡す (ほかの形の Action は上で読めないため)
-while IFS=: read -r file line; do
-    [ -n "$file" ] || continue
-    fail "$file:$line: the policy of aws_iam_role_policy is not data.aws_iam_policy_document.<name>.json (the check reads Actions only from policy documents)"
-done < <(awk '
-    /^resource "aws_iam_role_policy" "/ { in_policy = 1; next }
-    /^[^[:space:]]/ { in_policy = 0 }
-    in_policy && /^[[:space:]]*policy[[:space:]]*=/ && $0 !~ /=[[:space:]]*data\.aws_iam_policy_document\.[A-Za-z0-9_-]+\.json[[:space:]]*$/ {
-        print FILENAME ":" FNR
+# モジュールの IAM の作りを、検査が読める形に限る。種類ごとに "<種類>\t<ファイル>\t<行>\t<詳しく>" を出す
+# - aws_iam_role は全部 permissions_boundary を持つ
+# - ロールの権限は aws_iam_role_policy (policy_document の json、信頼ポリシーでないもの) と
+#   aws_iam_role_policy_attachment (AWS の管理ポリシーの ARN をそのまま) だけで付ける。ほかの aws_iam_* は読まない
+structure=$(awk '
+    function out(kind, detail) { print kind "\t" FILENAME "\t" FNR "\t" detail }
+    /^resource "/ {
+        split($0, f, "\""); type = f[2]; name = f[4]; start = FNR; has_boundary = 0
+        if (type ~ /^aws_iam_/ && type !~ /^aws_iam_(role|role_policy|role_policy_attachment|instance_profile)$/) out("unread", "resource \"" type "\"")
+        next
+    }
+    /^}/ {
+        if (type == "aws_iam_role" && !has_boundary) print "noboundary\t" FILENAME "\t" start "\t" name
+        type = ""
+        next
+    }
+    /^[^[:space:]]/ { type = "" }
+    type == "aws_iam_role" && /^[[:space:]]*permissions_boundary[[:space:]]*=/ { has_boundary = 1 }
+    type == "aws_iam_role" && /^[[:space:]]*inline_policy[[:space:]]*\{/ { out("unread", "inline_policy of aws_iam_role") }
+    type == "aws_iam_role" && /^[[:space:]]*managed_policy_arns[[:space:]]*=/ { out("unread", "managed_policy_arns of aws_iam_role") }
+    type == "aws_iam_role_policy" && /^[[:space:]]*policy[[:space:]]*=/ {
+        if (match($0, /data\.aws_iam_policy_document\.[A-Za-z0-9_-]+\.json[[:space:]]*$/)) {
+            doc = substr($0, RSTART + 29)
+            sub(/\.json[[:space:]]*$/, "", doc)
+            if (doc ~ /_assume$/) out("assume", doc)
+        } else {
+            out("policy", "")
+        }
+    }
+    type == "aws_iam_role_policy_attachment" && /^[[:space:]]*policy_arn[[:space:]]*=/ {
+        if (match($0, /"arn:aws:iam::aws:policy\/[A-Za-z0-9]+"[[:space:]]*$/)) {
+            arn = substr($0, RSTART + 1, RLENGTH)
+            sub(/".*$/, "", arn)
+            sub(/.*\//, "", arn)
+            out("managed", arn)
+        } else {
+            out("arn", "")
+        }
     }' "${modules[@]}")
-
-# 付ける管理ポリシーは、boundary にその名前の Sid の文がある (中身は AWS の管理ポリシーの写し)
-while IFS=: read -r file name; do
-    [ -n "$name" ] || continue
-    grep -qE "^[[:space:]]*- Sid: ${name}[[:space:]]*$" "$boundary" ||
-        fail "$file: the managed policy $name has no statement with Sid: $name in $boundary"
-done < <(grep -oE 'policy_arn[[:space:]]*=[[:space:]]*"arn:aws:iam::aws:policy/[A-Za-z0-9]+"' "${modules[@]}" |
-    sed -E 's|^([^:]+):.*policy/([A-Za-z0-9]+)"$|\1:\2|')
+while IFS=$'\t' read -r kind file line detail; do
+    case $kind in
+        noboundary) fail "$file:$line: aws_iam_role.$detail has no permissions_boundary" ;;
+        unread) fail "$file:$line: $detail is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)" ;;
+        policy) fail "$file:$line: the policy of aws_iam_role_policy is not data.aws_iam_policy_document.<name>.json (the check reads Actions only from policy documents)" ;;
+        assume) fail "$file:$line: the policy of aws_iam_role_policy is data.aws_iam_policy_document.$detail, which the check skips as a trust policy (*_assume)" ;;
+        arn) fail "$file:$line: the policy_arn of aws_iam_role_policy_attachment is not \"arn:aws:iam::aws:policy/<name>\" (the check cannot read it)" ;;
+        # 付ける管理ポリシーは、boundary にその名前の Sid の文がある (中身は AWS の管理ポリシーの写し)
+        managed)
+            grep -qE "^[[:space:]]*- Sid: ${detail}[[:space:]]*\$" "$boundary" ||
+                fail "$file: the managed policy $detail has no statement with Sid: $detail in $boundary"
+            ;;
+    esac
+done <<< "$structure"
 
 # 名前: テンプレートの ManagedPolicyName、codepipeline.yaml の条件の ARN (全部の出現)、config の permissions_boundary_name
 names() {
