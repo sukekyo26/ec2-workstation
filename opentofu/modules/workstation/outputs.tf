@@ -13,11 +13,6 @@ output "data_volume_id" {
   value       = aws_ebs_volume.data.id
 }
 
-output "session_log_group_name" {
-  description = "SessionManager log group name"
-  value       = aws_cloudwatch_log_group.session_logs.name
-}
-
 output "key_pair_id" {
   description = "Key pair ID (private key is stored at /ec2/keypair/{id} in SSM Parameter Store)"
   value       = aws_key_pair.this.key_pair_id

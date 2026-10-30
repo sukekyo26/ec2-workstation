@@ -442,6 +442,8 @@ Resources:
               - logs:ListTagsLogGroup
             Resource:
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              # LIMIT: /ssm/session-logs is kept so that the apply can delete the log groups the modules no longer make.
+              # Drop it once every deployed environment has applied that change
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
           - Effect: Allow
             Action: cloudwatch:ListTagsForResource
@@ -616,6 +618,8 @@ Resources:
               - logs:UntagLogGroup
             Resource:
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              # LIMIT: /ssm/session-logs is kept so that the apply can delete the log groups the modules no longer make.
+              # Drop it once every deployed environment has applied that change
               - !Sub arn:${AWS::Partition}:logs:${DeployRegion}:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
           # The alarm's EC2 stop action needs this service-linked role. CloudWatch creates it with the first such alarm
           - Effect: Allow
