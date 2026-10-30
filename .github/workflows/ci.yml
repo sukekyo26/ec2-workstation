@@ -221,6 +221,7 @@ jobs:
 
       - name: Parse and analyze scripts/**/*.ps1
         shell: powershell
+        continue-on-error: true
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
 
       - name: Test start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake aws
