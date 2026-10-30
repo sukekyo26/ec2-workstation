@@ -21,8 +21,10 @@ Resources:
   PermissionsBoundary:
     Type: AWS::IAM::ManagedPolicy
     Properties:
-      ManagedPolicyName: !Sub ${ProjectName}-${Environment}-permissions-boundary
-      Description: !Sub Upper limit of the IAM roles that OpenTofu makes for ${ProjectName}-${Environment}
+      ManagedPolicyName:
+        Fn::Sub: ${ProjectName}-${Environment}-permissions-boundary
+      Description:
+        Fn::Sub: Upper limit of the IAM roles that OpenTofu makes for ${ProjectName}-${Environment}
       PolicyDocument:
         Version: "2012-10-17"
         Statement:
@@ -65,14 +67,16 @@ Resources:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource:
-              - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+              - Fn::Sub: arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
           # The daily stop (scheduler role). LIMIT: any instance of the account in any region; the role's own policy names the one instance
           - Effect: Allow
             Action:
               - ec2:StopInstances
-            Resource: !Sub arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
+            Resource:
+              Fn::Sub: arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
 
 Outputs:
   PermissionsBoundaryArn:
     Description: The boundary's ARN (OpenTofu builds the same ARN from the name)
-    Value: !Ref PermissionsBoundary
+    Value:
+      Ref: PermissionsBoundary
