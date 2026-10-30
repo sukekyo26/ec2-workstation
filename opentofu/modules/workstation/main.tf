@@ -6,6 +6,8 @@
 locals {
   resource_prefix = "${var.project_name}-${var.environment}-${var.username}"
 
+  permissions_boundary_arn = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary_name}"
+
   # 最新 AMI は各ディストリビューションが公開する SSM パブリックパラメータから引く。
   # キーと workstation-config.schema.json の definitions.os の enum が一致することは CI が確かめる
   os_image = jsondecode(file("${path.module}/os-images.json"))[var.os]

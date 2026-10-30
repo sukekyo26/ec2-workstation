@@ -260,6 +260,17 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
   - ルートユーザーの場合：追加権限不要
 - AWS CLIバージョン確認：`aws --version`（2.32.0以降推奨）
 - state 保存用 S3 バケット（[cloudformation/state-bucket.yaml](cloudformation/state-bucket.yaml) で作る。手順は [opentofu/README.md](opentofu/README.md)）。暗号化に `SSE-KMS-CMK` を選んだときは、state を読み書きする主体に、その鍵（出力 `StateKmsKeyArn`）の `kms:Decrypt`・`kms:GenerateDataKey`。デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）、`scripts/tofu-destroy.sh` を回す主体、`tofu output workstations` で `instance_name` を引く利用者（接続の設定の前）のどれも state を読みます
+- モジュールが作る IAM のロールの permissions boundary（[cloudformation/permissions-boundary.yaml](cloudformation/permissions-boundary.yaml) で作る。名前は `<projectName>-<environment>-permissions-boundary`）。無いまま deploy すると、ロールを作る所で止まります。`ProjectName`・`Environment` は `workstation-config.json` の `projectName`・`environment`（CodePipeline のスタックと同じ値）にそろえます
+
+  ```bash
+  aws cloudformation deploy \
+    --template-file cloudformation/permissions-boundary.yaml \
+    --stack-name ec2-workstation-permissions-boundary \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --parameter-overrides ProjectName=<projectName> Environment=<environment>
+  ```
+
+- デプロイする主体に `iam:PutRolePermissionsBoundary`（対象: `arn:aws:iam::<account-id>:role/<projectName>-<environment>-*`）。boundary の付いていないモジュールのロールに boundary を付けるため
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
@@ -470,6 +481,7 @@ HTTPS で push する場合は、IAM ユーザーに CodeCommit 用の Git の�
 注意:
 
 - 権限は段ごとに分かれています。Check は deploy の権限を持たず、plan の段は読むだけ（と state への書き込み）、apply の段だけが作る・消す権限を持ちます。Check は承認の前に、push されたどのコミットでも走るので、アーティファクトのバケットはソース（`Source`）しか読めません
+- apply の段は、permissions boundary（`<projectName>-<environment>-permissions-boundary`）の付いた IAM のロールしか作れず、変えられません。boundary のスタック（上の「AWS環境」）を先に作ってください
 - plan のファイルには、state と同じく秘密鍵が入ります。アーティファクトのバケットは、このスタックが作る KMS のキーで暗号化し、パイプライン・plan・apply のロールだけが読めます。plan の段も、refresh のために SSM パラメータの秘密鍵を読めます
 - 手元の `scripts/tofu-deploy.sh` など、ほかの deploy と同時に流さないでください（state はロックされますが、片方の plan が古くなって apply で止まります）
 - PowerShell の検査: 利用者が使う PowerShell は Windows PowerShell 5.1 か PowerShell 7 です。Check の段は、版を固定した PowerShell 7（`scripts/install/install-pwsh.sh`）と PSScriptAnalyzer（`scripts/install/install-psscriptanalyzer.sh`）で、構文と PSScriptAnalyzer の規則を見ます。5.1 と 7 の両方で使える書き方かは、互換性の規則（`PSUseCompatibleSyntax`、対象 5.1・7）で見ます。5.1 の Parser そのものでの検査（BOM の無いファイルの読み違えなど、5.1 の読み方に頼る所）は、GitHub Actions の `PowerShell 5.1` のジョブだけが行います。AWS だけで使う場合は、この分の検査がありません。Check の段は pwsh が無ければ飛ばさずに止まり（`EC2WS_REQUIRE_PWSH=yes`）、ログに `PowerShell 7.x (Core), PSScriptAnalyzer x` と `checked N file(s)` の行が出ます

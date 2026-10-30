@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  ec2-workstation: the permissions boundary that every IAM role of the OpenTofu modules gets
+  (<projectName>-<environment>-permissions-boundary). The deploy principal of cloudformation/codepipeline.yaml can make
+  and change those roles only with this boundary. See the README section "AWS環境".
+
+Parameters:
+  ProjectName:
+    Type: String
+    Description: projectName in workstation-config.json (the same as the pipeline stack's ProjectName)
+  Environment:
+    Type: String
+    Description: environment in workstation-config.json (the same as the pipeline stack's Environment)
+
+Resources:
+  # LIMIT: the union of the module roles' permissions (instance, scheduler, flow logs), not one boundary per role.
+  # When a module policy gets an action, add it here too (scripts/check-permissions-boundary.sh checks the actions in CI,
+  # not the resources). One action per line: the check reads lines
+  # The region is *: the apply role's WritePolicy already limits where roles are made. A region here that differs from
+  # awsRegion would let the apply pass and silently stop the auto stop and the logs
+  PermissionsBoundary:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      ManagedPolicyName: !Sub ${ProjectName}-${Environment}-permissions-boundary
+      Description: !Sub Upper limit of the IAM roles that OpenTofu makes for ${ProjectName}-${Environment}
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the check reads it).
+          # LIMIT: when AWS adds actions to that policy in a new version, add them here
+          - Sid: AmazonSSMManagedInstanceCore
+            Effect: Allow
+            Action:
+              - ssm:DescribeAssociation
+              - ssm:GetDeployablePatchSnapshotForInstance
+              - ssm:GetDocument
+              - ssm:DescribeDocument
+              - ssm:GetManifest
+              - ssm:GetParameter
+              - ssm:GetParameters
+              - ssm:ListAssociations
+              - ssm:ListInstanceAssociations
+              - ssm:PutInventory
+              - ssm:PutComplianceItems
+              - ssm:PutConfigurePackageResult
+              - ssm:UpdateAssociationStatus
+              - ssm:UpdateInstanceAssociationStatus
+              - ssm:UpdateInstanceInformation
+              - ssmmessages:CreateControlChannel
+              - ssmmessages:CreateDataChannel
+              - ssmmessages:OpenControlChannel
+              - ssmmessages:OpenDataChannel
+              - ec2messages:AcknowledgeMessage
+              - ec2messages:DeleteMessage
+              - ec2messages:FailMessage
+              - ec2messages:GetEndpoint
+              - ec2messages:GetMessages
+              - ec2messages:SendReply
+            Resource: "*"
+          # The session logs (instance role) and the flow logs (flow log role). The group names are the WritePolicy's:
+          # LIMIT: the flow log group has no "-" after the environment, so an environment that prefixes another (dev, dev-x) reaches both
+          - Effect: Allow
+            Action:
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource:
+              - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
+              - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
+          # The daily stop (scheduler role). LIMIT: any instance of the account in any region; the role's own policy names the one instance
+          - Effect: Allow
+            Action:
+              - ec2:StopInstances
+            Resource: !Sub arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
+
+Outputs:
+  PermissionsBoundaryArn:
+    Description: The boundary's ARN (OpenTofu builds the same ARN from the name)
+    Value: !Ref PermissionsBoundary

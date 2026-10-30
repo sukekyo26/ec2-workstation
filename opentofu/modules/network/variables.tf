@@ -17,3 +17,8 @@ variable "public_subnet_name" {
   description = "Name tag of the public subnet (the workstations root looks the subnet up by it)"
   type        = string
 }
+
+variable "permissions_boundary_name" {
+  description = "Name of the permissions boundary policy that every IAM role of the module gets (cloudformation/permissions-boundary.yaml)"
+  type        = string
+}

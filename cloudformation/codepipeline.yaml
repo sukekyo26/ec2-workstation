@@ -464,8 +464,15 @@ Resources:
             Resource: !Sub arn:${AWS::Partition}:ssm:${DeployRegion}::parameter/aws/service/*
 
   # Writes, only after the approval. Names are scoped to <projectName>-<environment>- where the API allows it.
-  # LIMIT: with iam:CreateRole and iam:PutRolePolicy on that prefix, the apply role can make a strong role under that name.
-  # Closing it needs a permissions boundary on the modules' roles (trouble #11)
+  # The roles under that prefix can be made and changed only with the permissions boundary of
+  # cloudformation/permissions-boundary.yaml, so a role the apply role makes is no stronger than the modules' roles.
+  # LIMIT: what is left open, for a change of design (an SCP, or naming the roles one by one):
+  # - The trust policy has no condition key: a role with the boundary can still trust another account
+  # - iam:PassRole and iam:AddRoleToInstanceProfile have no boundary key: a role under the prefix without the boundary
+  #   (made by hand, left from before the boundary, or of an environment the prefix also matches, like dev and dev-x)
+  #   can still go to an instance
+  # - The provider updates assume_role_policy and max_session_duration before permissions_boundary: an apply that adds the
+  #   boundary to an old role and changes those in the same run is denied before the boundary is set
   WritePolicy:
     Type: AWS::IAM::ManagedPolicy
     Properties:
@@ -527,18 +534,36 @@ Resources:
             Resource: "*"
             Condition:
               StringEquals: { aws:RequestedRegion: !Ref DeployRegion }
+          # Making and changing a role under the prefix needs the boundary
           - Effect: Allow
             Action:
               - iam:CreateRole
-              - iam:DeleteRole
               - iam:UpdateRole
               - iam:UpdateAssumeRolePolicy
+              - iam:PutRolePolicy
+              - iam:PutRolePermissionsBoundary
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+            Condition:
+              StringEquals:
+                iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
+          # The only managed policy the modules attach
+          - Effect: Allow
+            Action: iam:AttachRolePolicy
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+            Condition:
+              ArnEquals: { iam:PolicyARN: !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
+              StringEquals:
+                iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
+          # Deleting widens nothing, so a role without the boundary (made before it, of a user removed from the config) can
+          # still be destroyed. The tags and the instance profiles have no boundary key
+          - Effect: Allow
+            Action:
+              - iam:DeleteRole
+              - iam:DeleteRolePolicy
+              - iam:DetachRolePolicy
               - iam:TagRole
               - iam:UntagRole
               - iam:ListRoleTags
-              - iam:PutRolePolicy
-              - iam:DeleteRolePolicy
-              - iam:DetachRolePolicy
               - iam:CreateInstanceProfile
               - iam:DeleteInstanceProfile
               - iam:AddRoleToInstanceProfile
@@ -548,12 +573,30 @@ Resources:
             Resource:
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
               - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:instance-profile/${ProjectName}-${Environment}-*
-          # The only managed policy the modules attach
-          - Effect: Allow
-            Action: iam:AttachRolePolicy
-            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*
+          # Kept even if a later statement allows IAM without a condition. StringNotEquals is also true when the request has
+          # no boundary (the key is absent), so a role without the boundary or with another one is denied
+          - Effect: Deny
+            Action:
+              - iam:CreateRole
+              - iam:UpdateRole
+              - iam:UpdateAssumeRolePolicy
+              - iam:PutRolePolicy
+              - iam:AttachRolePolicy
+              - iam:PutRolePermissionsBoundary
+            Resource: "*"
             Condition:
-              ArnEquals: { iam:PolicyARN: !Sub "arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore" }
+              StringNotEquals:
+                iam:PermissionsBoundary: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
+          - Effect: Deny
+            Action: iam:DeleteRolePermissionsBoundary
+            Resource: "*"
+          - Effect: Deny
+            Action:
+              - iam:CreatePolicyVersion
+              - iam:DeletePolicy
+              - iam:DeletePolicyVersion
+              - iam:SetDefaultPolicyVersion
+            Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:policy/${ProjectName}-${Environment}-permissions-boundary
           - Effect: Allow
             Action: iam:PassRole
             Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/${ProjectName}-${Environment}-*

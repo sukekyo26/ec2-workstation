@@ -7,6 +7,8 @@ locals {
   public_subnet_cidr = cidrsubnet(var.vpc_cidr, 24 - tonumber(split("/", var.vpc_cidr)[1]), 0)
 }
 
+data "aws_caller_identity" "current" {}
+
 data "aws_availability_zones" "available" {
   state = "available"
 }
@@ -86,11 +88,13 @@ data "aws_iam_policy_document" "flow_logs_assume" {
 }
 
 resource "aws_iam_role" "flow_logs" {
-  name               = "${var.resource_prefix}-flow-log-role"
-  description        = "IAM role for VPC Flow Logs"
-  assume_role_policy = data.aws_iam_policy_document.flow_logs_assume.json
+  name                 = "${var.resource_prefix}-flow-log-role"
+  description          = "IAM role for VPC Flow Logs"
+  assume_role_policy   = data.aws_iam_policy_document.flow_logs_assume.json
+  permissions_boundary = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.permissions_boundary_name}"
 }
 
+# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (scripts/check-permissions-boundary.sh が CI で見る。Resource の広さは見ない)
 data "aws_iam_policy_document" "flow_logs_write" {
   statement {
     effect = "Allow"

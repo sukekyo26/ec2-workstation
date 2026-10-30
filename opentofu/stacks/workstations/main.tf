@@ -12,6 +12,8 @@ module "workstation" {
   environment  = module.config.environment
   username     = each.key
 
+  permissions_boundary_name = module.config.permissions_boundary_name
+
   vpc_id            = data.aws_vpc.this.id
   subnet_id         = data.aws_subnet.public.id
   availability_zone = data.aws_subnet.public.availability_zone

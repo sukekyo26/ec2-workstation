@@ -9,4 +9,6 @@ module "network" {
   vpc_cidr           = module.config.vpc_cidr
   vpc_name           = module.config.vpc_name
   public_subnet_name = module.config.public_subnet_name
+
+  permissions_boundary_name = module.config.permissions_boundary_name
 }
