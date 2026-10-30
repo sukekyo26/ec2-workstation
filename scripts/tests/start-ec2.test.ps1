@@ -9,12 +9,52 @@
     script at once: each run is killed after 10 seconds (EC2WS_SSM_POLL_INTERVAL=1 shortens the wait between SSM checks).
     setup-remote-ssh.ps1 runs with USERPROFILE in the temp directory; its ProxyCommand must not load the user's profile
     (the output would go into the SSH channel).
-    Windows only (the fake is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
+    The check of Wait-SSMAgentReady with an aws that does not start runs on any OS; the rest is Windows only (the fake
+    is a .cmd). Saved with a BOM and ASCII only, like the other scripts.
 #>
 $ErrorActionPreference = 'Stop'
 
+# An aws that does not start fails the same way on every call: Wait-SSMAgentReady of both start-ec2 scripts stops at the
+# first one, without retrying and without the login hint. The function runs alone with Invoke-AwsCli replaced (the fake aws
+# cannot stop starting halfway), so this part runs on any OS
+$ssmFailures = 0
+foreach ($name in @('start-ec2.ps1', 'start-ec2-and-wait.ps1')) {
+    $path = Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'client') $name
+    $definition = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref]$null, [ref]$null).Find({
+            param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Wait-SSMAgentReady' }, $true)
+    $outcome = & {
+        param([string]$Definition)
+        $state = @{ Calls = 0 }
+        # Read by the start-ec2-and-wait.ps1 version of the function
+        Set-Variable -Name awsLoginHint -Value 'HINT'
+        function Write-ScriptLog { param([string]$Message) $null = $Message }
+        function Invoke-AwsCli {
+            param([string]$Description, [string[]]$Arguments)
+            $null = $Arguments
+            $state.Calls++
+            throw [System.Management.Automation.ApplicationFailedException]::new("${Description}: 'aws.exe' could not start: reason")
+        }
+        . ([scriptblock]::Create($Definition))
+        try {
+            Wait-SSMAgentReady -InstanceId 'i-1' -Region 'ap-northeast-1' -RetryIntervalSeconds 0
+            return "returned after $($state.Calls) call(s)"
+        } catch {
+            return "$_ (after $($state.Calls) call(s))"
+        }
+    } $definition.Extent.Text
+    $want = "Failed to check the SSM Agent of i-1: 'aws.exe' could not start: reason (after 1 call(s))"
+    Write-Output "$name SSM, aws does not start: $outcome"
+    if ($outcome -cne $want) {
+        Write-Output "FAIL: $name SSM, aws does not start: want '$want'"
+        $ssmFailures++
+    }
+}
+
 if ($env:OS -ne 'Windows_NT') {
-    Write-Output 'skip start-ec2.test.ps1: the fake aws is a .cmd and runs only on Windows'
+    if ($ssmFailures -ne 0) {
+        exit 1
+    }
+    Write-Output 'skip the rest of start-ec2.test.ps1: the fake aws is a .cmd and runs only on Windows'
     exit 0
 }
 
@@ -77,7 +117,8 @@ $fakeLines = @(
     'if "%what%"=="lookup" if not defined FAKE_LOOKUP_IDS set "FAKE_LOOKUP_IDS=i-0123456789abcdef0"',
     'if "%what%"=="lookup" echo %FAKE_LOOKUP_IDS%',
     'if "%what%"=="state" echo %FAKE_STATE%',
-    'if "%what%"=="keyname" echo ws-keypair',
+    'if "%what%"=="keyname" if defined FAKE_KEYNAME echo %FAKE_KEYNAME%',
+    'if "%what%"=="keyname" if not defined FAKE_KEYNAME echo ws-keypair',
     'if "%what%"=="start-instances" (',
     '    echo {',
     '    echo     "StartingInstances": []',
@@ -127,7 +168,7 @@ $clientDir = Join-Path $root 'scripts\client'
 $waitScript = Join-Path $clientDir 'start-ec2-and-wait.ps1'
 $startScript = Join-Path $clientDir 'start-ec2.ps1'
 $powershell = (Get-Process -Id $PID).Path
-$failures = 0
+$failures = $ssmFailures
 
 function Add-Failure {
     param([string]$Message)
@@ -157,7 +198,7 @@ function Invoke-Case {
     $psi.RedirectStandardInput = $true
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
-    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY', 'FAKE_LOOKUP_IDS', 'FAKE_SESSION_STDERR')) {
+    foreach ($key in @('FAKE_STATE', 'FAKE_FAIL', 'FAKE_SSM_SEQUENCE', 'FAKE_COUNTER', 'FAKE_WARN', 'FAKE_ARGS_LOG', 'FAKE_VERSION_FAIL', 'FAKE_VERSION_STDERR', 'FAKE_VERSION_EMPTY', 'FAKE_LOOKUP_IDS', 'FAKE_SESSION_STDERR', 'FAKE_KEYNAME')) {
         $psi.EnvironmentVariables.Remove($key)
     }
     $psi.EnvironmentVariables['EC2WS_SSM_POLL_INTERVAL'] = '1'
@@ -438,10 +479,13 @@ if ("$(Get-FileText $alphaKey)".Trim() -ne 'FAKE PRIVATE KEY') {
 } else {
     $acl = Get-Acl -LiteralPath $alphaKey
     $rules = @($acl.Access)
-    $userRules = @($rules | Where-Object { $_.IdentityReference.Value -like "*\$env:USERNAME" -and $_.FileSystemRights -eq 'FullControl' })
-    $others = @($rules | Where-Object { $_.IdentityReference.Value -notlike "*\$env:USERNAME" -and $_.IdentityReference.Value -notin @('NT AUTHORITY\SYSTEM', 'BUILTIN\Administrators') })
+    # Compared by SID: S-1-5-18 is SYSTEM, S-1-5-32-544 is Administrators
+    $userSid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    $sids = @($rules | ForEach-Object { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value })
+    $userRules = @(0..($rules.Count - 1) | Where-Object { $sids[$_] -eq $userSid -and $rules[$_].FileSystemRights -eq 'FullControl' })
+    $others = @($sids | Where-Object { $_ -notin @($userSid, 'S-1-5-18', 'S-1-5-32-544') })
     if (-not $acl.AreAccessRulesProtected -or @($rules | Where-Object { $_.IsInherited }).Count -ne 0 -or $userRules.Count -eq 0 -or $others.Count -ne 0) {
-        Add-Failure "setup alpha: want $alphaKey with no inherited access, FullControl for $env:USERNAME and no one else but SYSTEM and Administrators, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
+        Add-Failure "setup alpha: want $alphaKey with no inherited access, FullControl for the user ($userSid) and no one else but SYSTEM and Administrators, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
     }
 }
 if (@(Get-ChildItem -Force -LiteralPath $sshDir -Filter '.*.tmp').Count -ne 0) {
@@ -656,22 +700,31 @@ foreach ($case in @(@{ Name = 'start-ec2-and-wait'; Script = $waitScript; Argume
 # under USERPROFILE is written or changed: the private key of an earlier setup of the host stays as it was
 $zetaKey = Join-Path $sshDir 'ec2_secret_key_zeta.pem'
 [IO.File]::WriteAllText($zetaKey, "OLD KEY`r`n", [Text.Encoding]::ASCII)
+# The checks of what aws returned (one instance, a LoginUser tag, a key pair) stop the same way, with one line
 foreach ($case in @(
-        @{ Fail = 'lookup'; Line = 'Error: Failed to look up instance: fake aws: lookup failed' },
-        @{ Fail = 'state'; Line = "Error: Failed to read the LoginUser tag of ${id}: fake aws: state failed" },
-        @{ Fail = 'keyname'; Line = "Error: Failed to read the key pair name of ${id}: fake aws: keyname failed" },
-        @{ Fail = 'describe-key-pairs'; Line = 'Error: Failed to get the key pair ID of ws-keypair: fake aws: describe-key-pairs failed' },
-        @{ Fail = 'get-parameter'; Line = 'Error: Failed to get the private key from Parameter Store: fake aws: get-parameter failed' })) {
-    $label = "setup $($case.Fail) fails"
+        @{ Name = 'lookup fails'; Environment = @{ FAKE_FAIL = 'lookup' }; Line = 'Error: Failed to look up instance: fake aws: lookup failed' },
+        @{ Name = 'state fails'; Environment = @{ FAKE_FAIL = 'state' }; Line = "Error: Failed to read the LoginUser tag of ${id}: fake aws: state failed" },
+        @{ Name = 'keyname fails'; Environment = @{ FAKE_FAIL = 'keyname' }; Line = "Error: Failed to read the key pair name of ${id}: fake aws: keyname failed" },
+        @{ Name = 'describe-key-pairs fails'; Environment = @{ FAKE_FAIL = 'describe-key-pairs' }; Line = 'Error: Failed to get the key pair ID of ws-keypair: fake aws: describe-key-pairs failed' },
+        @{ Name = 'get-parameter fails'; Environment = @{ FAKE_FAIL = 'get-parameter' }; Line = 'Error: Failed to get the private key from Parameter Store: fake aws: get-parameter failed' },
+        @{ Name = 'two instances'; Environment = @{ FAKE_LOOKUP_IDS = 'i-1 i-2' }
+            Line = "Error: Expected exactly one instance tagged Name=ws-zeta in ap-northeast-1, found 2: i-1 i-2. Check the instance_name in 'tofu output workstations'." },
+        @{ Name = 'no LoginUser tag'; Environment = @{ FAKE_STATE = 'None' }; Line = "Error: Instance $id has no LoginUser tag. Run 'tofu apply' to update the instance tags." },
+        @{ Name = 'no key pair'; Environment = @{ FAKE_KEYNAME = 'None' }; Line = "Error: No key pair is associated with instance $id" })) {
+    $label = "setup $($case.Name)"
+    $environment = $setupEnvironment.Clone()
+    foreach ($key in $case.Environment.Keys) {
+        $environment[$key] = $case.Environment[$key]
+    }
     $before = Get-Snapshot
-    $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-zeta', '-SshHost', 'zeta', '-Region', 'ap-northeast-1') -Environment ($setupEnvironment + @{ FAKE_FAIL = $case.Fail })
+    $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-zeta', '-SshHost', 'zeta', '-Region', 'ap-northeast-1') -Environment $environment
     Write-Case -Name $label -Result $result
     if ($result.TimedOut -or $result.ExitCode -ne 1) {
         Add-Failure "${label}: want rc=1 within 10s, got: $(Get-CaseOutput $result)"
     }
     Test-ErrorLine -Label $label -Text $result.Stderr -Line $case.Line -WantHint $false
-    if ($result.Stderr -match 'char:\d|aws login') {
-        Add-Failure "${label}: want no script position and no login guidance, got: $($result.Stderr)"
+    if ($result.Stderr -match 'char:\d|CategoryInfo|Error: Error:|aws login') {
+        Add-Failure "${label}: want no script position, no CategoryInfo and no login guidance, got: $($result.Stderr)"
     }
     $change = Get-SnapshotChange $before
     if ($change) {
