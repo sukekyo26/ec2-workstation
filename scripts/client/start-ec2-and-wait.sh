@@ -24,7 +24,7 @@ log() {
 # 名前の引き・状態の引き・SSM の問い合わせ (続けて 3 回) の失敗の文の後に付ける。理由は aws の文にしか無いので、言い切らない。
 # ps1 と同じ行にするため、log の時刻を付けない
 show_aws_login_hint() {
-    log "  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again."
+    echo "  If the AWS error above says the credentials are missing or expired, run 'aws login' and connect again." >&2
 }
 
 # SSM Agentの接続状態を確認して待機する。問い合わせの一時的な失敗 (スロットリング・ネットワークの断) は待って問い合わせ直し、

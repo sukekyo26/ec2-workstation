@@ -132,12 +132,8 @@ function Wait-SSMAgentReady {
 function Invoke-StartInstance {
     param([string]$InstanceId, [string]$Region)
     Write-ScriptLog "Starting instance $InstanceId..."
-    try {
-        $null = Invoke-AwsCli -Description "Failed to start instance $InstanceId" -Arguments @(
-            'ec2', 'start-instances', '--instance-ids', $InstanceId, '--region', $Region)
-    } catch {
-        throw "$_`n$awsLoginHint"
-    }
+    $null = Invoke-AwsCli -Description "Failed to start instance $InstanceId" -Arguments @(
+        'ec2', 'start-instances', '--instance-ids', $InstanceId, '--region', $Region)
 }
 
 function Wait-InstanceState {
@@ -154,7 +150,8 @@ try {
             '--filters', "Name=tag:Name,Values=$InstanceName", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
             '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
     } catch {
-        throw
+        # 資格情報の切れでも起きるので、条件つきの案内を付ける
+        throw "$_`n$awsLoginHint"
     }
 
     $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
@@ -168,7 +165,6 @@ try {
         $state = Invoke-AwsCli -Description "Failed to get instance state" -Arguments @(
             'ec2', 'describe-instances', '--instance-ids', $InstanceId, '--region', $Region,
             '--query', 'Reservations[0].Instances[0].State.Name', '--output', 'text')
-        if ($state -notin @('stopped', 'stopping', 'pending', 'running')) { throw "Unexpected instance state: $state" }
     } catch {
         throw "$_`n$awsLoginHint"
     }
