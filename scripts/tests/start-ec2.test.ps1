@@ -399,7 +399,8 @@ function Test-AwsMissing {
     param([string]$Label, [hashtable]$Result)
     Write-Case -Name $Label -Result $Result
     $output = (($Result.Stdout -join "`n") + "`n" + $Result.Stderr) -replace "`r`n", "`n"
-    if ($Result.TimedOut -or $Result.ExitCode -ne 1 -or -not $output.Contains($awsMissing)) {
+    # Whole lines: a newline on both sides, so text added before the first line or after the last one fails
+    if ($Result.TimedOut -or $Result.ExitCode -ne 1 -or -not ("`n$output`n").Contains("`n$awsMissing`n")) {
         Add-Failure "${Label}: want rc=1 within 10s and the three lines '$awsMissing', got: $output"
     }
 }
