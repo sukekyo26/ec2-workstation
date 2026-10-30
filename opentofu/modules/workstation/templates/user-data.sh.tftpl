@@ -201,8 +201,9 @@ case "$BLKID_STATUS" in
         ;;
     2)
         # データボリュームは OS を変えても引き継ぐので、どの OS の e2fsprogs でも扱える features にする。
-        # LIMIT: AL2023 (e2fsprogs 1.46.5) の既定と同じ組。これより古い e2fsprogs の OS を足すとき、
-        # または新しい OS の mke2fs が一覧の名前を受け付けなくなったとき (下の ERROR で止まる) は一覧を見直す
+        # LIMIT: 基準は対応する OS の中でいちばん古い e2fsprogs で、今は AL2023 (1.46.5) の既定と同じ組。より古い e2fsprogs の OS を足すとき、
+        # または新しい OS の mke2fs が一覧の名前を断るとき (下の ERROR で止まる) は見直す。AL2023 を外せば残りは 1.47 以降なので一覧を上げてよく、
+        # そのときは prepare_data_fs の orphan_file を外す段も消す (残すと新しい一覧で付けた orphan_file を毎回外す。今あるボリュームは手当て不要)
         if ! mkfs.ext4 -q -O none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,64bit,flex_bg,sparse_super,large_file,huge_file,dir_nlink,extra_isize,metadata_csum "$DATA_DEVICE"; then
             echo "ERROR: mkfs.ext4 on this OS rejected the ext4 feature list (its message is above). Fix the list in opentofu/modules/workstation/templates/user-data.sh.tftpl, then recreate the instance:" >&2
             print_recreate_hint
