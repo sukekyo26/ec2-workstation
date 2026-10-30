@@ -37,7 +37,7 @@ $awsCli = (Get-Command aws -CommandType Application -ErrorAction SilentlyContinu
 if (-not $awsCli) {
     Write-Host "Error: AWS CLI v2 (aws) is not installed or not in PATH." -ForegroundColor Red
     Write-Host "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html" -ForegroundColor Yellow
-    Write-Host "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded." -ForegroundColor Yellow
+    Write-Host "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded. (or log off)" -ForegroundColor Yellow
     $hasError = $true
 } else {
     $awsVersion = & $awsCli --version 2>&1
