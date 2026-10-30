@@ -7,8 +7,6 @@ resource "aws_ebs_volume" "data" {
   size              = var.data_volume_size
   type              = var.data_volume_type
   encrypted         = true
-  # ユーザー削除・tofu destroy でボリュームが消えるときもスナップショットを残す
-  final_snapshot = true
 
   tags = {
     Name  = "${local.resource_prefix}-data"
