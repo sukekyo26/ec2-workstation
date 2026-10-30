@@ -270,7 +270,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
     --parameter-overrides ProjectName=<projectName> Environment=<environment>
   ```
 
-- デプロイする主体の IAM の権限は、CodePipeline の apply のロールの IAM の文（[cloudformation/codepipeline.yaml](cloudformation/codepipeline.yaml) の WritePolicy と ReadPolicy の IAM の文。Deny も全部）と同じにします。モジュールのロールに boundary を付け、boundary の無いロールを作れないようにするため
+- デプロイする主体の、`scripts/tofu-deploy.sh` でモジュールの IAM のロールとインスタンスプロファイルを扱う権限は、CodePipeline の apply のロールの IAM の文（[cloudformation/codepipeline.yaml](cloudformation/codepipeline.yaml) の WritePolicy と ReadPolicy の、前置き `<projectName>-<environment>-` のロールとインスタンスプロファイルの文）にそろえ、その Deny も含めます。モジュールのロールに boundary を付け、boundary の無いロールを作れないようにするため。boundary やパイプラインのスタックを作る権限は、これとは別です
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
@@ -462,7 +462,7 @@ git push codecommit develop
 |-----------|------|
 | `StateBucketName` | state のバケット（`TF_STATE_BUCKET` と同じ。state のスタックの出力 `BucketName`） |
 | `StateKmsKeyArn` | state のバケットが `SSE-KMS-CMK` のときだけ、state のスタックの出力 `StateKmsKeyArn`（Plan・Apply のロールに、S3 を通してその鍵を使う権限を足す）。このスタックが作るアーティファクト用の鍵とは別です。空のままバケットが `SSE-KMS-CMK` だと、plan の段の最初の `tofu init`（と前の版の state の確かめ）で AccessDenied で止まります |
-| `ProjectName`・`Environment` | `workstation-config.json` の `projectName`・`environment`。IAM・ロググループ・アラーム・スケジュールの名前の絞り込みに使うので、設定と違うと権限が足りずに止まります |
+| `ProjectName`・`Environment` | `workstation-config.json` の `projectName`・`environment`。IAM・ロググループ・アラーム・スケジュールの名前の絞り込みに使うので、設定と違うと権限が足りずに止まります。スタック名は `<projectName>-<environment>-` で始めないでください（パイプラインのロール `<スタック名>-apply` などが、apply のロールが扱うモジュールのロールの前置きに当たるため） |
 | `DeployRegion` | `workstation-config.json` の `awsRegion` |
 | `RepositoryName` | CodeCommit のリポジトリ名（既定 `ec2-workstation`） |
 | `BranchName` | deploy するブランチ（既定 `develop`） |
