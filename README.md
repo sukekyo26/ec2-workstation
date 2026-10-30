@@ -270,7 +270,7 @@ Docker イメージは移さず、必要なものを pull し直してくださ�
     --parameter-overrides ProjectName=<projectName> Environment=<environment>
   ```
 
-- デプロイする主体に `iam:PutRolePermissionsBoundary`（対象: `arn:aws:iam::<account-id>:role/<projectName>-<environment>-*`）。boundary の付いていないモジュールのロールに boundary を付けるため
+- デプロイする主体の IAM の権限は、CodePipeline の apply のロールの IAM の文（[cloudformation/codepipeline.yaml](cloudformation/codepipeline.yaml) の WritePolicy と ReadPolicy の IAM の文。Deny も全部）と同じにします。モジュールのロールに boundary を付け、boundary の無いロールを作れないようにするため
 - デプロイする主体（ローカルの IAM ユーザーと、GitHub Actions のデプロイ用ロール）に `ssm:GetParameter`（対象: `arn:aws:ssm:<region>::parameter/aws/service/*`）。各 OS の最新 AMI を AWS の公開 SSM パラメータから引くため
 - デプロイする主体に `ec2:DescribeVpcs`・`ec2:DescribeSubnets`。workstations の state が、network の state が作った VPC とサブネットを Name タグで引くため
 - デプロイする主体に、state のバケットの `s3:ListBucket`。ユーザーごとの state（workspace）の一覧を取るため
