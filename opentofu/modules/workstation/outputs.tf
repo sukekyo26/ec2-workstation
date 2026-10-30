@@ -22,3 +22,22 @@ output "elastic_ip" {
   description = "Elastic IP address (null if disabled)"
   value       = var.enable_elastic_ip ? aws_eip.this[0].public_ip : null
 }
+
+# LIMIT: opentofu/stacks/workstations/tests は、ここに載せたロール・ポリシーだけを boundary と照らす。aws_iam_* を足したらここにも載せる
+output "iam" {
+  description = "IAM roles and policies of the module, for opentofu/stacks/workstations/tests"
+  value = {
+    roles = {
+      for k, r in { instance = aws_iam_role.instance, scheduler = aws_iam_role.scheduler } :
+      k => { id = r.id, permissions_boundary = r.permissions_boundary, inline_policy = r.inline_policy }
+    }
+    role_policies = {
+      for k, p in { deny_keypair_read = aws_iam_role_policy.deny_keypair_read, scheduler_stop = aws_iam_role_policy.scheduler_stop } :
+      k => { role = p.role, policy = p.policy }
+    }
+    role_policy_attachments = {
+      ssm_core = { role = aws_iam_role_policy_attachment.ssm_core.role, policy_arn = aws_iam_role_policy_attachment.ssm_core.policy_arn }
+    }
+    keypair_parameter_name = aws_ssm_parameter.private_key.name
+  }
+}
