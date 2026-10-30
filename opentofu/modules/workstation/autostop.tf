@@ -50,15 +50,17 @@ data "aws_iam_policy_document" "scheduler_assume" {
 }
 
 resource "aws_iam_role" "scheduler" {
-  name               = "${local.resource_prefix}-scheduler-role"
-  description        = "IAM role for EventBridge Scheduler to stop EC2 instance for ${var.username}"
-  assume_role_policy = data.aws_iam_policy_document.scheduler_assume.json
+  name                 = "${local.resource_prefix}-scheduler-role"
+  description          = "IAM role for EventBridge Scheduler to stop EC2 instance for ${var.username}"
+  assume_role_policy   = data.aws_iam_policy_document.scheduler_assume.json
+  permissions_boundary = local.permissions_boundary_arn
 
   tags = {
     Owner = var.username
   }
 }
 
+# LIMIT: Action を足したら cloudformation/permissions-boundary.yaml にも足す (scripts/check-permissions-boundary.sh が CI で見る。Resource の広さは見ない)
 data "aws_iam_policy_document" "scheduler_stop" {
   statement {
     effect    = "Allow"

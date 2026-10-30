@@ -88,3 +88,8 @@ variable "scheduled_stop_minute" {
   description = "Daily scheduled stop minute (0-59)"
   type        = number
 }
+
+variable "permissions_boundary_name" {
+  description = "Name of the permissions boundary policy that every IAM role of the module gets (cloudformation/permissions-boundary.yaml)"
+  type        = string
+}
