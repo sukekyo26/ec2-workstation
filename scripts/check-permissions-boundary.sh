@@ -62,7 +62,7 @@ done < <(awk '
 # 付ける管理ポリシーは、boundary にその名前の Sid の文がある (中身は AWS の管理ポリシーの写し)
 while IFS=: read -r file name; do
     [ -n "$name" ] || continue
-    grep -qE "^[[:space:]]*- Sid: $name[[:space:]]*$" "$boundary" ||
+    grep -qE "^[[:space:]]*- Sid: ${name}[[:space:]]*$" "$boundary" ||
         fail "$file: the managed policy $name has no statement with Sid: $name in $boundary"
 done < <(grep -oE 'policy_arn[[:space:]]*=[[:space:]]*"arn:aws:iam::aws:policy/[A-Za-z0-9]+"' "${modules[@]}" |
     sed -E 's|^([^:]+):.*policy/([A-Za-z0-9]+)"$|\1:\2|')
