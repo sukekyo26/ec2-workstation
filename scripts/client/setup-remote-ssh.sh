@@ -14,6 +14,18 @@ CYAN='\033[0;36m'
 GRAY='\033[0;37m'
 NC='\033[0m' # No Color
 
+# $1: 表示名, $2: コマンド。--version が 0 なら出力を TOOL_VERSION に入れて 0、0 以外なら出力 (空白だけの行は除く) を付けた誤りの文を出して 1
+tool_version() {
+    local label=$1 command=$2 rc=0
+    TOOL_VERSION=$("$command" --version 2>&1) || rc=$?
+    if [ "$rc" -ne 0 ]; then
+        echo -e "${RED}Error: ${label} failed to run: '$(command -v "$command") --version' exited with code ${rc}.${NC}"
+        sed -e '/^[[:space:]]*$/d' -e 's/^/    /' <<< "$TOOL_VERSION"
+        echo -e "${YELLOW}  Reinstall it, or fix PATH so that a working one comes first.${NC}"
+        return 1
+    fi
+}
+
 # ============================================
 # Prerequisites Check
 # ============================================
@@ -29,9 +41,10 @@ if ! command -v aws &> /dev/null; then
     echo -e "${RED}Error: AWS CLI v2 is not installed.${NC}"
     echo -e "${YELLOW}  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html${NC}"
     HAS_ERROR=true
+elif tool_version 'AWS CLI v2 (aws)' aws; then
+    echo -e "  ${GREEN}${TOOL_VERSION} - OK${NC}"
 else
-    AWS_VERSION=$(aws --version 2>&1)
-    echo -e "  ${GREEN}${AWS_VERSION} - OK${NC}"
+    HAS_ERROR=true
 fi
 
 # Check Session Manager Plugin (must be in PATH for AWS CLI to use it)
@@ -40,9 +53,10 @@ if ! command -v session-manager-plugin &> /dev/null; then
     echo -e "${YELLOW}  Download: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html${NC}"
     echo -e "${YELLOW}  Note: After installation, you may need to restart your shell or add the plugin to PATH.${NC}"
     HAS_ERROR=true
+elif tool_version 'Session Manager Plugin (session-manager-plugin)' session-manager-plugin; then
+    echo -e "  ${GREEN}Session Manager Plugin ${TOOL_VERSION} - OK${NC}"
 else
-    SSM_VERSION=$(session-manager-plugin --version 2>&1 || echo "installed")
-    echo -e "  ${GREEN}Session Manager Plugin ${SSM_VERSION} - OK${NC}"
+    HAS_ERROR=true
 fi
 
 # Exit if any prerequisite is missing
