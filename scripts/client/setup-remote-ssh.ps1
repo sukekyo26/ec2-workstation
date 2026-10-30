@@ -34,7 +34,7 @@ function Get-ToolVersion {
                     # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
                     if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
                 } else {
-                    ''
+                    "$_"
                 }
             } | Where-Object { $_.Trim() })
         if ($LASTEXITCODE -ne 0) {
