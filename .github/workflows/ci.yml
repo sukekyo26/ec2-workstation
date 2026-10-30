@@ -124,6 +124,9 @@ jobs:
       - name: Test check-permissions-boundary.sh with broken copies
         run: scripts/tests/check-permissions-boundary.test.sh
 
+      - name: Test the data volume preparation in user-data with fake e2fsprogs
+        run: scripts/tests/data-volume-fs.test.sh
+
   shell-format:
     name: Shell format
     runs-on: ubuntu-latest
