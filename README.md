@@ -17,7 +17,7 @@ OpenTofu を使用して、EC2上にセキュアなLinux開発環境を構築す
 |--------|------|
 | **ローカルPCに制限がある場合** | 管理者権限なし、WSL使用不可、社内ポリシーでの制限など |
 | **チーム開発環境の統一** | 全メンバーが同一構成の開発環境を使用 |
-| **セキュアなリモート開発** | SSH不使用、IAM認証、監査ログ対応 |
+| **セキュアなリモート開発** | 22 番ポートを開けない（SSH は Session Manager の上を通る）、IAM 認証、接続の記録は CloudTrail |
 | **高スペックな開発環境が必要** | ローカルPCよりもパワフルなEC2インスタンスを使用 |
 
 ---
@@ -35,7 +35,6 @@ flowchart TB
             IGW["🌐 Internet Gateway"]
         end
         SSM["AWS Systems Manager<br/>Session Manager"]
-        CW["CloudWatch Logs<br/>セッションログ"]
     end
 
     subgraph Local["ローカルPC"]
@@ -45,7 +44,6 @@ flowchart TB
     VSCode -->|"HTTPS (443)<br/>SessionManager"| SSM
     SSM -->|"IAM認証"| EC2A
     SSM -->|"IAM認証"| EC2B
-    SSM -->|"監査ログ"| CW
     EC2A & EC2B -->|"アウトバウンド<br/>HTTPS/HTTP/DNS"| IGW
     IGW --> Internet["🌍 Internet<br/>apt, docker pull, git等"]
 
@@ -107,7 +105,7 @@ flowchart LR
 | **コスト削減** | NAT Gateway ($45/月) + VPC Endpoints ($30/月) = **月$75削減** |
 | **セキュリティ担保** | セキュリティグループで**全インバウンドをブロック**（SSHポート含む）<br/>アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
 | **IAM認証** | SessionManager接続にはIAM認証が必須 |
-| **監査ログ** | 全セッションをCloudWatch Logsに記録 |
+| **接続の記録** | Session Manager の接続（StartSession）は CloudTrail の Event history に 90 日残る（誰が・いつ・どのインスタンスへ）。セッションの中の操作は記録しない（記録の設定（Session Manager の preferences）をしていない。VS Code の SSH 接続は、AWS の仕様でも記録の対象外） |
 
 > ⚠️ パブリックIPが付与されますが、セキュリティグループで全インバウンドをブロックするため、外部から直接接続することはできません。
 
@@ -130,7 +128,7 @@ flowchart TB
     subgraph Security["🔐 多層のセキュリティ"]
         L1["1️⃣ IAM認証<br/>SessionManager接続時に必須"]
         L2["2️⃣ セキュリティグループ<br/>全インバウンドブロック"]
-        L3["3️⃣ 監査ログ<br/>VPC Flow Logs & Session Logs"]
+        L3["3️⃣ 記録<br/>CloudTrail（接続）& VPC Flow Logs（拒まれた通信の IP・ポート）"]
     end
     L1 --> L2 --> L3
 ```
@@ -140,7 +138,7 @@ flowchart TB
 | **IAM認証** | SessionManager接続にはAWS認証情報が必要 |
 | **セキュリティグループ** | インバウンド：全拒否、アウトバウンド：HTTPS(443)、HTTP(80)、DNS(53)のみ許可 |
 | **VPC Flow Logs** | 拒否されたトラフィックをCloudWatch Logsに記録（セキュリティ監査用、保持期間：1ヶ月） |
-| **セッションログ** | SessionManagerの全セッションをCloudWatch Logsに記録 |
+| **接続の記録** | StartSession が CloudTrail の Event history に 90 日残る。90 日より長く残すには、アカウントに trail か event data store を作る。セッションの中の操作は記録しない（記録の設定をしていない。VS Code の SSH 接続は、AWS の仕様でも記録の対象外） |
 | **EBS暗号化** | 全ボリュームをAWS管理キーで暗号化 |
 | **IMDSv2強制** | インスタンスメタデータサービスv2を強制（SSRF対策） |
 | **リソースタグ** | `Owner`タグでリソースを識別（管理・フィルタリング用） |
@@ -670,7 +668,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\client\start-ec2.p
 | リソース | 説明 | 月額コスト |
 |----------|------|-----------|
 | VPC Flow Logs | CloudWatch Logsへのログ取り込み | **約 $0.76/GB** |
-| CloudWatch Logs | セッションログ + Flow Logs保存 | **$0.033/GB/月** |
+| CloudWatch Logs | Flow Logs の保存 | **$0.033/GB/月** |
 
 > 💡 VPC Flow LogsはREJECTトラフィックのみ記録する設定のため、ログ量は通常数MB～数十MB/月程度です。
 

@@ -57,14 +57,13 @@ Resources:
               - ec2messages:GetMessages
               - ec2messages:SendReply
             Resource: "*"
-          # The session logs (instance role) and the flow logs (flow log role). The group names are the WritePolicy's:
+          # The flow logs (flow log role). The group name is the WritePolicy's:
           # LIMIT: the flow log group has no "-" after the environment, so an environment that prefixes another (dev, dev-x) reaches both
           - Effect: Allow
             Action:
               - logs:CreateLogStream
               - logs:PutLogEvents
             Resource:
-              - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/ssm/session-logs/${ProjectName}-${Environment}-*
               - !Sub arn:${AWS::Partition}:logs:*:${AWS::AccountId}:log-group:/vpc/flow-logs/${ProjectName}-${Environment}*
           # The daily stop (scheduler role). LIMIT: any instance of the account in any region; the role's own policy names the one instance
           - Effect: Allow
