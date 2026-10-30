@@ -26,7 +26,7 @@ param(
 $ErrorActionPreference = "Continue"
 
 # AWS CLI path
-$awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"
+$awsCli = (Get-Command aws -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Path
 
 # stderr writer for ProxyCommand environment (UTF8 without BOM)
 $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
@@ -37,6 +37,14 @@ $stderrWriter.NewLine = "`n"
 function Write-Stderr {
     param([string]$Message)
     $stderrWriter.WriteLine($Message)
+}
+
+# 下の try の外で止める (catch は認証の案内を出すが、aws が無いのは認証と関係ない)
+if (-not $awsCli) {
+    Write-Stderr "Error: AWS CLI v2 (aws) is not installed or not in PATH."
+    Write-Stderr "  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html"
+    Write-Stderr "  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded."
+    exit 1
 }
 
 function Write-ScriptLog {

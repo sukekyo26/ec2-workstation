@@ -2,8 +2,9 @@
 .SYNOPSIS
     Checks start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake AWS CLI.
 .DESCRIPTION
-    Each script is copied to a temp directory with its one $awsCli line pointed at a fake aws.cmd, and run in a
-    child powershell.exe (the same one that runs this test). start-ec2-and-wait.ps1 runs as the SSH ProxyCommand,
+    Each script runs in a child powershell.exe (the same one that runs this test) whose PATH finds a fake aws.cmd
+    (in a folder with a space) before the real AWS CLI, and an aws.ps1 decoy that exits 99 before both: the scripts
+    must take aws from Get-Command -CommandType Application. start-ec2-and-wait.ps1 runs as the SSH ProxyCommand,
     so its stdout must carry nothing but the session (the fake prints SSH-2.0-fake). A failed aws call must stop the
     script at once: each run is killed after 10 seconds (EC2WS_SSM_POLL_INTERVAL=1 shortens the wait between SSM checks).
     setup-remote-ssh.ps1 runs with USERPROFILE in the temp directory; its ProxyCommand must not load the user's profile
@@ -21,11 +22,11 @@ $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $work = Join-Path ([IO.Path]::GetTempPath()) ("start-ec2-test-" + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $work | Out-Null
 try {
-$utf8Bom = [Text.UTF8Encoding]::new($true)
-
 # The fake dispatches on the first three arguments only (%1 %2 %3), so the characters in --query and --filters
 # are never parsed by cmd. It logs the whole command line to FAKE_ARGS_LOG to show how the arguments arrive.
-$fakeAws = Join-Path $work 'aws.cmd'
+$fakeDir = Join-Path $work 'aws cli'
+New-Item -ItemType Directory -Path $fakeDir | Out-Null
+$fakeAws = Join-Path $fakeDir 'aws.cmd'
 $fakeLines = @(
     '@echo off',
     'setlocal',
@@ -74,24 +75,33 @@ $fakeLines = @(
 )
 [IO.File]::WriteAllText($fakeAws, ($fakeLines -join "`r`n") + "`r`n", [Text.Encoding]::ASCII)
 
-$awsCliLine = '$awsCli = "C:\Program Files\Amazon\AWSCLIV2\aws.exe"'
+# An aws that Get-Command finds before the fake only when -CommandType Application is left out
+$decoyDir = Join-Path $work 'decoy'
+New-Item -ItemType Directory -Path $decoyDir | Out-Null
+$decoyAws = Join-Path $decoyDir 'aws.ps1'
+[IO.File]::WriteAllText($decoyAws, "exit 99`r`n", [Text.Encoding]::ASCII)
 
-# Copy a script with its $awsCli line pointed at the fake, keeping the BOM (5.1 reads a file without one in the ANSI code page)
-function Copy-ScriptWithFakeCli {
-    param([string]$Name)
-    $text = [IO.File]::ReadAllText((Join-Path $root "scripts\client\$Name"))
-    $lines = $text -split "`r?`n"
-    $found = @($lines | Where-Object { $_ -eq $awsCliLine }).Count
-    if ($found -ne 1) {
-        throw "$Name has $found lines '$awsCliLine', want exactly 1"
-    }
-    $copy = Join-Path $work $Name
-    [IO.File]::WriteAllText($copy, $text.Replace($awsCliLine, "`$awsCli = `"$fakeAws`""), $utf8Bom)
-    return $copy
+# windows-latest has the real AWS CLI on PATH: the fake must come first, and the decoy before it
+$testPath = "$decoyDir;$fakeDir;$env:PATH"
+$savedPath = $env:PATH
+$env:PATH = $testPath
+try {
+    $application = (Get-Command aws -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+    $anyCommand = (Get-Command aws -ErrorAction SilentlyContinue | Select-Object -First 1).Path
+} finally {
+    $env:PATH = $savedPath
 }
+if ($application -ne $fakeAws) {
+    throw "Get-Command aws -CommandType Application finds $application, want the fake $fakeAws"
+}
+if ($anyCommand -ne $decoyAws) {
+    throw "Get-Command aws finds $anyCommand, want the decoy $decoyAws"
+}
+Write-Output "PATH: Get-Command aws -CommandType Application finds the fake, Get-Command aws finds the decoy"
 
-$waitScript = Copy-ScriptWithFakeCli 'start-ec2-and-wait.ps1'
-$startScript = Copy-ScriptWithFakeCli 'start-ec2.ps1'
+$clientDir = Join-Path $root 'scripts\client'
+$waitScript = Join-Path $clientDir 'start-ec2-and-wait.ps1'
+$startScript = Join-Path $clientDir 'start-ec2.ps1'
 $powershell = (Get-Process -Id $PID).Path
 $failures = 0
 
@@ -99,6 +109,16 @@ function Add-Failure {
     param([string]$Message)
     Write-Output "FAIL: $Message"
     $script:failures++
+}
+
+# The text of a file the scripts or the fake should have written, or $null when it is missing: a missing file is a
+# failed check, not a throw that stops the remaining cases
+function Get-FileText {
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) {
+        return $null
+    }
+    return [IO.File]::ReadAllText($Path)
 }
 
 # Run a script in a child powershell.exe with the given environment, killing it (and the fake aws under it) after 10 seconds.
@@ -117,6 +137,9 @@ function Invoke-Case {
         $psi.EnvironmentVariables.Remove($key)
     }
     $psi.EnvironmentVariables['EC2WS_SSM_POLL_INTERVAL'] = '1'
+    $psi.EnvironmentVariables['PATH'] = $testPath
+    # If the real aws runs, it fails on the missing credentials at once instead of trying the instance metadata
+    $psi.EnvironmentVariables['AWS_EC2_METADATA_DISABLED'] = 'true'
     foreach ($key in $Environment.Keys) {
         $psi.EnvironmentVariables[$key] = $Environment[$key]
     }
@@ -166,14 +189,18 @@ Write-Output ("fake aws: one call took {0:N2}s" -f $seconds)
 # How the arguments reach the fake (the --filters and --query values must arrive whole)
 $argsLog = Join-Path $work 'args.log'
 $null = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment @{ FAKE_STATE = 'running'; FAKE_ARGS_LOG = $argsLog }
-Write-Output 'fake aws: arguments as received'
-Get-Content $argsLog | ForEach-Object { Write-Output "    $_" }
-foreach ($want in @('--filters Name=tag:Name,Values=ws Name=instance-state-name,Values=pending,running,stopping,stopped',
-        '--query Reservations[].Instances[].InstanceId',
-        '--query Reservations[0].Instances[0].State.Name',
-        '--query InstanceInformationList[0].PingStatus')) {
-    if (-not (Select-String -Path $argsLog -SimpleMatch -Quiet -Pattern $want)) {
-        Add-Failure "arguments: the fake did not receive '$want'"
+if ($null -eq (Get-FileText $argsLog)) {
+    Add-Failure 'arguments: the fake was not called'
+} else {
+    Write-Output 'fake aws: arguments as received'
+    Get-Content $argsLog | ForEach-Object { Write-Output "    $_" }
+    foreach ($want in @('--filters Name=tag:Name,Values=ws Name=instance-state-name,Values=pending,running,stopping,stopped',
+            '--query Reservations[].Instances[].InstanceId',
+            '--query Reservations[0].Instances[0].State.Name',
+            '--query InstanceInformationList[0].PingStatus')) {
+        if (-not (Select-String -Path $argsLog -SimpleMatch -Quiet -Pattern $want)) {
+            Add-Failure "arguments: the fake did not receive '$want'"
+        }
     }
 }
 
@@ -259,14 +286,14 @@ foreach ($sequence in @('fail,fail,Online', 'fail,fail,None,fail,fail,Online')) 
 
 # setup-remote-ssh.ps1: one auto-start script per host (ec2-workstation-proxy-<host>.ps1). A setup for another host must not
 # change this host's script or its Host block, and the shared start-ec2-and-wait.ps1 of an older setup stays as it is.
-# The setup copies start-ec2-and-wait.ps1 from its own folder, which is $work (already pointed at the fake)
-$setupScript = Copy-ScriptWithFakeCli 'setup-remote-ssh.ps1'
+# The setup copies start-ec2-and-wait.ps1 from its own folder (scripts\client) and writes only under USERPROFILE
+$setupScript = Join-Path $clientDir 'setup-remote-ssh.ps1'
 $profileDir = Join-Path $work 'profile'
 $sshDir = Join-Path $profileDir '.ssh'
 $pluginDir = Join-Path $work 'plugin'
 New-Item -ItemType Directory -Path $sshDir, $pluginDir | Out-Null
 [IO.File]::WriteAllText((Join-Path $pluginDir 'session-manager-plugin.cmd'), "@echo 1.2.3`r`n", [Text.Encoding]::ASCII)
-$setupEnvironment = @{ FAKE_STATE = 'ec2-user'; USERPROFILE = $profileDir; PATH = "$pluginDir;$env:PATH" }
+$setupEnvironment = @{ FAKE_STATE = 'ec2-user'; USERPROFILE = $profileDir; PATH = "$pluginDir;$testPath" }
 $oldShared = Join-Path $sshDir 'start-ec2-and-wait.ps1'
 [IO.File]::WriteAllText($oldShared, "old shared script`n")
 $newVersion = [IO.File]::ReadAllText($waitScript)
@@ -286,7 +313,7 @@ function Invoke-Setup {
 # of the config into LF, so the blocks are compared without CR
 function Get-HostBlock {
     param([string]$SshHost)
-    $config = [IO.File]::ReadAllText((Join-Path $sshDir 'config')) -replace "`r`n", "`n"
+    $config = "$(Get-FileText (Join-Path $sshDir 'config'))" -replace "`r`n", "`n"
     # The comma keeps a one-block result an array (a bare return unrolls it to a string, and [0] would be its first character)
     return ,@([regex]::Matches($config, "(?m)^Host $SshHost\n(?:   .+\n)*") | ForEach-Object { $_.Value })
 }
@@ -301,7 +328,7 @@ $result = Invoke-Setup -Name 'alpha' -SshHost 'Alpha'
 $alphaScript = Get-ProxyScript 'alpha'
 $wantProxy = "   ProxyCommand powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$($alphaScript -replace '\\', '/')`" %h ap-northeast-1 %p"
 $alphaBlock = Get-HostBlock 'alpha'
-if (-not (Test-Path $alphaScript) -or [IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+if ((Get-FileText $alphaScript) -ne $newVersion) {
     Add-Failure "setup alpha: $alphaScript is not a copy of start-ec2-and-wait.ps1"
 }
 if ($alphaBlock.Count -ne 1 -or ($alphaBlock[0] -split "`n") -notcontains $wantProxy -or ($alphaBlock[0] -split "`n") -notcontains '   User ec2-user') {
@@ -314,32 +341,32 @@ if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run th
 
 # 2. beta: alpha's script (an older version, marked) and the content of its Host block stay; so does the shared script
 [IO.File]::AppendAllText($alphaScript, "# older alpha`r`n")
-$alphaBefore = [IO.File]::ReadAllText($alphaScript)
+$alphaBefore = Get-FileText $alphaScript
 $null = Invoke-Setup -Name 'beta' -SshHost 'beta'
 $betaScript = Get-ProxyScript 'beta'
 if (-not (Test-Path $betaScript) -or @(Get-HostBlock 'beta').Count -ne 1 -or (Get-HostBlock 'beta')[0] -notlike "*$($betaScript -replace '\\', '/')*") {
     Add-Failure "setup beta: want Host beta running $betaScript"
 }
-if ([IO.File]::ReadAllText($alphaScript) -ne $alphaBefore) {
+if ((Get-FileText $alphaScript) -ne $alphaBefore) {
     Add-Failure "setup beta: changed $alphaScript"
 }
 if (((Get-HostBlock 'alpha') -join '') -ne ($alphaBlock -join '')) {
     Add-Failure "setup beta: changed Host alpha: $(Get-HostBlock 'alpha')"
 }
-if ([IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+if ((Get-FileText $oldShared) -ne "old shared script`n") {
     Add-Failure 'setup beta: changed the shared start-ec2-and-wait.ps1'
 }
 
 # 3. alpha again: only alpha's script becomes the new version, and there is one Host alpha
-$betaBefore = [IO.File]::ReadAllText($betaScript)
+$betaBefore = Get-FileText $betaScript
 $null = Invoke-Setup -Name 'alpha-again' -SshHost 'alpha'
-if ([IO.File]::ReadAllText($alphaScript) -ne $newVersion) {
+if ((Get-FileText $alphaScript) -ne $newVersion) {
     Add-Failure "setup alpha-again: $alphaScript is not the new version"
 }
 if (@(Get-HostBlock 'alpha').Count -ne 1) {
     Add-Failure "setup alpha-again: want one Host alpha, got $(@(Get-HostBlock 'alpha').Count)"
 }
-if ([IO.File]::ReadAllText($betaScript) -ne $betaBefore -or [IO.File]::ReadAllText($oldShared) -ne "old shared script`n") {
+if ((Get-FileText $betaScript) -ne $betaBefore -or (Get-FileText $oldShared) -ne "old shared script`n") {
     Add-Failure 'setup alpha-again: changed beta or the shared script'
 }
 
@@ -357,6 +384,39 @@ foreach ($badHost in @('..\x', "alpha`n")) {
     if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
         Add-Failure "setup bad-host '$badHost': files were written or changed"
     }
+}
+
+# No aws on PATH (the decoy stays): each script stops with the same three lines before it touches AWS, and start-ec2
+# stops before it asks for the instance name (without arguments, its prompt would fail in -NonInteractive)
+$awsMissing = @(
+    'Error: AWS CLI v2 (aws) is not installed or not in PATH.',
+    '  Download: https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html',
+    '  Note: After installation, restart VS Code or PowerShell so that PATH is reloaded.'
+) -join "`n"
+$noAwsPath = "$decoyDir;$env:SystemRoot\System32"
+
+function Test-AwsMissing {
+    param([string]$Label, [hashtable]$Result)
+    Write-Case -Name $Label -Result $Result
+    $output = (($Result.Stdout -join "`n") + "`n" + $Result.Stderr) -replace "`r`n", "`n"
+    # Whole lines: a newline on both sides, so text added before the first line or after the last one fails
+    if ($Result.TimedOut -or $Result.ExitCode -ne 1 -or -not ("`n$output`n").Contains("`n$awsMissing`n")) {
+        Add-Failure "${Label}: want rc=1 within 10s and the three lines '$awsMissing', got: $output"
+    }
+}
+
+$result = Invoke-Case -Script $waitScript -Arguments $waitArgs -Environment @{ PATH = $noAwsPath }
+Test-AwsMissing -Label 'start-ec2-and-wait without aws' -Result $result
+if (-not $result.TimedOut -and ($result.Stdout.Count -ne 0 -or $result.Stderr -match 'aws login')) {
+    Add-Failure 'start-ec2-and-wait without aws: want empty stdout and no authentication guidance (aws login)'
+}
+Test-AwsMissing -Label 'start-ec2 without aws' -Result (Invoke-Case -Script $startScript -Arguments $startArgs -Environment @{ PATH = $noAwsPath })
+Test-AwsMissing -Label 'start-ec2 without aws or arguments' -Result (Invoke-Case -Script $startScript -Arguments @() -Environment @{ PATH = $noAwsPath })
+$before = Get-Snapshot
+$result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-noaws', '-SshHost', 'noaws', '-Region', 'ap-northeast-1') -Environment @{ USERPROFILE = $profileDir; PATH = "$pluginDir;$noAwsPath" }
+Test-AwsMissing -Label 'setup without aws' -Result $result
+if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
+    Add-Failure 'setup without aws: files were written or changed'
 }
 
 } finally {
