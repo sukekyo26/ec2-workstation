@@ -98,6 +98,9 @@ expect renamed-one "$dir" 1 \
 # boundary の無いロール
 dir=$(copy no-boundary)
 sed -i '/^[[:space:]]*permissions_boundary[[:space:]]*=/d' "$dir/opentofu/modules/workstation/autostop.tf"
+if awk '/^resource "aws_iam_role" "scheduler"/,/^}/' "$dir/opentofu/modules/workstation/autostop.tf" | grep -q permissions_boundary; then
+    fail "no-boundary: the edit did not apply (aws_iam_role.scheduler still has permissions_boundary)"
+fi
 must_grep no-boundary '^resource "aws_iam_role" "scheduler"' "$dir/opentofu/modules/workstation/autostop.tf"
 expect no-boundary "$dir" 1 \
     "Error: opentofu/modules/workstation/autostop.tf:$line: aws_iam_role.scheduler has no permissions_boundary"
@@ -118,6 +121,9 @@ expect policy-assume "$dir" 1 \
 
 dir=$(copy iam-policy)
 printf '\nresource "aws_iam_policy" "extra" {\n  policy = "{}"\n}\n' >> "$dir/opentofu/modules/workstation/iam.tf"
+if [ "$(grep -c '^resource "aws_iam_policy" "extra"' "$dir/opentofu/modules/workstation/iam.tf")" != 1 ]; then
+    fail "iam-policy: the edit did not apply (want one resource \"aws_iam_policy\" \"extra\")"
+fi
 must_grep iam-policy '^resource "aws_iam_policy" "extra"' "$dir/opentofu/modules/workstation/iam.tf"
 expect iam-policy "$dir" 1 \
     "Error: opentofu/modules/workstation/iam.tf:$line: resource \"aws_iam_policy\" is not read by the check (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)"
