@@ -226,3 +226,19 @@ jobs:
       - name: Test start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake aws
         shell: powershell
         run: powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1
+
+  powershell-7:
+    name: PowerShell 7
+    # The same checks on pwsh 7, for users who run the scripts from PowerShell 7 (the ProxyCommand itself runs 5.1)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Parse and analyze scripts/**/*.ps1
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/tests/powershell-lint.ps1
+
+      - name: Test start-ec2-and-wait.ps1, start-ec2.ps1 and setup-remote-ssh.ps1 with a fake aws
+        shell: pwsh
+        run: pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/tests/start-ec2.test.ps1
