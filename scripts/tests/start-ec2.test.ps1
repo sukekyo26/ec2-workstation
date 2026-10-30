@@ -248,10 +248,10 @@ function Test-ErrorLine {
     $at = [array]::IndexOf($lines, $Line)
     if ($at -lt 0) {
         Add-Failure "${Label}: want the line '$Line', got: $Text"
-    } elseif ($WantHint -and ($at + 1 -ge $lines.Count -or $lines[$at + 1] -ne $awsLoginHint)) {
+    } elseif ($WantHint -and ($at + 1 -ge $lines.Count -or $lines[$at + 1] -cne $awsLoginHint)) {
         Add-Failure "${Label}: want the hint right after '$Line', got: $Text"
     }
-    if (-not $WantHint -and $lines -contains $awsLoginHint) {
+    if (-not $WantHint -and $lines -ccontains $awsLoginHint) {
         Add-Failure "${Label}: want no hint, got: $Text"
     }
     if ($Text -match 'ERROR: AWS authentication failed|RemoteException') {

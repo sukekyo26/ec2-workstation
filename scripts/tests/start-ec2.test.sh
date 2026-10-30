@@ -93,8 +93,8 @@ hint="  If the AWS error above says the credentials are missing or expired, run 
 plain_err() {
     sed -E 's/^\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9:]{8}\] //' "$work/out/$1.err"
 }
-# error_lines <name> <want_hint (1/0)> <行>...: <行> が続けて行の全体であり、want_hint=1 ならその直後が案内の行、0 なら案内の行がどこにも無い。
-# どちらでも前の枠の見出しは無い
+# error_lines <name> <want_hint (1/0)> <行>...: <行> が (時刻を除いて) 続けて行の全体であり、want_hint=1 ならその直後が案内の行、
+# 0 なら案内の行がどこにも無い。案内は時刻を付けずに出すので、時刻を取り除く前の行でも比べる。どちらでも前の枠の見出しは無い
 error_lines() {
     local name=$1 want_hint=$2 block next
     shift 2
@@ -104,10 +104,10 @@ error_lines() {
         return
     fi
     next=$(plain_err "$name" | grep -xF -A1 -- "${!#}" | sed -n 2p)
-    if [ "$want_hint" = 1 ] && [ "$next" != "$hint" ]; then
-        fail "$name: want the hint right after '${!#}', got: $next"
+    if [ "$want_hint" = 1 ] && { [ "$next" != "$hint" ] || ! grep -qxF -- "$hint" "$work/out/$name.err"; }; then
+        fail "$name: want the hint right after '${!#}', without a time, got: $(grep -F -- "${hint# }" "$work/out/$name.err")"
     fi
-    if [ "$want_hint" = 0 ] && plain_err "$name" | grep -qxF -- "$hint"; then
+    if [ "$want_hint" = 0 ] && { plain_err "$name" | grep -qxF -- "$hint" || grep -qF -- "${hint#  }" "$work/out/$name.err"; }; then
         fail "$name: want no hint"
     fi
     if grep -qF 'ERROR: AWS authentication failed' "$work/out/$name.err"; then
