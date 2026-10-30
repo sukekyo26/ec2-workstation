@@ -13,7 +13,7 @@ resource "aws_key_pair" "this" {
 }
 
 resource "aws_ssm_parameter" "private_key" {
-  name        = "/ec2/keypair/${aws_key_pair.this.key_pair_id}"
+  name        = "${local.keypair_parameter_prefix}${aws_key_pair.this.key_pair_id}"
   description = "SSH private key for ${local.resource_prefix} (used by setup-remote-ssh script)"
   type        = "SecureString"
   value       = tls_private_key.ssh.private_key_openssh

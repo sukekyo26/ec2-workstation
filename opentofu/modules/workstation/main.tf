@@ -11,6 +11,10 @@ locals {
   # 最新 AMI は各ディストリビューションが公開する SSM パブリックパラメータから引く。
   # キーと workstation-config.schema.json の definitions.os の enum が一致することは CI が確かめる
   os_image = jsondecode(file("${path.module}/os-images.json"))[var.os]
+
+  # SSM Parameter Store の秘密鍵の名前の接頭辞 (keypair.tf)。iam.tf のインスタンスのロールの Deny も使う。
+  # scripts/client/setup-remote-ssh.* と cloudformation/codepipeline.yaml も、このパスを決め打ちで使う
+  keypair_parameter_prefix = "/ec2/keypair/"
 }
 
 # ============================================================
