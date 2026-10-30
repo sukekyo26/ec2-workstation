@@ -72,7 +72,7 @@ check_environment() {
         die "unset TF_WORKSPACE: it overrides the workspace OpenTofu selects, so the state would be read from another key"
     fi
     if [ -z "${TF_STATE_BUCKET:-}" ]; then
-        die "set TF_STATE_BUCKET to the S3 bucket that keeps the OpenTofu state (see opentofu/README.md)"
+        die "set TF_STATE_BUCKET to the S3 bucket that keeps the OpenTofu state (see README.md)"
     fi
 }
 

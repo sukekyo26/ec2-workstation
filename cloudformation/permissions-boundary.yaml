@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   ec2-workstation: the permissions boundary that every IAM role of the OpenTofu modules gets
   (<projectName>-<environment>-permissions-boundary). The deploy principal of cloudformation/codepipeline.yaml can make
-  and change those roles only with this boundary. See the README section "AWS環境".
+  and change those roles only with this boundary. See README.md.
 
 Parameters:
   ProjectName:

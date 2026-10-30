@@ -2,7 +2,7 @@ AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   ec2-workstation: deploy workstation-config.json from a CodeCommit repository with CodePipeline
   (just ci -> network plan -> [approve -> apply, only when the network changes] -> users plan -> approve -> apply).
-  See the README section "AWS だけで deploy する (CodePipeline)".
+  See README.md.
 
 Parameters:
   RepositoryName:
