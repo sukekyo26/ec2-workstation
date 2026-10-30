@@ -53,9 +53,10 @@ if ! command -v session-manager-plugin &> /dev/null; then
     echo -e "${YELLOW}  Download: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html${NC}"
     echo -e "${YELLOW}  Note: After installation, you may need to restart your shell or add the plugin to PATH.${NC}"
     HAS_ERROR=true
+elif tool_version 'Session Manager Plugin (session-manager-plugin)' session-manager-plugin; then
+    echo -e "  ${GREEN}Session Manager Plugin ${TOOL_VERSION} - OK${NC}"
 else
-    SSM_VERSION=$(session-manager-plugin --version 2>&1 || echo "installed")
-    echo -e "  ${GREEN}Session Manager Plugin ${SSM_VERSION} - OK${NC}"
+    HAS_ERROR=true
 fi
 
 # Exit if any prerequisite is missing
