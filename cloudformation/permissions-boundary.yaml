@@ -28,6 +28,7 @@ Resources:
         Statement:
           # The same as AmazonSSMManagedInstanceCore (v2), which the instance role attaches. The Sid is the policy's name (the check reads it).
           # LIMIT: when AWS adds actions to that policy in a new version, add them here
+          # LIMIT: when that policy adds an action that reads parameter values, also add it to the keypair Deny in opentofu/modules/workstation/iam.tf
           - Sid: AmazonSSMManagedInstanceCore
             Effect: Allow
             Action:
