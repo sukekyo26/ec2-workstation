@@ -206,6 +206,40 @@ must_grep other-role 'role   = aws_iam_role.scheduler.id' "$dir/$iam"
 expect other-role "$dir" 1 \
     "Error: $iam: the keypair Deny (data.aws_iam_policy_document.deny_keypair_read) is not attached to aws_iam_role.instance"
 
+# Action は語で比べる (ssm:GetParameters があっても、ssm:GetParameter が無ければ足りない)
+dir=$(copy getparameter-removed)
+sed -i 's/\["ssm:GetParameter", "ssm:GetParameters", /["ssm:GetParameters", /' "$dir/$iam"
+must_grep getparameter-removed '\["ssm:GetParameters", "ssm:GetParameterHistory"\]' "$dir/$iam"
+expect getparameter-removed "$dir" 1 "$deny_keypair"
+
+# effect を書かない statement は Allow (前の statement の Deny を引き継がない)
+dir=$(copy allow-after-deny)
+sed -i '/^data "aws_iam_policy_document" "deny_keypair_read" {$/,/^}$/{/^}$/i\  statement {\n    actions   = ["ssm:DescribeParameters"]\n    resources = ["*"]\n  }
+}' "$dir/$iam"
+must_grep allow-after-deny '"ssm:DescribeParameters"' "$dir/$iam"
+expect allow-after-deny "$dir" 1 \
+    "Error: $iam: ssm:DescribeParameters is not in $boundary"
+
+# インスタンスのロールに付いているのが、keypair の Deny でない別の文書
+dir=$(copy other-doc-attached)
+sed -i 's/policy = data\.aws_iam_policy_document\.deny_keypair_read\.json/policy = data.aws_iam_policy_document.scheduler_stop.json/' "$dir/$iam"
+must_grep other-doc-attached 'policy = data.aws_iam_policy_document.scheduler_stop.json' "$dir/$iam"
+expect other-doc-attached "$dir" 1 \
+    "Error: $iam: the keypair Deny (data.aws_iam_policy_document.deny_keypair_read) is not attached to aws_iam_role.instance"
+
+# 前のファイルに同じ形の、どこにも付いていない文書があっても、workstation の付いている文書を見る
+dir=$(copy decoy-in-other-module)
+awk '/^data "aws_iam_policy_document" "deny_keypair_read" \{$/,/^}$/' "$dir/$iam" |
+    sed 's/"deny_keypair_read"/"decoy"/' >> "$dir/opentofu/modules/network/main.tf"
+must_grep decoy-in-other-module '^data "aws_iam_policy_document" "decoy"' "$dir/opentofu/modules/network/main.tf"
+expect decoy-in-other-module "$dir" 0
+
+# role は .id でも .name でも同じロール
+dir=$(copy role-by-name)
+sed -i '/^resource "aws_iam_role_policy" "deny_keypair_read" {$/,/^}$/s/role   = aws_iam_role\.instance\.id/role   = aws_iam_role.instance.name/' "$dir/$iam"
+must_grep role-by-name 'role   = aws_iam_role.instance.name' "$dir/$iam"
+expect role-by-name "$dir" 0
+
 # Deny の Action は、boundary に要る Action に数えない
 dir=$(copy deny-not-counted)
 sed -i 's/actions   = \["ssm:GetParametersByPath"\]/actions   = ["ssm:GetParametersByPath", "ssm:DeleteParameter"]/' "$dir/$iam"
