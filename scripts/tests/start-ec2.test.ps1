@@ -36,8 +36,12 @@ $fakeLines = @(
     'if "%~2"=="wait" set "what=wait-%~3"',
     'if "%~2"=="describe-instances" if "%~3"=="--region" set "what=lookup"',
     'if "%~2"=="describe-instances" if "%~3"=="--instance-ids" set "what=state"',
+    'if not "%what%"=="state" goto :notkeyname',
+    'echo(%*| findstr /l /c:".KeyName" >nul',
+    'if not errorlevel 1 set "what=keyname"',
+    ':notkeyname',
     'set known=',
-    'for %%w in (lookup state start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session describe-key-pairs get-parameter) do if "%what%"=="%%w" set known=1',
+    'for %%w in (lookup state keyname start-instances wait-instance-stopped wait-instance-running describe-instance-information start-session describe-key-pairs get-parameter) do if "%what%"=="%%w" set known=1',
     'if not defined known (',
     '    >&2 echo fake aws: unexpected call: %what%',
     '    exit /b 2',
@@ -73,6 +77,7 @@ $fakeLines = @(
     'if "%what%"=="lookup" if not defined FAKE_LOOKUP_IDS set "FAKE_LOOKUP_IDS=i-0123456789abcdef0"',
     'if "%what%"=="lookup" echo %FAKE_LOOKUP_IDS%',
     'if "%what%"=="state" echo %FAKE_STATE%',
+    'if "%what%"=="keyname" echo ws-keypair',
     'if "%what%"=="start-instances" (',
     '    echo {',
     '    echo     "StartingInstances": []',
@@ -424,6 +429,21 @@ if ($output -notlike "*'alpha' runs $alphaScript*" -or $output -notlike '*run th
     Add-Failure "setup alpha: the last message does not name the script or say how to update it"
 }
 
+# alpha's private key: the fake's key, no inherited access and full control for the user alone, and no temporary file left
+$alphaKey = Join-Path $sshDir 'ec2_secret_key_alpha.pem'
+if ("$(Get-FileText $alphaKey)".Trim() -ne 'FAKE PRIVATE KEY') {
+    Add-Failure "setup alpha: want $alphaKey with FAKE PRIVATE KEY, got: $(Get-FileText $alphaKey)"
+} else {
+    $acl = Get-Acl -LiteralPath $alphaKey
+    $rules = @($acl.Access)
+    if (-not $acl.AreAccessRulesProtected -or $rules.Count -ne 1 -or $rules[0].IdentityReference.Value -notlike "*\$env:USERNAME" -or $rules[0].FileSystemRights -ne 'FullControl') {
+        Add-Failure "setup alpha: want $alphaKey with no inherited access and FullControl for $env:USERNAME alone, got: $(($rules | ForEach-Object { "$($_.IdentityReference) $($_.FileSystemRights) inherited=$($_.IsInherited)" }) -join '; ')"
+    }
+}
+if (@(Get-ChildItem -Force -LiteralPath $sshDir -Filter '.*.tmp').Count -ne 0) {
+    Add-Failure "setup alpha: temporary files are left in $sshDir"
+}
+
 # 2. beta: alpha's script (an older version, marked) and the content of its Host block stay; so does the shared script
 [IO.File]::AppendAllText($alphaScript, "# older alpha`r`n")
 $alphaBefore = Get-FileText $alphaScript
@@ -590,6 +610,60 @@ Write-Case -Name 'setup empty version' -Result $result
 $output = Get-CaseOutput $result
 if ($result.TimedOut -or $result.ExitCode -ne 0 -or -not ("`n$output`n").Contains("`n   - OK`n")) {
     Add-Failure "setup empty version: want rc=0 and the line '   - OK', got: $output"
+}
+
+# An aws.exe that is not an executable, first on PATH: Get-Command finds it (an Application) but it does not start.
+# The script stops with one line that has the OS's reason and no script position; the ProxyCommand adds no login hint
+# (there is no AWS error above) and its stdout stays empty
+$badExeAwsDir = Join-Path $work 'bad exe aws'
+New-Item -ItemType Directory -Path $badExeAwsDir | Out-Null
+$badExeAws = Join-Path $badExeAwsDir 'aws.exe'
+[IO.File]::WriteAllText($badExeAws, "not an executable`r`n", [Text.Encoding]::ASCII)
+$badExePattern = '^Error: Failed to look up instance: ' + [regex]::Escape("'$badExeAws'") + ' could not start: \S.*$'
+foreach ($case in @(@{ Name = 'start-ec2-and-wait'; Script = $waitScript; Arguments = $waitArgs }, @{ Name = 'start-ec2'; Script = $startScript; Arguments = $startArgs })) {
+    $label = "$($case.Name) aws does not start"
+    $result = Invoke-Case -Script $case.Script -Arguments $case.Arguments -Environment @{ FAKE_STATE = 'running'; PATH = "$badExeAwsDir;$testPath" }
+    Write-Case -Name $label -Result $result
+    $output = Get-CaseOutput $result
+    $errorLines = @($output -split "`n" | Where-Object { $_ -like 'Error:*' })
+    if ($result.TimedOut -or $result.ExitCode -ne 1 -or $errorLines.Count -ne 1 -or $errorLines[0] -notmatch $badExePattern) {
+        Add-Failure "${label}: want rc=1 within 10s and one line matching '$badExePattern', got: $output"
+    }
+    if ($output -match 'char:\d|~~~~|(?m)^At ' -or $output.Contains($awsLoginHint)) {
+        Add-Failure "${label}: want no script position and no login hint, got: $output"
+    }
+    if ($case.Name -eq 'start-ec2-and-wait' -and -not $result.TimedOut -and $result.Stdout.Count -ne 0) {
+        Add-Failure "${label}: want empty stdout, got: $($result.Stdout -join ' | ')"
+    }
+}
+
+# A failed aws call in the setup stops it with the reason as aws wrote it, on stderr and without a login hint. Nothing
+# under USERPROFILE is written or changed: the private key of an earlier setup of the host stays as it was
+$zetaKey = Join-Path $sshDir 'ec2_secret_key_zeta.pem'
+[IO.File]::WriteAllText($zetaKey, "OLD KEY`r`n", [Text.Encoding]::ASCII)
+foreach ($case in @(
+        @{ Fail = 'lookup'; Line = 'Error: Failed to look up instance: fake aws: lookup failed' },
+        @{ Fail = 'state'; Line = "Error: Failed to read the LoginUser tag of ${id}: fake aws: state failed" },
+        @{ Fail = 'keyname'; Line = "Error: Failed to read the key pair name of ${id}: fake aws: keyname failed" },
+        @{ Fail = 'describe-key-pairs'; Line = 'Error: Failed to get the key pair ID of ws-keypair: fake aws: describe-key-pairs failed' },
+        @{ Fail = 'get-parameter'; Line = 'Error: Failed to get the private key from Parameter Store: fake aws: get-parameter failed' })) {
+    $label = "setup $($case.Fail) fails"
+    $before = Get-Snapshot
+    $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-zeta', '-SshHost', 'zeta', '-Region', 'ap-northeast-1') -Environment ($setupEnvironment + @{ FAKE_FAIL = $case.Fail })
+    Write-Case -Name $label -Result $result
+    if ($result.TimedOut -or $result.ExitCode -ne 1) {
+        Add-Failure "${label}: want rc=1 within 10s, got: $(Get-CaseOutput $result)"
+    }
+    Test-ErrorLine -Label $label -Text $result.Stderr -Line $case.Line -WantHint $false
+    if ($result.Stderr -match 'char:\d|aws login') {
+        Add-Failure "${label}: want no script position and no login guidance, got: $($result.Stderr)"
+    }
+    if (((Get-Snapshot) -join '|') -ne ($before -join '|')) {
+        Add-Failure "${label}: files under USERPROFILE were written or changed"
+    }
+}
+if ("$(Get-FileText $zetaKey)" -ne "OLD KEY`r`n") {
+    Add-Failure "setup fails: the earlier private key of zeta changed: $(Get-FileText $zetaKey)"
 }
 
 } finally {
