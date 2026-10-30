@@ -22,9 +22,11 @@ resource "aws_vpc" "this" {
 }
 
 resource "aws_subnet" "public" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = local.public_subnet_cidr
-  availability_zone       = data.aws_availability_zones.available.names[0]
+  vpc_id            = aws_vpc.this.id
+  cidr_block        = local.public_subnet_cidr
+  availability_zone = data.aws_availability_zones.available.names[0]
+  # ワークステーションの起動時の public IP はこれで付く (aws_instance には書かない。EIP ありの人はこの上に EIP を付ける)。
+  # NAT も VPC エンドポイントも無いので、false にすると EIP の無い新しいインスタンスは SSM に届かない (stacks/workstations はこのサブネットを Name タグで引く)
   map_public_ip_on_launch = true
 
   tags = {
