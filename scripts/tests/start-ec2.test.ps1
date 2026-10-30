@@ -540,8 +540,12 @@ function Get-SnapshotChange {
 foreach ($badHost in @('..\x', "alpha`n")) {
     $before = Get-Snapshot
     $result = Invoke-Setup -Name 'bad-host' -SshHost $badHost -WantExitCode 1
-    if ($result.Stderr -notlike '*is not a valid host name*') {
-        Add-Failure "setup bad-host '$badHost': want 'is not a valid host name', got: $($result.Stderr)"
+    # The whole stderr is the one Error line (the bad name itself may hold a newline), without the script position or
+    # CategoryInfo that Write-Error would add
+    $want = "Error: '$badHost' is not a valid host name. Host name must start with a lowercase letter, end with a letter or number, and contain only lowercase letters, numbers, hyphens, and underscores."
+    $stderr = ($result.Stderr -replace "`r`n", "`n").TrimEnd("`n")
+    if ($stderr -cne $want -or $stderr -match 'char:\d|CategoryInfo') {
+        Add-Failure "setup bad-host '$badHost': want stderr to be exactly '$want', got: $($result.Stderr)"
     }
     $change = Get-SnapshotChange $before
     if ($change) {

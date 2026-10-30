@@ -187,7 +187,7 @@ if ([string]::IsNullOrEmpty($SshHost)) {
     # -SshHost cannot be asked again, so a bad one stops here
     $name = ConvertTo-SshHostName $SshHost
     if ($null -eq $name) {
-        Write-Error "Error: '$SshHost' is not a valid host name. $hostNameRule"
+        Write-Stderr "Error: '$SshHost' is not a valid host name. $hostNameRule"
         exit 1
     }
     $SshHost = $name
