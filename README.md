@@ -420,13 +420,13 @@ export TF_STATE_BUCKET=<your-state-bucket>
 
 - リージョンは 2 つあります。デプロイ先（VPC・インスタンスを作る所）は `workstation-config.json` の `awsRegion` です。state のバケットのリージョンは `ap-northeast-1` に固定で（`scripts/lib/tofu-common.sh` の `STATE_REGION`）、バケットはここに作ります（[opentofu/README.md](opentofu/README.md)）。デプロイ先を別のリージョンにしても、state のバケットは `ap-northeast-1` のままです
 - GitHub Actions の Deploy (OpenTofu) も、同じ `scripts/tofu-deploy.sh` を呼ぶだけです。CodePipeline など別の CI で回すときも、bash・jq・AWS CLI と AWS の認証、`TF_STATE_BUCKET` を用意し、`scripts/install/install-tofu.sh` で `scripts/lib/tools.sh` の `TOFU_VERSION` の OpenTofu を入れて `.tools/tofu-<版>` を PATH の先頭に足し（CodePipeline の buildspec と GitHub Actions の `.github/actions/install-tofu` と同じ）、`scripts/install/install-jv.sh` の後に `scripts/tofu-deploy.sh` を呼べば同じになります。deploy と destroy を同時に走らせないでください。state が network と workstations の 2 つに分かれているため、ロックは片方ずつにしか効かず、重なると片方の state だけが進みます。GitHub Actions では、Deploy と Destroy の workflow が同じ `concurrency` の group（`aws-deploy`）にあり、順に走ります。手元や別の CI では、同時に走らせないようにしてください
-- VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください
+- VPC・サブネットを作り直す・消す変更（`vpcCidr` を変えるなど）は、`scripts/tofu-deploy.sh` が apply せずに止めます。ユーザーのインスタンスとデータボリュームがサブネットにあるためです。`scripts/tofu-destroy.sh` で全部を消してから、デプロイし直してください（データボリュームも消え、中のデータは取り戻せません。先に退避してください。「🗑️ インフラの削除」の注意を参照）
 
 state の保護（秘密鍵が state に記録されるため重要）を含む詳細は [opentofu/README.md](opentofu/README.md) を参照してください。
 
 #### state を network と workstations に分ける前の環境から移る場合
 
-state の置き場所（key）が変わったため、前の版で作った環境は、この版からは見えません。そのまま `scripts/tofu-deploy.sh` を実行すると、同じ名前の VPC が残っていることを見つけて止まります。前の版のまま `tofu destroy` で消してから、この版でデプロイしてください。
+state の置き場所（key）が変わったため、前の版で作った環境は、この版からは見えません。そのまま `scripts/tofu-deploy.sh` を実行すると、同じ名前の VPC が残っていることを見つけて止まります。前の版のまま `tofu destroy` で消してから（データボリュームはスナップショットが残ります）、この版でデプロイしてください。
 
 workstations の state を全員で 1 つにしていた版（ユーザーごとに分ける前）で作った環境も同じです。`scripts/tofu-deploy.sh`・`scripts/tofu-destroy.sh` は、その state（`<projectName>/<environment>/workstations.tfstate`）にリソースが残っていれば止まるので、その版の `scripts/tofu-destroy.sh` で消してから、この版でデプロイしてください。
 
@@ -642,7 +642,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\client\start-ec2.p
 
 端末で実行したときは、workstations（全員分をまとめて 1 回）・network の段ごとに消すものの要約を出し、`yes` と打つまで消しません。前の版で作った環境が残っている（同じ名前の VPC があるのに state が空）ときは、何も消さずに止まります（前の版で `tofu destroy` してください）。GitHub Actions の Destroy (OpenTofu) も、同じ `scripts/tofu-destroy.sh` を呼ぶだけです。
 
-> ⚠️ ユーザーを設定から消したとき、`scripts/tofu-destroy.sh` で消したとき、VPC を作り直したときは、データボリュームも消えます。スナップショットは残さないので、中のデータ（`~/work`・Docker・`~/.gitconfig`）は取り戻せません。残したいものは、先に退避してください。ルートボリュームも、スナップショットを残さずに消えます。
+> ⚠️ ユーザーを設定から消したとき、`scripts/tofu-destroy.sh` で消したとき、VPC を作り直したときは、データボリュームも消えます。スナップショットは残さないので、中のデータ（`~/work`・Docker・`~/.gitconfig`）は取り戻せません。残したいものは、先に退避してください。ルートボリュームも、スナップショットを残さずに消えます。この版より前に作ったデータボリュームは、`final_snapshot` の更新（この版の後の最初の apply で出ます）が通るまで、消すときにスナップショットを取ります。残ったスナップショットは、手で消してください（gp2 のボリュームでは、この更新が通らないことがあります）。
 
 ---
 
