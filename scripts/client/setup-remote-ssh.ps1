@@ -32,7 +32,7 @@ function Get-ToolVersion {
         $output = @(& $Path --version 2>&1 | ForEach-Object {
                 if ($_ -is [System.Management.Automation.ErrorRecord]) {
                     # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
-                    if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+                    "$_"
                 } else {
                     "$_"
                 }
@@ -40,7 +40,7 @@ function Get-ToolVersion {
         if ($LASTEXITCODE -ne 0) {
             $failure = "exited with code $LASTEXITCODE"
         }
-    } catch {
+    } catch [System.DivideByZeroException] {
         # Not a valid executable for this OS, blocked by policy, ...: $LASTEXITCODE still holds the previous command's code.
         # The innermost exception has the OS's reason alone (the outer message adds the script position)
         $output = @($_.Exception.GetBaseException().Message -split "`r?`n" | Where-Object { $_.Trim() })
