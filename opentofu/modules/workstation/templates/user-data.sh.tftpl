@@ -129,6 +129,33 @@ DEFAULT_USER="${login_user}"
 print_recreate_hint() {
     echo "  tofu apply -replace='module.workstation[\"$WORKSTATION_USER\"].aws_instance.this'" >&2
 }
+# データボリュームを、この OS の e2fsprogs で扱える形にする。マウントの前に呼ぶ (scripts/tests/data-volume-fs.test.sh が取り出して確かめる)
+prepare_data_fs() {
+    local device=$1 status header features
+    # 起動のたびに systemd-fsck が走らせるのも e2fsck。ここで通らないボリュームは、マウントしても次の起動で外れる。
+    # -p はジャーナルの回復と orphan の片付けもする (tune2fs は orphan_present が立っていると orphan_file を外さない)
+    if e2fsck -p "$device"; then status=0; else status=$?; fi
+    if [ $((status & 8)) -ne 0 ]; then
+        echo "ERROR: e2fsck on this OS could not check data volume $DATA_VOLUME_ID (exit $status; its message is above). If it reports unsupported feature(s), a newer OS formatted the volume: set os to al2027-preview and apply, wait until the user-data finishes, then set os back to this one and apply." >&2
+        exit 1
+    fi
+    if [ $((status & ~3)) -ne 0 ]; then
+        echo "ERROR: e2fsck left errors on data volume $DATA_VOLUME_ID (exit $status). Run 'sudo e2fsck -f $device' on the instance, then recreate it:" >&2
+        print_recreate_hint
+        exit 1
+    fi
+    # パイプにすると dumpe2fs の失敗が sed の終了コードに隠れ、外す段が黙って飛ばされるので、いったん受ける
+    if ! header=$(dumpe2fs -f -h "$device"); then
+        echo "ERROR: dumpe2fs could not read data volume $DATA_VOLUME_ID (its message is above), so whether it has orphan_file is unknown. Inspect it with 'sudo dumpe2fs -f -h $device', then recreate the instance:" >&2
+        print_recreate_hint
+        exit 1
+    fi
+    features=$(echo "$header" | sed -n 's/^Filesystem features:[[:space:]]*//p')
+    # 1.47 の mke2fs が既定で付ける orphan_file は、1.46 (AL2023) の e2fsck・resize2fs が断る
+    case " $features " in
+        *" orphan_file "*) tune2fs -O ^orphan_file "$device" ;;
+    esac
+}
 DATA_MOUNT=/data
 # 既定ユーザーは cloud-init が user-data より前に作る
 if ! DEFAULT_PASSWD=$(getent passwd "$DEFAULT_USER"); then
@@ -172,12 +199,25 @@ case "$BLKID_STATUS" in
             exit 1
         fi
         ;;
-    2) mkfs.ext4 -q "$DATA_DEVICE" ;;
+    2)
+        # データボリュームは OS を変えても引き継ぐので、どの OS の e2fsprogs でも扱える features にする。
+        # LIMIT: AL2023 (e2fsprogs 1.46.5) の既定と同じ組。これより古い e2fsprogs の OS を足すとき、
+        # または新しい OS の mke2fs が一覧の名前を受け付けなくなったとき (下の ERROR で止まる) は一覧を見直す
+        if ! mkfs.ext4 -q -O none,has_journal,ext_attr,resize_inode,dir_index,filetype,extent,64bit,flex_bg,sparse_super,large_file,huge_file,dir_nlink,extra_isize,metadata_csum "$DATA_DEVICE"; then
+            echo "ERROR: mkfs.ext4 on this OS rejected the ext4 feature list (its message is above). Fix the list in opentofu/modules/workstation/templates/user-data.sh.tftpl, then recreate the instance:" >&2
+            print_recreate_hint
+            exit 1
+        fi
+        ;;
     *)
         echo "ERROR: blkid -p failed on $DATA_DEVICE (exit $BLKID_STATUS). Refusing to format it; inspect it with 'sudo blkid -p $DATA_DEVICE' and 'sudo wipefs $DATA_DEVICE'." >&2
         exit 1
         ;;
 esac
+# マウント済み (手での再実行) なら、e2fsck も tune2fs も断るので確かめない
+if ! mountpoint -q "$DATA_MOUNT"; then
+    prepare_data_fs "$DATA_DEVICE"
+fi
 DATA_UUID=$(blkid -o value -s UUID "$DATA_DEVICE")
 
 mkdir -p "$DATA_MOUNT"
