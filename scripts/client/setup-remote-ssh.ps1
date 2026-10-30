@@ -57,6 +57,50 @@ function Get-ToolVersion {
     return ($output -join ' ')
 }
 
+# Errors of aws go to stderr in UTF-8 without a BOM. The aws helpers below are the same text in start-ec2.ps1 and
+# start-ec2-and-wait.ps1 (scripts/tests/powershell-lint.ps1 checks it)
+$utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+$stderrWriter = [System.IO.StreamWriter]::new([Console]::OpenStandardError(), $utf8NoBom)
+$stderrWriter.AutoFlush = $true
+$stderrWriter.NewLine = "`n"
+
+function Write-Stderr {
+    param([string]$Message)
+    $stderrWriter.WriteLine($Message)
+}
+
+# Runs aws and returns its stdout lines. On a failure (exit code not 0) it throws "<Description>: <aws's stderr lines>";
+# when aws does not start, it throws "<Description>: '<path>' could not start: <the OS's reason>"
+function Invoke-AwsCli {
+    param(
+        [string]$Description,
+        [string[]]$Arguments
+    )
+    # Windows PowerShell 5.1 は、Stop のもとでは native のコマンドの stderr の 1 行目で throw し、$LASTEXITCODE を見る所に届かない
+    $ErrorActionPreference = 'Continue'
+    try {
+        $all = & $awsCli @Arguments 2>&1
+    } catch [System.Management.Automation.ApplicationFailedException] {
+        # aws が起動しない (別の OS 向けの exe・ポリシーで止められたなど)。いちばん内の例外が OS の理由だけを持つ (外の文はスクリプトの位置を足す)。
+        # 型を ApplicationFailedException のままにして、呼ぶ所がログインの案内を付けないようにする (上に aws の文が無い)
+        $reason = @($_.Exception.GetBaseException().Message -split "`r?`n" | Where-Object { $_.Trim() }) -join ' '
+        throw [System.Management.Automation.ApplicationFailedException]::new("${Description}: '$awsCli' could not start: $reason")
+    }
+    $exitCode = $LASTEXITCODE
+    $stderr = @($all | Where-Object { $_ -is [System.Management.Automation.ErrorRecord] } | ForEach-Object {
+            # "$_" would turn an empty stderr line into System.Management.Automation.RemoteException
+            if ($_.TargetObject -is [string]) { $_.TargetObject } else { $_.Exception.Message }
+        } | Where-Object { $_.Trim() })
+    $stdout = @($all | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] } | ForEach-Object { "$_" })
+    if ($exitCode -ne 0) {
+        throw "${Description}: $($stderr -join ' ')"
+    }
+    foreach ($line in $stderr) {
+        Write-Stderr $line
+    }
+    return $stdout
+}
+
 # ============================================
 # Prerequisites Check
 # ============================================
@@ -180,61 +224,81 @@ if (-not (Test-Path $SSH_CONFIG_DIR)) {
 # Get key pair information from EC2 instance
 # ============================================
 Write-Host "`nRetrieving key pair information from instance..." -ForegroundColor Cyan
-$instanceIds = & $awsCli ec2 describe-instances --region $REGION --filters "Name=tag:Name,Values=$INSTANCE_NAME" "Name=instance-state-name,Values=pending,running,stopping,stopped" --query "Reservations[].Instances[].InstanceId" --output text
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Error: Failed to look up instance: $instanceIds"
+try {
+    $instanceIds = Invoke-AwsCli -Description 'Failed to look up instance' -Arguments @(
+        'ec2', 'describe-instances', '--region', $REGION,
+        '--filters', "Name=tag:Name,Values=$INSTANCE_NAME", 'Name=instance-state-name,Values=pending,running,stopping,stopped',
+        '--query', 'Reservations[].Instances[].InstanceId', '--output', 'text')
+
+    $instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
+    if ($instanceIdList.Count -ne 1) {
+        Write-Error "Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
+        exit 1
+    }
+    $INSTANCE_ID = $instanceIdList[0]
+
+    # 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
+    $SSH_USER = "$(Invoke-AwsCli -Description "Failed to read the LoginUser tag of $INSTANCE_ID" -Arguments @(
+        'ec2', 'describe-instances', '--instance-ids', $INSTANCE_ID, '--region', $REGION,
+        '--query', "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]", '--output', 'text'))"
+    if ($SSH_USER -eq "None" -or [string]::IsNullOrEmpty($SSH_USER)) {
+        Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
+        exit 1
+    }
+    $KEY_NAME = "$(Invoke-AwsCli -Description "Failed to read the key pair name of $INSTANCE_ID" -Arguments @(
+        'ec2', 'describe-instances', '--instance-ids', $INSTANCE_ID, '--region', $REGION,
+        '--query', 'Reservations[0].Instances[0].KeyName', '--output', 'text'))"
+
+    if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {
+        Write-Error "Error: No key pair is associated with instance $INSTANCE_ID"
+        exit 1
+    }
+
+    Write-Host "Key name: $KEY_NAME" -ForegroundColor Green
+
+    # ============================================
+    # Get Key Pair ID from Key Name
+    # ============================================
+    $KEY_ID = "$(Invoke-AwsCli -Description "Failed to get the key pair ID of $KEY_NAME" -Arguments @(
+        'ec2', 'describe-key-pairs', '--key-names', $KEY_NAME, '--region', $REGION,
+        '--query', 'KeyPairs[0].KeyPairId', '--output', 'text'))"
+
+    Write-Host "Key pair ID: $KEY_ID" -ForegroundColor Green
+
+    # ============================================
+    # Retrieve private key from Parameter Store
+    # ============================================
+    Write-Host "`nRetrieving private key from Parameter Store..." -ForegroundColor Cyan
+    $privateKey = Invoke-AwsCli -Description 'Failed to get the private key from Parameter Store' -Arguments @(
+        'ssm', 'get-parameter', '--region', $REGION, '--name', "/ec2/keypair/$KEY_ID", '--with-decryption',
+        '--query', 'Parameter.Value', '--output', 'text')
+} catch {
+    Write-Stderr "Error: $_"
     exit 1
 }
-
-$instanceIdList = @("$instanceIds" -split '\s+' | Where-Object { $_ })
-if ($instanceIdList.Count -ne 1) {
-    Write-Error "Error: Expected exactly one instance tagged Name=$INSTANCE_NAME in $REGION, found $($instanceIdList.Count): $instanceIds. Check the instance_name in 'tofu output workstations'."
-    exit 1
-}
-$INSTANCE_ID = $instanceIdList[0]
-
-# 接続ユーザー名は OS ごとに異なるため、tofu がインスタンスに付けた LoginUser タグから取る
-$SSH_USER = & $awsCli ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].Tags[?Key=='LoginUser'].Value | [0]" --output text
-if ($LASTEXITCODE -ne 0) {
-    Write-Error "Error: Failed to read the LoginUser tag (AWS CLI error). Check your AWS credentials (e.g. run 'aws login') and try again: $SSH_USER"
-    exit 1
-}
-if ($SSH_USER -eq "None" -or [string]::IsNullOrEmpty($SSH_USER)) {
-    Write-Error "Error: Instance $INSTANCE_ID has no LoginUser tag. Run 'tofu apply' to update the instance tags."
-    exit 1
-}
-$KEY_NAME = & $awsCli ec2 describe-instances --instance-ids $INSTANCE_ID --region $REGION --query "Reservations[0].Instances[0].KeyName" --output text
-
-if ($KEY_NAME -eq "None" -or [string]::IsNullOrEmpty($KEY_NAME)) {
-    Write-Error "Error: No key pair is associated with instance $INSTANCE_ID"
-    exit 1
-}
-
-Write-Host "Key name: $KEY_NAME" -ForegroundColor Green
-
-# ============================================
-# Get Key Pair ID from Key Name
-# ============================================
-$KEY_ID = & $awsCli ec2 describe-key-pairs --key-names $KEY_NAME --region $REGION --query "KeyPairs[0].KeyPairId" --output text
-
-Write-Host "Key pair ID: $KEY_ID" -ForegroundColor Green
 
 $SECRET_KEY = "ec2_secret_key_$SSH_HOST.pem"
 $SECRET_KEY_PATH = "$SSH_CONFIG_DIR\$SECRET_KEY"
 
-# ============================================
-# Retrieve private key from Parameter Store
-# ============================================
-Write-Host "`nRetrieving private key from Parameter Store..." -ForegroundColor Cyan
-& $awsCli ssm get-parameter --region $REGION --name "/ec2/keypair/$KEY_ID" --with-decryption --query "Parameter.Value" --output text | Set-Content -Path $SECRET_KEY_PATH
+# Write the key to a temporary file in the same folder, then put it in place: a failure leaves an earlier key as it was.
+# The ACL (no inheritance, full control for the user alone) is set before the key is written, so it is never readable by others
+$keyTemp = Join-Path $SSH_CONFIG_DIR ".$SECRET_KEY.$([guid]::NewGuid()).tmp"
+try {
+    New-Item -ItemType File -Path $keyTemp -ErrorAction Stop | Out-Null
+    foreach ($icaclsArguments in @(@('/inheritance:r'), @('/grant', "$($env:USERNAME):F"))) {
+        $icaclsOutput = & icacls $keyTemp @icaclsArguments 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "icacls $($icaclsArguments -join ' ') exited with code ${LASTEXITCODE}: $($icaclsOutput -join ' ')"
+        }
+    }
+    Set-Content -LiteralPath $keyTemp -Value $privateKey -ErrorAction Stop
+    Move-Item -LiteralPath $keyTemp -Destination $SECRET_KEY_PATH -Force -ErrorAction Stop
+} catch {
+    Remove-Item -LiteralPath $keyTemp -Force -ErrorAction SilentlyContinue
+    Write-Stderr "Error: Failed to write the private key to ${SECRET_KEY_PATH}: $_"
+    exit 1
+}
 Write-Host "Created/Updated: $SECRET_KEY_PATH" -ForegroundColor Green
-
-# ============================================
-# Set file permissions for private key
-# ============================================
-Write-Host "Setting file permissions..." -ForegroundColor Cyan
-icacls $SECRET_KEY_PATH /inheritance:r | Out-Null
-icacls $SECRET_KEY_PATH /grant "$($env:USERNAME):F" | Out-Null
 
 # ============================================
 # Copy auto-start script to .ssh directory
