@@ -528,6 +528,8 @@ tofu -chdir=opentofu/stacks/workstations output workstations
 
 > ⚠️ `os` を変えると次の `tofu apply` でインスタンスが作り直されます。データボリュームはそのまま引き継がれ、`~/work` の持ち主は新しいログインユーザーに合わせ直されます。ログインユーザーが変わる場合は、apply の後に `setup-remote-ssh` をやり直してください。
 >
+> ⚠️ データボリュームの ext4 は、どの OS でも扱える features で作ります。mkfs が既定で orphan_file を付ける OS（`al2027-preview`・`debian-13`・`ubuntu-26.04`）で前に作ったボリュームを `al2023` で使うと、user-data がマウントの前に止まります。その場合は `os` を `al2027-preview` にして apply し、user-data が走り切ったら `os` を戻して apply してください（`al2027-preview` で作り直したときに、`al2023` の e2fsprogs が扱えない orphan_file を外します）。
+>
 > 💡 接続ユーザー名は、インスタンスの `LoginUser` タグから取ります。このタグが無い（この版より前に作った）インスタンスでは、`setup-remote-ssh` がタグの誤りで止まります。`tofu apply` でタグを付けてからやり直してください。
 
 ### User Dataスクリプトで自動インストール
