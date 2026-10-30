@@ -535,7 +535,7 @@ SessionManager経由でVS Code Remote-SSHを使用してEC2に接続できます
 
 - PowerShell 5.1以降
 - VS Code + [Remote - SSH 拡張機能](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-ssh)
-- AWS CLI v2
+- AWS CLI v2（`aws` が PATH で見つかること。公式のインストーラーは既定で PATH に入れる）
 - Session Manager Plugin
 
 ### セットアップ手順
