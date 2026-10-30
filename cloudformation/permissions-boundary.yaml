@@ -15,7 +15,8 @@ Parameters:
 Resources:
   # LIMIT: the union of the module roles' permissions (instance, scheduler, flow logs), not one boundary per role.
   # When a module policy gets an action, add it here too (opentofu/stacks/workstations/tests/boundary.tftest.hcl checks
-  # the actions in CI, not the resources)
+  # the actions in CI, not the resources). The test reads this file with yamldecode, which does not read the short-form
+  # tags (!Sub, !Ref): write the intrinsic functions in the long form (Fn::Sub:, Ref:)
   # The region is *: the apply role's WritePolicy already limits where roles are made. A region here that differs from
   # awsRegion would let the apply pass and silently stop the auto stop and the logs
   PermissionsBoundary:

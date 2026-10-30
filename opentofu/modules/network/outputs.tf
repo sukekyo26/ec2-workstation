@@ -14,7 +14,7 @@ output "iam" {
   value = {
     roles = {
       for k, r in { flow_logs = aws_iam_role.flow_logs } :
-      k => { id = r.id, permissions_boundary = r.permissions_boundary, inline_policy = r.inline_policy }
+      k => { id = r.id, name = r.name, permissions_boundary = r.permissions_boundary, inline_policy = r.inline_policy }
     }
     role_policies = {
       for k, p in { flow_logs_write = aws_iam_role_policy.flow_logs_write } :

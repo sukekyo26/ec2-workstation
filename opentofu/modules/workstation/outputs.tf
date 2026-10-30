@@ -29,7 +29,7 @@ output "iam" {
   value = {
     roles = {
       for k, r in { instance = aws_iam_role.instance, scheduler = aws_iam_role.scheduler } :
-      k => { id = r.id, permissions_boundary = r.permissions_boundary, inline_policy = r.inline_policy }
+      k => { id = r.id, name = r.name, permissions_boundary = r.permissions_boundary, inline_policy = r.inline_policy }
     }
     role_policies = {
       for k, p in { deny_keypair_read = aws_iam_role_policy.deny_keypair_read, scheduler_stop = aws_iam_role_policy.scheduler_stop } :

@@ -4,6 +4,8 @@
 # - 決まりは tests/checker の output の precondition。本物を渡す run "check" と、1 か所だけ壊して落ちることを見る run を並べる
 # LIMIT: モジュールの output iam に載せたロール・ポリシー・管理ポリシーだけを見る (aws_iam_* を足したら iam にも載せる。
 # count で 0 になるものは、ここの変数で 0 なら見ない)。載せ忘れが起きたら、tofu show -json の plan の全部のリソースをなめる検査にする
+# LIMIT: ロールの managed_policy_arns は見ない (provider で deprecated で、output で読むと全部の plan に警告が出る)。
+# モジュールで使うことになったら、output iam に載せてここで見る
 # LIMIT: スタックがモジュールに渡す値 (permissions_boundary_name など) の配線は見ない。Resource の広さも見ない
 #
 #   tofu -chdir=opentofu/stacks/workstations init -backend=false && tofu -chdir=opentofu/stacks/workstations test
@@ -69,14 +71,14 @@ run "workstation" {
     values = { insecure_value = "ami-12345678" }
   }
 
-  # ロールの id は name と同じ値にする (ポリシーは role に .id、管理ポリシーは .name を渡すので、どちらも id と比べられる)
+  # ロールの arn は provider が形を確かめるので渡す
   override_resource {
     target = aws_iam_role.instance
-    values = { id = "p-dev-u-instance-role", arn = "arn:aws:iam::123456789012:role/p-dev-u-instance-role" }
+    values = { arn = "arn:aws:iam::123456789012:role/instance" }
   }
   override_resource {
     target = aws_iam_role.scheduler
-    values = { id = "p-dev-u-scheduler-role", arn = "arn:aws:iam::123456789012:role/p-dev-u-scheduler-role" }
+    values = { arn = "arn:aws:iam::123456789012:role/scheduler" }
   }
   override_resource {
     target = aws_iam_role_policy_attachment.ssm_core
@@ -149,7 +151,7 @@ run "network" {
 
   override_resource {
     target = aws_iam_role.flow_logs
-    values = { id = "p-dev-flow-log-role", arn = "arn:aws:iam::123456789012:role/p-dev-flow-log-role" }
+    values = { arn = "arn:aws:iam::123456789012:role/flow-logs" }
   }
   override_resource {
     target = aws_cloudwatch_log_group.flow_logs
@@ -185,11 +187,9 @@ run "check" {
 
   variables {
     input = {
-      account_id              = "123456789012"
-      roles                   = merge(run.workstation.iam.roles, run.network.iam.roles)
-      role_policies           = merge(run.workstation.iam.role_policies, run.network.iam.role_policies)
-      role_policy_attachments = merge(run.workstation.iam.role_policy_attachments, run.network.iam.role_policy_attachments)
-      keypair_parameter_name  = run.workstation.iam.keypair_parameter_name
+      account_id             = "123456789012"
+      modules                = { workstation = run.workstation.iam, network = run.network.iam }
+      keypair_parameter_name = run.workstation.iam.keypair_parameter_name
       config = {
         permissions_boundary_name = run.config.permissions_boundary_name
         project_name              = run.config.project_name
@@ -210,9 +210,9 @@ run "allow_not_actions" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        scheduler_stop = { role = "p-dev-u-scheduler-role", policy = jsonencode({ Statement = [{ Effect = "Allow", NotAction = "iam:PassRole", Resource = "*" }] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { scheduler_stop = { role = run.check.input.modules.workstation.roles.scheduler.name, policy = jsonencode({ Statement = [
+        { Effect = "Allow", NotAction = "iam:PassRole", Resource = "*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.allow_statements_readable]
@@ -225,9 +225,9 @@ run "allow_without_action" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        scheduler_stop = { role = "p-dev-u-scheduler-role", policy = jsonencode({ Statement = [{ Effect = "Allow", Action = [], Resource = "*" }] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { scheduler_stop = { role = run.check.input.modules.workstation.roles.scheduler.name, policy = jsonencode({ Statement = [
+        { Effect = "Allow", Action = [], Resource = "*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.allow_statements_readable]
@@ -240,7 +240,7 @@ run "no_allow" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = { deny_keypair_read = run.check.input.role_policies.deny_keypair_read }
+      modules = { workstation = merge(run.check.input.modules.workstation, { role_policies = { deny_keypair_read = run.check.input.modules.workstation.role_policies.deny_keypair_read } }) }
     })
   }
   expect_failures = [output.module_allow_not_empty]
@@ -253,9 +253,9 @@ run "action_not_in_boundary" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        scheduler_stop = { role = "p-dev-u-scheduler-role", policy = jsonencode({ Statement = [{ Effect = "Allow", Action = ["ec2:StopInstances", "ec2:TerminateInstances"], Resource = "*" }] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { scheduler_stop = { role = run.check.input.modules.workstation.roles.scheduler.name, policy = jsonencode({ Statement = [
+        { Effect = "Allow", Action = ["ec2:StopInstances", "ec2:TerminateInstances"], Resource = "*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.actions_in_boundary]
@@ -269,14 +269,26 @@ run "deny_and_not_resource_pass" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        scheduler_stop = { role = "p-dev-u-scheduler-role", policy = jsonencode({ Statement = [
-          { Effect = "Allow", Action = "ec2:StopInstances", NotResource = "arn:aws:ec2:*:*:instance/i-1" },
-          { Effect = "Deny", Action = "ssm:DeleteParameter", Resource = "*" },
-        ] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { scheduler_stop = { role = run.check.input.modules.workstation.roles.scheduler.name, policy = jsonencode({ Statement = [
+        { Effect = "Allow", Action = "ec2:StopInstances", NotResource = "arn:aws:ec2:*:*:instance/i-1" },
+        { Effect = "Deny", Action = "ssm:DeleteParameter", Resource = "*" },
+      ] }) } }) }) })
     })
   }
+}
+
+# 同じキーのロールが 2 つのモジュールにあっても、片方が黙って消えない
+run "same_key_in_two_modules" {
+  command = plan
+  module {
+    source = "./tests/checker"
+  }
+  variables {
+    input = merge(run.check.input, {
+      modules = merge(run.check.input.modules, { a = { roles = { scheduler = merge(run.check.input.modules.workstation.roles.scheduler, { permissions_boundary = null }) }, role_policies = {}, role_policy_attachments = {} } })
+    })
+  }
+  expect_failures = [output.roles_have_boundary]
 }
 
 run "boundary_allow_not_action" {
@@ -286,9 +298,7 @@ run "boundary_allow_not_action" {
   }
   variables {
     input = merge(run.check.input, {
-      boundary = merge(run.check.input.boundary, {
-        PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Allow", NotAction = "iam:*", Resource = "*" }]) }
-      })
+      boundary = merge(run.check.input.boundary, { PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Allow", NotAction = "iam:*", Resource = "*" }]) } })
     })
   }
   expect_failures = [output.boundary_readable]
@@ -314,9 +324,7 @@ run "boundary_deny_action" {
   }
   variables {
     input = merge(run.check.input, {
-      boundary = merge(run.check.input.boundary, {
-        PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Deny", Action = ["ec2:StopInstances"], Resource = "*" }]) }
-      })
+      boundary = merge(run.check.input.boundary, { PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Deny", Action = ["ec2:StopInstances"], Resource = "*" }]) } })
     })
   }
   expect_failures = [output.not_denied_by_boundary]
@@ -329,12 +337,24 @@ run "boundary_deny_not_action" {
   }
   variables {
     input = merge(run.check.input, {
-      boundary = merge(run.check.input.boundary, {
-        PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Deny", NotAction = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "*" }]) }
-      })
+      boundary = merge(run.check.input.boundary, { PolicyDocument = { Statement = concat(run.check.input.boundary.PolicyDocument.Statement, [{ Effect = "Deny", NotAction = ["logs:CreateLogStream", "logs:PutLogEvents"], Resource = "*" }]) } })
     })
   }
   expect_failures = [output.not_denied_by_boundary]
+}
+
+# 管理ポリシーの名前の Sid が Deny の文に付いていても、その Action は許されない
+run "managed_policy_sid_on_deny" {
+  command = plan
+  module {
+    source = "./tests/checker"
+  }
+  variables {
+    input = merge(run.check.input, {
+      boundary = merge(run.check.input.boundary, { PolicyDocument = { Statement = [for st in run.check.input.boundary.PolicyDocument.Statement : lookup(st, "Sid", "") == "AmazonSSMManagedInstanceCore" ? merge(st, { Effect = "Deny" }) : st] } })
+    })
+  }
+  expect_failures = [output.managed_policies_in_boundary]
 }
 
 run "role_without_boundary" {
@@ -344,7 +364,7 @@ run "role_without_boundary" {
   }
   variables {
     input = merge(run.check.input, {
-      roles = merge(run.check.input.roles, { scheduler = merge(run.check.input.roles.scheduler, { permissions_boundary = null }) })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { roles = merge(run.check.input.modules.workstation.roles, { scheduler = merge(run.check.input.modules.workstation.roles.scheduler, { permissions_boundary = null }) }) }) })
     })
   }
   expect_failures = [output.roles_have_boundary]
@@ -357,7 +377,7 @@ run "role_with_other_boundary" {
   }
   variables {
     input = merge(run.check.input, {
-      roles = merge(run.check.input.roles, { flow_logs = merge(run.check.input.roles.flow_logs, { permissions_boundary = "arn:aws:iam::123456789012:policy/other" }) })
+      modules = merge(run.check.input.modules, { network = merge(run.check.input.modules.network, { roles = { flow_logs = merge(run.check.input.modules.network.roles.flow_logs, { permissions_boundary = "arn:aws:iam::123456789012:policy/other" }) } }) })
     })
   }
   expect_failures = [output.roles_have_boundary]
@@ -370,9 +390,7 @@ run "policy_on_unlisted_role" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        scheduler_stop = merge(run.check.input.role_policies.scheduler_stop, { role = "p-dev-u-other-role" })
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { scheduler_stop = merge(run.check.input.modules.workstation.role_policies.scheduler_stop, { role = "p-dev-u-other-role" }) }) }) })
     })
   }
   expect_failures = [output.policies_on_listed_roles]
@@ -385,7 +403,7 @@ run "role_with_inline_policy" {
   }
   variables {
     input = merge(run.check.input, {
-      roles = merge(run.check.input.roles, { instance = merge(run.check.input.roles.instance, { inline_policy = [{ name = "x", policy = "{}" }] }) })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { roles = merge(run.check.input.modules.workstation.roles, { instance = merge(run.check.input.modules.workstation.roles.instance, { inline_policy = [{ name = "x", policy = "{}" }] }) }) }) })
     })
   }
   expect_failures = [output.roles_without_inline]
@@ -398,7 +416,7 @@ run "managed_policy_without_sid" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policy_attachments = { ssm_core = { role = "p-dev-u-instance-role", policy_arn = "arn:aws:iam::aws:policy/AmazonSSMFullAccess" } }
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policy_attachments = { ssm_core = { role = run.check.input.modules.workstation.roles.instance.name, policy_arn = "arn:aws:iam::aws:policy/AmazonSSMFullAccess" } } }) })
     })
   }
   expect_failures = [output.managed_policies_in_boundary]
@@ -411,7 +429,7 @@ run "managed_policy_with_path" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policy_attachments = { ssm_core = { role = "p-dev-u-instance-role", policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore" } }
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policy_attachments = { ssm_core = { role = run.check.input.modules.workstation.roles.instance.name, policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonSSMManagedInstanceCore" } } }) })
     })
   }
   expect_failures = [output.managed_policies_in_boundary]
@@ -426,7 +444,7 @@ run "keypair_deny_removed" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = { for k, v in run.check.input.role_policies : k => v if k != "deny_keypair_read" }
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = { for k, v in run.check.input.modules.workstation.role_policies : k => v if k != "deny_keypair_read" } }) })
     })
   }
   expect_failures = [output.keypair_deny]
@@ -439,12 +457,10 @@ run "keypair_deny_without_get_parameter" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        deny_keypair_read = { role = "p-dev-u-instance-role", policy = jsonencode({ Statement = [
-          { Effect = "Deny", Action = ["ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
-          { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*" },
-        ] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = { role = run.check.input.modules.workstation.roles.instance.name, policy = jsonencode({ Statement = [
+        { Effect = "Deny", Action = ["ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
+        { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.keypair_deny]
@@ -458,15 +474,46 @@ run "keypair_deny_to_allow" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        deny_keypair_read = { role = "p-dev-u-instance-role", policy = jsonencode({ Statement = [
-          { Effect = "Allow", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
-          { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*" },
-        ] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = { role = run.check.input.modules.workstation.roles.instance.name, policy = jsonencode({ Statement = [
+        { Effect = "Allow", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
+        { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.keypair_deny, output.actions_in_boundary]
+}
+
+# Condition の付いた Deny は、条件に合わないと効かない
+run "keypair_deny_with_condition" {
+  command = plan
+  module {
+    source = "./tests/checker"
+  }
+  variables {
+    input = merge(run.check.input, {
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = { role = run.check.input.modules.workstation.roles.instance.name, policy = jsonencode({ Statement = [
+        { Effect = "Deny", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*", Condition = { StringEquals = { "aws:RequestedRegion" = "us-east-1" } } },
+        { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*" },
+      ] }) } }) }) })
+    })
+  }
+  expect_failures = [output.keypair_deny]
+}
+
+run "keypair_bypath_with_not_resource" {
+  command = plan
+  module {
+    source = "./tests/checker"
+  }
+  variables {
+    input = merge(run.check.input, {
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = { role = run.check.input.modules.workstation.roles.instance.name, policy = jsonencode({ Statement = [
+        { Effect = "Deny", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
+        { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "*", NotResource = "arn:*:ssm:*:*:parameter/ec2/*" },
+      ] }) } }) }) })
+    })
+  }
+  expect_failures = [output.keypair_deny]
 }
 
 run "keypair_deny_on_other_role" {
@@ -476,9 +523,7 @@ run "keypair_deny_on_other_role" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        deny_keypair_read = merge(run.check.input.role_policies.deny_keypair_read, { role = "p-dev-u-scheduler-role" })
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = merge(run.check.input.modules.workstation.role_policies.deny_keypair_read, { role = run.check.input.modules.workstation.roles.scheduler.name }) }) }) })
     })
   }
   expect_failures = [output.keypair_deny]
@@ -504,12 +549,10 @@ run "keypair_bypath_narrowed" {
   }
   variables {
     input = merge(run.check.input, {
-      role_policies = merge(run.check.input.role_policies, {
-        deny_keypair_read = { role = "p-dev-u-instance-role", policy = jsonencode({ Statement = [
-          { Effect = "Deny", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
-          { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
-        ] }) }
-      })
+      modules = merge(run.check.input.modules, { workstation = merge(run.check.input.modules.workstation, { role_policies = merge(run.check.input.modules.workstation.role_policies, { deny_keypair_read = { role = run.check.input.modules.workstation.roles.instance.name, policy = jsonencode({ Statement = [
+        { Effect = "Deny", Action = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"], Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
+        { Effect = "Deny", Action = "ssm:GetParametersByPath", Resource = "arn:*:ssm:*:*:parameter/ec2/keypair/*" },
+      ] }) } }) }) })
     })
   }
   expect_failures = [output.keypair_deny]

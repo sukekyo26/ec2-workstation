@@ -3,15 +3,20 @@
 # 壊した入力がどの決まりで落ちるかを expect_failures で見分けられるようにする
 # LIMIT: Action は文字のまま比べる (ワイルドカードを展開しない)。boundary の Allow の "ssm:*" は落ち、Deny の "ssm:*" は見落とす
 variable "input" {
-  description = "account_id, roles, role_policies, role_policy_attachments, keypair_parameter_name, config, boundary (Properties of the template), pipeline_template"
+  description = "account_id, modules (the iam output of each module by module name), keypair_parameter_name, config, boundary (Properties of the template), pipeline_template"
   type        = any
 }
 
 locals {
   in = var.input
 
+  # キーにモジュールの名前を付けて 1 つにする (同じキーのロールやポリシーが、別のモジュールのもので黙って消えないように)
+  roles                   = merge([for m, iam in local.in.modules : { for k, v in iam.roles : "${m}.${k}" => v }]...)
+  role_policies           = merge([for m, iam in local.in.modules : { for k, v in iam.role_policies : "${m}.${k}" => v }]...)
+  role_policy_attachments = merge([for m, iam in local.in.modules : { for k, v in iam.role_policy_attachments : "${m}.${k}" => v }]...)
+
   statements = flatten([
-    for name, p in local.in.role_policies : [
+    for name, p in local.role_policies : [
       for st in jsondecode(p.policy).Statement : merge(st, { policy = name, role = p.role })
     ]
   ])
@@ -23,16 +28,21 @@ locals {
   boundary_allow      = [for st in local.boundary_statements : st if st.Effect == "Allow"]
   boundary_deny       = [for st in local.boundary_statements : st if st.Effect == "Deny"]
   boundary_actions    = toset(flatten([for st in local.boundary_allow : lookup(st, "Action", [])]))
-  boundary_sids       = [for st in local.boundary_statements : lookup(st, "Sid", "")]
+  # 管理ポリシーの Action を許すのは、Allow の文だけ
+  boundary_sids = [for st in local.boundary_allow : lookup(st, "Sid", "")]
 
   boundary_arn = "arn:aws:iam::${local.in.account_id}:policy/${local.in.config.permissions_boundary_name}"
-  role_ids     = [for r in local.in.roles : r.id]
+  # ポリシーはロールを id か name で指す (AWS ではどちらもロールの名前)
+  role_refs = flatten([for r in local.roles : [r.id, r.name]])
 
-  # 秘密鍵の値を読む道: インスタンスのロールに付いた Deny の文
+  # 秘密鍵の値を読む道: インスタンスのロールに付いた Deny の文。Condition・NotPrincipal・NotResource の付いた文は、
+  # 効かない場合があるので数えない
   keypair_actions = ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParameterHistory"]
+  instance        = local.roles["workstation.instance"]
   instance_deny = [
     for st in local.statements : st
-    if st.Effect == "Deny" && st.role == local.in.roles.instance.id && contains(keys(st), "Action")
+    if st.Effect == "Deny" && contains([local.instance.id, local.instance.name], st.role) && contains(keys(st), "Action") &&
+    length(setintersection(keys(st), ["Condition", "NotPrincipal", "NotResource"])) == 0
   ]
   keypair_denied = anytrue([
     for st in local.instance_deny : (
@@ -106,15 +116,15 @@ output "not_denied_by_boundary" {
 output "roles_have_boundary" {
   value = true
   precondition {
-    condition     = alltrue([for r in local.in.roles : r.permissions_boundary == local.boundary_arn])
-    error_message = "Roles without the boundary ${local.boundary_arn}: ${join(", ", [for k, r in local.in.roles : k if r.permissions_boundary != local.boundary_arn])}"
+    condition     = alltrue([for r in local.roles : r.permissions_boundary == local.boundary_arn])
+    error_message = "Roles without the boundary ${local.boundary_arn}: ${join(", ", [for k, r in local.roles : k if r.permissions_boundary != local.boundary_arn])}"
   }
 }
 
 output "policies_on_listed_roles" {
   value = true
   precondition {
-    condition     = alltrue([for p in merge(local.in.role_policies, local.in.role_policy_attachments) : contains(local.role_ids, p.role)])
+    condition     = alltrue([for p in concat(values(local.role_policies), values(local.role_policy_attachments)) : contains(local.role_refs, p.role)])
     error_message = "A policy is attached to a role that is not in the iam output of the module (add the role to it)."
   }
 }
@@ -122,7 +132,7 @@ output "policies_on_listed_roles" {
 output "roles_without_inline" {
   value = true
   precondition {
-    condition     = alltrue([for r in local.in.roles : length(coalesce(r.inline_policy, [])) == 0])
+    condition     = alltrue([for r in local.roles : length(coalesce(r.inline_policy, [])) == 0])
     error_message = "A role has inline_policy (give a role its policies with aws_iam_role_policy or aws_iam_role_policy_attachment)."
   }
 }
@@ -131,7 +141,7 @@ output "managed_policies_in_boundary" {
   value = true
   precondition {
     condition = alltrue([
-      for a in local.in.role_policy_attachments :
+      for a in local.role_policy_attachments :
       can(regex("^arn:aws:iam::aws:policy/[A-Za-z0-9]+$", a.policy_arn)) && contains(local.boundary_sids, element(split("/", a.policy_arn), 1))
     ])
     error_message = "A managed policy is not \"arn:aws:iam::aws:policy/<name>\", or has no statement with Sid: <name> in cloudformation/permissions-boundary.yaml."
