@@ -46,6 +46,7 @@ scripts-test:
     scripts/tests/setup-remote-ssh.test.sh
     scripts/tests/check-permissions-boundary.test.sh
     scripts/tests/data-volume-fs.test.sh
+    scripts/tests/fstab-entry.test.sh
 
 # シェルスクリプトの静的解析（対象は scripts/format-shell.sh の一覧）
 shellcheck:
