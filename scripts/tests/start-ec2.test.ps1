@@ -468,7 +468,8 @@ function Test-VersionFailed {
     $output = Get-CaseOutput $result
     if ($Pattern) {
         Write-Case -Name "setup $Name" -Result $result
-        if ($result.TimedOut -or $result.ExitCode -ne 1 -or $output -notmatch $Pattern) {
+        # One line of the OS's reason, without the script position that PowerShell's own message adds
+        if ($result.TimedOut -or $result.ExitCode -ne 1 -or $output -notmatch $Pattern -or $output -match 'char:\d') {
             Add-Failure "setup ${Name}: want rc=1 within 10s and lines matching '$Pattern', got: $output"
         }
     } else {
@@ -496,7 +497,7 @@ Test-VersionFailed -Name 'aws-version-fails' -Environment @{ PATH = "$pluginDir;
 Test-VersionFailed -Name 'plugin-version-fails' -Environment @{ PATH = "$brokenPluginDir;$testPath" } `
     -Blocks (Get-VersionFailedText -Label 'Session Manager Plugin (session-manager-plugin)' -Path $brokenPlugin -Code 4 -Output @('fake plugin: version stdout', 'fake plugin: broken'))
 Test-VersionFailed -Name 'plugin-does-not-start' -Environment @{ PATH = "$badExePluginDir;$testPath" } `
-    -Pattern ("(?m)^Error: Session Manager Plugin \(session-manager-plugin\) failed to run: '" + [regex]::Escape($badExePlugin) + " --version' could not start\.\n(    \S.*\n)+  Reinstall it, or fix PATH so that a working one comes first\.$")
+    -Pattern ("(?m)^Error: Session Manager Plugin \(session-manager-plugin\) failed to run: '" + [regex]::Escape($badExePlugin) + " --version' could not start\.\n    \S.*\n  Reinstall it, or fix PATH so that a working one comes first\.$")
 
 # A tool that prints its version on stderr and exits 0 (AWS CLI v1 does) passes: only the exit code decides
 $result = Invoke-Case -Script $setupScript -Arguments @('-InstanceName', 'ws-gamma', '-SshHost', 'gamma', '-Region', 'ap-northeast-1') -Environment ($setupEnvironment + @{ FAKE_VERSION_STDERR = '1' })
