@@ -482,8 +482,11 @@ if ((Get-FileText $betaScript) -ne $betaBefore -or (Get-FileText $oldShared) -ne
 # 4. A bad -SshHost stops before anything is written or changed (..\x would name a file outside ~/.ssh, and a final
 # newline would go into the file name and the Host line)
 # Only USERPROFILE, where the setup writes: the fake's call log under $work changes on every run
+# pwsh 7 keeps its own startup cache under USERPROFILE (AppData\Local\Microsoft\PowerShell\StartupProfileData-*) and
+# rewrites it on every start; that is not the setup's doing
 function Get-Snapshot {
-    return @(Get-ChildItem -Recurse -File $profileDir | Sort-Object FullName | ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
+    return @(Get-ChildItem -Recurse -File $profileDir | Where-Object { $_.Name -notlike 'StartupProfileData-*' } | Sort-Object FullName |
+            ForEach-Object { "$($_.FullName)=$((Get-FileHash $_.FullName).Hash)" })
 }
 # The entries of Get-Snapshot that differ from $Before (added, removed or changed), for the failure message
 function Get-SnapshotChange {
