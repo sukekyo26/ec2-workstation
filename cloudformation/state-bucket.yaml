@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
   ec2-workstation: the S3 bucket that keeps the OpenTofu state (TF_STATE_BUCKET).
-  Deleting the stack keeps the bucket (and the KMS key, with SSE-KMS-CMK). See opentofu/README.md.
+  Deleting the stack keeps the bucket (and the KMS key, with SSE-KMS-CMK). See README.md.
 
 Parameters:
   BucketName:
