@@ -41,8 +41,9 @@ function Get-ToolVersion {
             $failure = "exited with code $LASTEXITCODE"
         }
     } catch {
-        # Not a valid executable for this OS, blocked by policy, ...: $LASTEXITCODE still holds the previous command's code
-        $output = @($_.Exception.Message -split "`r?`n" | Where-Object { $_.Trim() })
+        # Not a valid executable for this OS, blocked by policy, ...: $LASTEXITCODE still holds the previous command's code.
+        # The innermost exception has the OS's reason alone (the outer message adds the script position)
+        $output = @($_.Exception.GetBaseException().Message -split "`r?`n" | Where-Object { $_.Trim() })
         $failure = 'could not start'
     }
     if ($failure) {
